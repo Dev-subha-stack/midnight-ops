@@ -9,12 +9,16 @@ import {
   GameSettings,
   HitmarkerEvent,
   KillFeedItem,
+  PlayerEliminatedInfo,
   PlayerStats,
   ScorestreakItem,
   TrainingTelemetryData,
   WeaponCamo,
   WeaponType,
   WeatherType,
+  OpticType,
+  ReticleColor,
+  ReticleStyle,
 } from './types';
 import { HUD } from './components/HUD';
 import { Scoreboard } from './components/Scoreboard';
@@ -43,6 +47,8 @@ import {
   Moon,
   ChevronRight,
   ShieldAlert,
+  Headphones,
+  Volume2,
 } from 'lucide-react';
 import { soundManager } from './game/audio';
 import { WEAPON_REGISTRY } from './game/weapons';
@@ -93,6 +99,9 @@ export default function App() {
 
   const [currentWeapon, setCurrentWeapon] = useState<WeaponType>('m4');
   const [currentCamo, setCurrentCamo] = useState<WeaponCamo>('standard');
+  const [currentOptic, setCurrentOptic] = useState<OpticType>('holo_553');
+  const [currentReticleColor, setCurrentReticleColor] = useState<ReticleColor>('red');
+  const [currentReticleStyle, setCurrentReticleStyle] = useState<ReticleStyle>('holo_ring');
   const [ammoInMag, setAmmoInMag] = useState<number>(30);
   const [ammoReserve, setAmmoReserve] = useState<number>(120);
   const [grenadesCount, setGrenadesCount] = useState<number>(2);
@@ -102,6 +111,18 @@ export default function App() {
   const [isAiming, setIsAiming] = useState<boolean>(false);
   const [isReloading, setIsReloading] = useState<boolean>(false);
   const [isSprinting, setIsSprinting] = useState<boolean>(false);
+  const [isHoldingBreath, setIsHoldingBreath] = useState<boolean>(false);
+  const [breathStamina, setBreathStamina] = useState<number>(1.0);
+  const [isHyperventilating, setIsHyperventilating] = useState<boolean>(false);
+  const [opticZoomStepIndex, setOpticZoomStepIndex] = useState<number>(0);
+  const [isThermalEnabled, setIsThermalEnabled] = useState<boolean>(false);
+  const [targetRangeMeters, setTargetRangeMeters] = useState<number>(0);
+  const [elevationHoldoverMil, setElevationHoldoverMil] = useState<number>(0);
+  const [targetedEnemyId, setTargetedEnemyId] = useState<string | null>(null);
+  const [scopeShadowOffsetX, setScopeShadowOffsetX] = useState<number>(0);
+  const [scopeShadowOffsetY, setScopeShadowOffsetY] = useState<number>(0);
+  const [isTacStance, setIsTacStance] = useState<boolean>(false);
+  const [isMounted, setIsMounted] = useState<boolean>(false);
   const [hitmarker, setHitmarker] = useState<HitmarkerEvent | null>(null);
   const [pickupNotice, setPickupNotice] = useState<{ text: string; type: 'ammo' | 'armor' | 'stimpack' | 'tactical' } | null>(null);
   const [accolades, setAccolades] = useState<EliminationAccolade[]>([]);
@@ -142,6 +163,9 @@ export default function App() {
   });
   const [floatingDamageNumbers, setFloatingDamageNumbers] = useState<FloatingDamageNumberItem[]>([]);
 
+  // Player Elimination State
+  const [eliminatedInfo, setEliminatedInfo] = useState<PlayerEliminatedInfo | null>(null);
+
   // Settings & Mode
   const [gameMode, setGameMode] = useState<GameMode>('tdm');
   const [settings, setSettings] = useState<GameSettings>({
@@ -167,6 +191,18 @@ export default function App() {
     setIsGameOver(false);
     setIsPaused(false);
   };
+
+  // Lobby keyboard shortcut [Enter] to deploy
+  useEffect(() => {
+    if (isPlaying || isGunsmithOpen || isSettingsOpen) return;
+    const handleLobbyKey = (e: KeyboardEvent) => {
+      if (e.code === 'Enter' || e.code === 'NumpadEnter') {
+        startMission();
+      }
+    };
+    window.addEventListener('keydown', handleLobbyKey);
+    return () => window.removeEventListener('keydown', handleLobbyKey);
+  }, [isPlaying, isGunsmithOpen, isSettingsOpen]);
 
   useEffect(() => {
     if (!isPlaying || !canvasContainerRef.current) return;
@@ -224,6 +260,10 @@ export default function App() {
       setFloatingDamageNumbers(items);
     };
 
+    engine.onPlayerEliminated = (info) => {
+      setEliminatedInfo(info);
+    };
+
     engine.controller.onAmmoChange = (mag, res) => {
       setAmmoInMag(mag);
       setAmmoReserve(res);
@@ -259,6 +299,20 @@ export default function App() {
         setTacticalType(engine.grenadeManager.getTacticalType());
         setLaserActive(engine.controller.laserActive);
         setUavActive(engine.streakManager.uavActive);
+
+        // Scope & Steady Aim Telemetry
+        setIsHoldingBreath(engine.controller.isHoldingBreath);
+        setBreathStamina(engine.controller.breathStamina);
+        setIsHyperventilating(engine.controller.isHyperventilating);
+        setOpticZoomStepIndex(engine.controller.opticZoomStepIndex);
+        setIsThermalEnabled(engine.controller.isThermalEnabled);
+        setTargetRangeMeters(engine.controller.targetRangeMeters);
+        setElevationHoldoverMil(engine.controller.elevationHoldoverMil);
+        setTargetedEnemyId(engine.controller.targetedEnemyId);
+        setScopeShadowOffsetX(engine.controller.scopeShadowOffsetX);
+        setScopeShadowOffsetY(engine.controller.scopeShadowOffsetY);
+        setIsTacStance(engine.controller.isTacStance);
+        setIsMounted(engine.controller.isMounted);
       }
       frameId = requestAnimationFrame(syncHud);
     };
@@ -266,6 +320,13 @@ export default function App() {
 
     // Global Key Handlers
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (engine.isPlayerDead) {
+        if (e.code === 'Space' || e.code === 'Enter') {
+          e.preventDefault();
+          engine.respawnPlayer();
+          return;
+        }
+      }
       if (e.code === 'Tab') {
         e.preventDefault();
         setIsScoreboardOpen(true);
@@ -356,11 +417,20 @@ export default function App() {
     }
   };
 
-  const handleSelectWeapon = (weapon: WeaponType, camo: WeaponCamo) => {
+  const handleSelectWeapon = (
+    weapon: WeaponType,
+    camo: WeaponCamo = currentCamo,
+    optic: OpticType = currentOptic,
+    reticleColor: ReticleColor = currentReticleColor,
+    reticleStyle: ReticleStyle = currentReticleStyle
+  ) => {
     setCurrentWeapon(weapon);
     setCurrentCamo(camo);
+    setCurrentOptic(optic);
+    setCurrentReticleColor(reticleColor);
+    setCurrentReticleStyle(reticleStyle);
     if (engineRef.current) {
-      engineRef.current.controller.equipWeapon(weapon, camo);
+      engineRef.current.controller.equipWeapon(weapon, camo, optic, reticleColor, reticleStyle);
     }
   };
 
@@ -403,6 +473,12 @@ export default function App() {
     setSettings(prev => ({ ...prev, weatherPreset: weather }));
   };
 
+  const handleInstantRespawn = () => {
+    if (engineRef.current) {
+      engineRef.current.respawnPlayer();
+    }
+  };
+
   const activeWeaponCfg = WEAPON_REGISTRY[currentWeapon];
 
   return (
@@ -422,6 +498,9 @@ export default function App() {
           stats={stats}
           gameMode={gameMode}
           currentWeapon={currentWeapon}
+          equippedOptic={currentOptic}
+          reticleColor={currentReticleColor}
+          reticleStyle={currentReticleStyle}
           ammoInMag={ammoInMag}
           ammoReserve={ammoReserve}
           grenadesCount={grenadesCount}
@@ -431,6 +510,18 @@ export default function App() {
           isAiming={isAiming}
           isReloading={isReloading}
           isSprinting={isSprinting}
+          isHoldingBreath={isHoldingBreath}
+          breathStamina={breathStamina}
+          isHyperventilating={isHyperventilating}
+          opticZoomStepIndex={opticZoomStepIndex}
+          isThermalEnabled={isThermalEnabled}
+          targetRangeMeters={targetRangeMeters}
+          elevationHoldoverMil={elevationHoldoverMil}
+          targetedEnemyId={targetedEnemyId}
+          scopeShadowOffsetX={scopeShadowOffsetX}
+          scopeShadowOffsetY={scopeShadowOffsetY}
+          isTacStance={isTacStance}
+          isMounted={isMounted}
           hitmarker={hitmarker}
           pickupNotice={pickupNotice}
           accolades={accolades}
@@ -475,6 +566,9 @@ export default function App() {
         <GunsmithModal
           currentWeapon={currentWeapon}
           currentCamo={currentCamo}
+          currentOptic={currentOptic}
+          currentReticleColor={currentReticleColor}
+          currentReticleStyle={currentReticleStyle}
           onSelectWeapon={handleSelectWeapon}
           onClose={() => {
             setIsGunsmithOpen(false);
@@ -528,257 +622,267 @@ export default function App() {
           victory={isVictory}
           stats={stats}
           onPlayAgain={handleRestart}
+          onReturnToHome={handleReturnToHomescreen}
         />
       )}
 
-      {/* HOMESCREEN - AAA CALL OF DUTY TACTICAL MILITARY LOBBY */}
+      {/* HOMESCREEN - CLEAN CALL OF DUTY TACTICAL LOBBY */}
       {!isPlaying && (
         <div
           id="start-screen"
-          className="absolute inset-0 z-40 flex items-center justify-center bg-[#07090e] p-4 sm:p-8 text-slate-200 overflow-y-auto"
+          className="absolute inset-0 z-40 flex flex-col justify-between bg-[#07090e] p-6 sm:p-10 text-slate-200 overflow-y-auto"
           style={{
-            backgroundImage: 'radial-gradient(circle at 50% 20%, rgba(6, 182, 212, 0.14) 0%, rgba(15, 23, 42, 0.7) 45%, rgba(3, 7, 18, 0.99) 100%)',
+            backgroundImage: 'radial-gradient(circle at 50% 10%, rgba(6, 182, 212, 0.08) 0%, rgba(15, 23, 42, 0.65) 50%, rgba(3, 7, 18, 0.98) 100%)',
           }}
         >
-          {/* Tactical Background Grid & Ambient Scanlines */}
-          <div className="absolute inset-0 tactical-scanlines pointer-events-none opacity-30" />
-          <div className="absolute inset-0 bg-[linear-gradient(to_right,#1e293b18_1px,transparent_1px),linear-gradient(to_bottom,#1e293b18_1px,transparent_1px)] bg-[size:4rem_4rem] pointer-events-none" />
+          {/* Subtle Ambient Scanlines */}
+          <div className="absolute inset-0 tactical-scanlines pointer-events-none opacity-20" />
 
-          <div className="relative w-full max-w-5xl bg-slate-950/95 border border-slate-800/90 rounded-3xl shadow-2xl p-6 sm:p-10 flex flex-col gap-6 backdrop-blur-2xl my-auto">
-            {/* Top Navigation & Status Bar */}
-            <div className="flex flex-wrap items-center justify-between gap-4 pb-5 border-b border-slate-800/80">
-              <div className="flex items-center gap-3.5">
-                <div className="w-12 h-12 rounded-2xl bg-cyan-500/10 border border-cyan-500/40 flex items-center justify-center text-cyan-400 font-black text-2xl shadow-[0_0_20px_rgba(6,182,212,0.3)]">
-                  FO
+          {/* TOP GLOBAL COD NAVIGATION BAR */}
+          <header className="relative z-10 flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-slate-800/80">
+            {/* Title & Brand */}
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/40 flex items-center justify-center text-cyan-400 font-mono font-black text-lg shadow-[0_0_15px_rgba(6,182,212,0.25)]">
+                FO
+              </div>
+              <div className="flex flex-col text-left">
+                <div className="flex items-center gap-2">
+                  <h1 className="text-xl font-black font-mono tracking-tight text-white uppercase">
+                    FRONTLINE OPS
+                  </h1>
+                  <span className="text-[9px] bg-cyan-950 text-cyan-400 px-1.5 py-0.5 rounded border border-cyan-500/40 font-mono font-black tracking-widest uppercase">
+                    WARZONE
+                  </span>
                 </div>
-                <div className="flex flex-col text-left">
-                  <div className="flex items-center gap-2">
-                    <h1 className="text-2xl sm:text-3xl font-black uppercase tracking-tight text-white">
-                      FRONTLINE OPS
-                    </h1>
-                    <span className="text-[10px] bg-cyan-950 text-cyan-400 px-2 py-0.5 rounded border border-cyan-500/50 font-mono font-black tracking-widest uppercase">
-                      WARZONE TACTICAL
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-3 text-xs text-slate-400 font-mono mt-0.5">
-                    <span className="flex items-center gap-1.5 text-emerald-400 font-bold">
-                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping inline-block" />
-                      128-TICK DEDICATED
-                    </span>
-                    <span>•</span>
-                    <span className="text-amber-400 font-bold">RANK 55 PRESTIGE</span>
-                    <span>•</span>
-                    <span>CLAN [TASK-141]</span>
-                  </div>
+                <div className="flex items-center gap-2 text-[11px] font-mono text-slate-400">
+                  <span className="text-emerald-400 font-bold flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping inline-block" />
+                    128-TICK
+                  </span>
+                  <span>•</span>
+                  <span className="text-amber-400 font-bold">PRESTIGE 55</span>
                 </div>
               </div>
+            </div>
 
-              <div className="flex items-center gap-2.5">
+            {/* Horizontal COD Navigation Tabs */}
+            <nav className="flex items-center gap-2 font-mono text-xs">
+              <button
+                className="px-4 py-2 rounded-lg bg-cyan-950/70 border border-cyan-500/80 text-cyan-300 font-black tracking-wider uppercase transition-all shadow-[0_0_10px_rgba(6,182,212,0.2)]"
+              >
+                PLAY
+              </button>
+              <button
+                id="btn-nav-gunsmith"
+                onClick={() => setIsGunsmithOpen(true)}
+                className="px-4 py-2 rounded-lg bg-slate-900/80 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-slate-300 font-bold tracking-wider uppercase transition-all flex items-center gap-1.5 cursor-pointer"
+              >
+                <Crosshair className="w-3.5 h-3.5 text-cyan-400" />
+                <span>WEAPONS</span>
+              </button>
+              <button
+                id="btn-nav-settings"
+                onClick={() => setIsSettingsOpen(true)}
+                className="px-4 py-2 rounded-lg bg-slate-900/80 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-slate-300 font-bold tracking-wider uppercase transition-all flex items-center gap-1.5 cursor-pointer"
+              >
+                <Sliders className="w-3.5 h-3.5 text-cyan-400" />
+                <span>SETTINGS</span>
+              </button>
+              <button
+                id="btn-test-audio"
+                onClick={() => {
+                  soundManager.init();
+                  soundManager.playSpatialGunshot(currentWeapon, { x: 4, y: 1.6, z: 2 } as any, false);
+                }}
+                title="Audition 3D HRTF firearm audio"
+                className="px-3.5 py-2 rounded-lg bg-slate-900/80 hover:bg-slate-800 border border-slate-800 hover:border-cyan-500/50 text-cyan-400 font-bold text-xs tracking-wider uppercase transition-all flex items-center gap-1.5 cursor-pointer"
+              >
+                <Volume2 className="w-3.5 h-3.5" />
+                <span>AUDIO</span>
+              </button>
+            </nav>
+
+            {/* Player Profile Dossier Card */}
+            <div className="flex items-center gap-3 bg-slate-900/80 px-3 py-1.5 rounded-xl border border-slate-800">
+              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-amber-500 to-red-600 flex items-center justify-center text-slate-950 font-black font-mono text-sm">
+                55
+              </div>
+              <div className="flex flex-col text-left">
+                <span className="text-xs font-black font-mono text-white leading-tight">GHOST [TF-141]</span>
+                <span className="text-[10px] font-mono text-amber-400 font-bold">TASK FORCE OPERATIVE</span>
+              </div>
+            </div>
+          </header>
+
+          {/* MAIN COD STAGE: 2-COLUMN WIDE CLEAN PRESENTATION */}
+          <main className="relative z-10 w-full max-w-6xl mx-auto my-auto py-6 grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            {/* LEFT COLUMN: PLAYLISTS & HIGH-IMPACT DEPLOY (7 Cols) */}
+            <div className="lg:col-span-7 flex flex-col gap-4 text-left">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-mono font-bold uppercase tracking-widest text-cyan-400 flex items-center gap-1.5">
+                  <Target className="w-4 h-4" /> SELECT OPERATIONAL PLAYLIST
+                </span>
+                <span className="text-[10px] font-mono text-slate-500">4 MODES AVAILABLE</span>
+              </div>
+
+              {/* Clean Playlist Cards */}
+              <div className="flex flex-col gap-2.5">
+                {[
+                  { id: 'tdm', title: 'Team Deathmatch', badge: '5v5 TACTICAL', desc: 'Squad elimination. First team to reach 50 eliminations wins.', icon: Users },
+                  { id: 'ffa', title: 'Free For All', badge: 'SOLO COMBAT', desc: 'Every operative for themselves. Eliminate all hostiles on sight.', icon: Flame },
+                  { id: 'gungame', title: 'Gun Game Escalation', badge: 'WEAPON LADDER', desc: 'Advance through weapon tiers with each elimination.', icon: Award },
+                  { id: 'training', title: 'Ballistic Range', badge: 'TELEMETRY & DPS', desc: 'Dynamic moving steel targets with real-time ballistic accuracy metrics.', icon: Target },
+                ].map(m => (
+                  <button
+                    key={m.id}
+                    onClick={() => setGameMode(m.id as GameMode)}
+                    className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer flex items-center justify-between gap-4 ${
+                      gameMode === m.id
+                        ? 'bg-gradient-to-r from-cyan-950/80 to-slate-900/90 border-cyan-500 text-white shadow-[0_0_20px_rgba(6,182,212,0.25)]'
+                        : 'bg-slate-900/60 hover:bg-slate-900/90 border-slate-800/90 text-slate-300 hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3.5">
+                      <div className={`p-2 rounded-lg ${gameMode === m.id ? 'bg-cyan-500 text-slate-950' : 'bg-slate-800 text-slate-400'}`}>
+                        <m.icon className="w-4 h-4" />
+                      </div>
+                      <div className="flex flex-col">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-black font-mono uppercase text-white">{m.title}</span>
+                          <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-cyan-300 border border-slate-700 font-bold">
+                            {m.badge}
+                          </span>
+                        </div>
+                        <span className="text-xs text-slate-400 font-sans mt-0.5">{m.desc}</span>
+                      </div>
+                    </div>
+
+                    {gameMode === m.id && (
+                      <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 shadow-[0_0_8px_#38bdf8] shrink-0" />
+                    )}
+                  </button>
+                ))}
+              </div>
+
+              {/* High-Impact Deploy Action Button */}
+              <div className="pt-2">
                 <button
-                  id="btn-open-settings"
-                  onClick={() => setIsSettingsOpen(true)}
-                  className="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-slate-300 font-bold text-xs uppercase tracking-wider rounded-xl border border-slate-800 transition-all flex items-center gap-2 cursor-pointer font-mono"
+                  id="btn-start-game"
+                  onClick={startMission}
+                  className="w-full py-4 px-6 bg-gradient-to-r from-cyan-500 via-sky-400 to-teal-400 hover:from-cyan-400 hover:to-teal-300 text-slate-950 font-black text-base font-mono uppercase tracking-widest rounded-xl transition-all shadow-[0_0_30px_rgba(6,182,212,0.4)] hover:shadow-[0_0_40px_rgba(6,182,212,0.6)] flex items-center justify-center gap-3 cursor-pointer hover:scale-[1.01] active:scale-[0.99]"
                 >
-                  <Sliders className="w-4 h-4 text-cyan-400" /> Settings
-                </button>
-                <button
-                  id="btn-open-gunsmith"
-                  onClick={() => setIsGunsmithOpen(true)}
-                  className="px-4 py-2.5 bg-cyan-950/60 hover:bg-cyan-900/60 text-cyan-300 font-bold text-xs uppercase tracking-wider rounded-xl border border-cyan-500/40 transition-all flex items-center gap-2 cursor-pointer font-mono shadow-[0_0_12px_rgba(6,182,212,0.2)]"
-                >
-                  <Crosshair className="w-4 h-4 text-cyan-400" /> Gunsmith Armory
+                  <Play className="w-5 h-5 fill-slate-950" />
+                  <span>DEPLOY // QUICK PLAY</span>
+                  <span className="text-xs font-bold text-slate-900 px-2 py-0.5 rounded bg-cyan-300/60 font-mono">[SPACE / ENTER]</span>
                 </button>
               </div>
             </div>
 
-            {/* Main Interactive Briefing Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-              {/* Card 1: Game Mode Selection */}
-              <div className="bg-slate-900/60 p-5 rounded-2xl border border-slate-800/80 flex flex-col gap-3 text-left">
+            {/* RIGHT COLUMN: ACTIVE LOADOUT & ATMOSPHERE STATION (5 Cols) */}
+            <div className="lg:col-span-5 flex flex-col gap-4 text-left">
+              {/* Weapon Showcase Card */}
+              <div className="bg-slate-900/70 p-4 rounded-xl border border-slate-800/90 flex flex-col gap-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-mono font-bold uppercase text-cyan-400 flex items-center gap-1.5">
-                    <Target className="w-3.5 h-3.5" /> Combat Deployment Mode
+                  <span className="text-xs font-mono font-bold uppercase text-cyan-400 flex items-center gap-1.5">
+                    <Crosshair className="w-3.5 h-3.5" /> PRIMARY WEAPON
                   </span>
-                  <span className="text-[10px] font-mono text-slate-500 font-bold">SELECT PLAYLIST</span>
+                  <button
+                    onClick={() => setIsGunsmithOpen(true)}
+                    className="text-[10px] font-mono text-cyan-400 hover:underline cursor-pointer font-bold"
+                  >
+                    GUNSMITH [B] →
+                  </button>
                 </div>
 
-                <div className="flex flex-col gap-2">
+                <div className="bg-slate-950/80 p-3.5 rounded-lg border border-slate-800 flex flex-col gap-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-base font-black font-mono text-white uppercase">{activeWeaponCfg.name}</span>
+                    <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-amber-400 font-bold">
+                      {currentCamo}
+                    </span>
+                  </div>
+
+                  {/* Weapon Stats Bars */}
+                  <div className="grid grid-cols-2 gap-2 text-[10px] font-mono text-slate-400 pt-1 border-t border-slate-900">
+                    <div>DAMAGE: <b className="text-cyan-300">{activeWeaponCfg.damage}</b></div>
+                    <div>FIRE RATE: <b className="text-cyan-300">{activeWeaponCfg.fireRateRpm} RPM</b></div>
+                    <div>MAGAZINE: <b className="text-cyan-300">{activeWeaponCfg.magSize} RDS</b></div>
+                    <div>CLASS: <b className="text-cyan-300 uppercase">{activeWeaponCfg.category}</b></div>
+                  </div>
+                </div>
+
+                {/* Tactical Utility Info */}
+                <div className="grid grid-cols-2 gap-2 text-xs font-mono">
+                  <div className="p-2 rounded bg-slate-950/70 border border-slate-800 text-slate-300 flex items-center gap-2">
+                    <Bomb className="w-3.5 h-3.5 text-amber-400" />
+                    <span>[G] Frag (×2)</span>
+                  </div>
+                  <div className="p-2 rounded bg-slate-950/70 border border-slate-800 text-slate-300 flex items-center gap-2">
+                    <Radio className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>[Q] Tactical (×2)</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Atmosphere & Weather Selector */}
+              <div className="bg-slate-900/70 p-4 rounded-xl border border-slate-800/90 flex flex-col gap-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-mono font-bold uppercase text-cyan-400 flex items-center gap-1.5">
+                    <CloudSunRain className="w-3.5 h-3.5" /> ATMOSPHERE PRESET
+                  </span>
+                  <span className="text-[10px] font-mono text-slate-500">[T] IN-GAME</span>
+                </div>
+
+                <div className="grid grid-cols-3 gap-1.5">
                   {[
-                    { id: 'training', title: '🎯 Ballistic Training Range', desc: '0 Enemies. Dynamic moving steel targets, humanoid mannequins & hit telemetry.', icon: Target },
-                    { id: 'tdm', title: 'Team Deathmatch', desc: '5v5 Tactical squad elimination. First team to 50 score.', icon: Users },
-                    { id: 'ffa', title: 'Free For All', desc: 'Solo combat arena. Eliminate every hostile bot on sight.', icon: Flame },
-                    { id: 'gungame', title: 'Gun Game Escalation', desc: 'Weapon tier progression on every elimination up to Deagle.', icon: Award },
-                  ].map(m => (
+                    { id: 'clear_day', label: 'High Noon', icon: Sun },
+                    { id: 'golden_sunset', label: 'Sunset', icon: Sunset },
+                    { id: 'midnight_fog', label: 'Midnight', icon: Moon },
+                    { id: 'tactical_storm', label: 'Storm', icon: CloudLightning },
+                    { id: 'sandstorm', label: 'Sandstorm', icon: Wind },
+                    { id: 'dynamic_cycle', label: 'Dynamic', icon: Sparkles },
+                  ].map(w => (
                     <button
-                      key={m.id}
-                      onClick={() => setGameMode(m.id as GameMode)}
-                      className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex flex-col gap-1 ${
-                        gameMode === m.id
-                          ? 'bg-cyan-950/60 border-cyan-500/80 text-white shadow-[0_0_15px_rgba(6,182,212,0.25)]'
-                          : 'bg-slate-950/60 border-slate-800/80 text-slate-400 hover:text-slate-200 hover:border-slate-700'
+                      key={w.id}
+                      onClick={() => handleSelectWeather(w.id as WeatherType)}
+                      className={`p-2 rounded border flex flex-col items-center gap-1 transition-all cursor-pointer ${
+                        settings.weatherPreset === w.id
+                          ? 'bg-cyan-950/80 border-cyan-500 text-cyan-300 shadow-sm'
+                          : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:text-slate-200'
                       }`}
                     >
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-bold font-mono uppercase text-cyan-300">{m.title}</span>
-                        {gameMode === m.id && <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />}
-                      </div>
-                      <span className="text-[10px] text-slate-400 leading-tight">{m.desc}</span>
+                      <w.icon className="w-3.5 h-3.5" />
+                      <span className="text-[9px] font-mono font-bold uppercase">{w.label}</span>
                     </button>
                   ))}
                 </div>
               </div>
 
-              {/* Card 2: Operator Loadout & Tactical Utility */}
-              <div className="bg-slate-900/60 p-5 rounded-2xl border border-slate-800/80 flex flex-col justify-between text-left gap-3">
-                <div className="flex flex-col gap-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-mono font-bold uppercase text-cyan-400 flex items-center gap-1.5">
-                      <Crosshair className="w-3.5 h-3.5" /> Operator Loadout
-                    </span>
-                    <button
-                      onClick={() => setIsGunsmithOpen(true)}
-                      className="text-[10px] font-mono text-cyan-400 hover:underline cursor-pointer font-bold"
-                    >
-                      MODIFY IN GUNSMITH →
-                    </button>
-                  </div>
-
-                  {/* Weapon Slot */}
-                  <div className="bg-slate-950/80 p-3.5 rounded-xl border border-slate-800 flex flex-col gap-1.5">
-                    <div className="flex justify-between items-center">
-                      <span className="text-[10px] font-mono uppercase text-slate-500 font-bold">PRIMARY FIREARM</span>
-                      <span className="text-[10px] font-mono font-bold text-cyan-400 uppercase">{activeWeaponCfg.category}</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-base font-black text-white font-mono">{activeWeaponCfg.name}</span>
-                      <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-amber-400 font-bold">
-                        {currentCamo}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2 text-[10px] font-mono text-slate-400 pt-1 border-t border-slate-900">
-                      <span>DMG: <b className="text-cyan-300">{activeWeaponCfg.damage}</b></span>
-                      <span>•</span>
-                      <span>RPM: <b className="text-cyan-300">{activeWeaponCfg.fireRateRpm}</b></span>
-                      <span>•</span>
-                      <span>MAG: <b className="text-cyan-300">{activeWeaponCfg.magSize}</b></span>
-                    </div>
-                  </div>
-
-                  {/* Tactical Equipment Slot */}
-                  <div className="bg-slate-950/80 p-3.5 rounded-xl border border-slate-800 flex flex-col gap-2">
-                    <span className="text-[10px] font-mono uppercase text-slate-500 font-bold">TACTICAL UTILITY LOADOUT</span>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div className="p-2 rounded-lg bg-slate-900/90 border border-slate-800 flex flex-col gap-0.5">
-                        <span className="text-[9px] font-mono text-orange-400 font-bold flex items-center gap-1">
-                          <Bomb className="w-3 h-3" /> [G] LETHAL
-                        </span>
-                        <span className="text-xs font-bold text-white font-mono">Frag Grenade (x2)</span>
-                      </div>
-                      <div className="p-2 rounded-lg bg-slate-900/90 border border-slate-800 flex flex-col gap-0.5">
-                        <span className="text-[9px] font-mono text-cyan-400 font-bold flex items-center gap-1">
-                          <Radio className="w-3 h-3" /> [Q/X] TACTICAL
-                        </span>
-                        <span className="text-xs font-bold text-white font-mono">Smoke / Sensor (x2)</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2 text-[11px] font-mono text-slate-400 bg-slate-950/60 p-2.5 rounded-lg border border-slate-800/80">
-                  <Shield className="w-4 h-4 text-emerald-400 shrink-0" />
-                  <span>Procedural CS2/COD reload & tactical AI perception enabled</span>
-                </div>
-              </div>
-
-              {/* Card 3: Dynamic Weather & Environment Engine */}
-              <div className="bg-slate-900/60 p-5 rounded-2xl border border-slate-800/80 flex flex-col justify-between text-left gap-3">
-                <div className="flex flex-col gap-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-mono font-bold uppercase text-cyan-400 flex items-center gap-1.5">
-                      <CloudSunRain className="w-3.5 h-3.5" /> Atmospheric Simulator
-                    </span>
-                    <span className="text-[10px] font-mono text-slate-500 font-bold">[T] IN COMBAT</span>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2">
-                    {[
-                      { id: 'dynamic_cycle', label: 'Dynamic Cycle', icon: Sparkles },
-                      { id: 'tactical_storm', label: 'Tactical Storm', icon: CloudLightning },
-                      { id: 'clear_day', label: 'High Noon', icon: Sun },
-                      { id: 'golden_sunset', label: 'Golden Sunset', icon: Sunset },
-                      { id: 'midnight_fog', label: 'Midnight Ops', icon: Moon },
-                      { id: 'sandstorm', label: 'Sandstorm', icon: Wind },
-                    ].map(w => (
-                      <button
-                        key={w.id}
-                        onClick={() => handleSelectWeather(w.id as WeatherType)}
-                        className={`p-2 rounded-lg border flex items-center gap-2 transition-all cursor-pointer ${
-                          settings.weatherPreset === w.id
-                            ? 'bg-cyan-950/70 border-cyan-500 text-white shadow-[0_0_10px_rgba(6,182,212,0.25)]'
-                            : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:text-slate-200'
-                        }`}
-                      >
-                        <w.icon className={`w-3.5 h-3.5 ${settings.weatherPreset === w.id ? 'text-cyan-400' : 'text-slate-500'}`} />
-                        <span className="text-[11px] font-mono font-bold uppercase">{w.label}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Tactical Features Check */}
-                <div className="flex flex-col gap-1 text-[10px] font-mono text-slate-400 bg-slate-950/60 p-2.5 rounded-lg border border-slate-800/80">
-                  <div className="flex justify-between">
-                    <span>HOSTILE OPERATIVES:</span>
-                    <span className="text-cyan-300 font-bold">{settings.botCount} AI Operatives</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>DIFFICULTY:</span>
-                    <span className="text-cyan-300 font-bold uppercase">{settings.botDifficulty}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>GRAPHICS ENGINE:</span>
-                    <span className="text-cyan-300 font-bold uppercase">{settings.graphicsQuality}</span>
-                  </div>
-                </div>
+              {/* Session Telemetry Brief */}
+              <div className="flex items-center justify-between text-[10.5px] font-mono text-slate-400 bg-slate-900/50 px-3 py-2 rounded-lg border border-slate-800/80">
+                <span>BOTS: <b className="text-cyan-300">{settings.botCount} AI</b></span>
+                <span>DIFFICULTY: <b className="text-cyan-300 uppercase">{settings.botDifficulty}</b></span>
+                <span>AUDIO: <b className="text-emerald-400">3D HRTF</b></span>
               </div>
             </div>
+          </main>
 
-            {/* Launch Action Bar */}
-            <div className="flex flex-col sm:flex-row gap-4 pt-2">
-              <button
-                id="btn-start-game"
-                onClick={startMission}
-                className="flex-1 py-4 px-8 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black text-base uppercase tracking-widest rounded-2xl transition-all shadow-[0_0_30px_rgba(6,182,212,0.35)] hover:shadow-[0_0_40px_rgba(6,182,212,0.5)] flex items-center justify-center gap-3 cursor-pointer font-mono hover:scale-[1.01]"
-              >
-                <Play className="w-5 h-5 fill-slate-950" /> DEPLOY TO OPERATIONAL COMBAT
-              </button>
-
-              <button
-                id="btn-gunsmith-action"
-                onClick={() => setIsGunsmithOpen(true)}
-                className="py-4 px-6 bg-slate-900 hover:bg-slate-800 text-slate-200 font-bold text-sm uppercase tracking-widest rounded-2xl border border-slate-800 transition-all flex items-center justify-center gap-2 cursor-pointer font-mono hover:border-slate-700"
-              >
-                <Crosshair className="w-4 h-4 text-cyan-400" /> ARMORY & CAMOS
-              </button>
+          {/* BOTTOM TACTICAL KEYBINDINGS STRIP */}
+          <footer className="relative z-10 pt-3 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-3 text-[11px] font-mono text-slate-400">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+              <span><kbd className="text-cyan-400 font-bold">WASD</kbd> Move</span>
+              <span><kbd className="text-cyan-400 font-bold">R-Click</kbd> ADS</span>
+              <span><kbd className="text-cyan-400 font-bold">R</kbd> Reload</span>
+              <span><kbd className="text-cyan-400 font-bold">G</kbd> Frag</span>
+              <span><kbd className="text-cyan-400 font-bold">Q</kbd> Tactical</span>
+              <span><kbd className="text-cyan-400 font-bold">F</kbd> Laser</span>
+              <span><kbd className="text-cyan-400 font-bold">V</kbd> Melee</span>
+              <span><kbd className="text-cyan-400 font-bold">TAB</kbd> Score</span>
+              <span><kbd className="text-cyan-400 font-bold">ESC</kbd> Pause</span>
             </div>
 
-            {/* Keybindings Quick Reference Footer */}
-            <div className="pt-3 border-t border-slate-900 text-[11px] font-mono text-slate-400 flex flex-wrap justify-between items-center gap-2">
-              <div className="flex flex-wrap gap-x-4 gap-y-1">
-                <span><b className="text-cyan-400">WASD</b>: Move</span>
-                <span><b className="text-cyan-400">R-Click</b>: ADS</span>
-                <span><b className="text-cyan-400">G</b>: Frag Grenade</span>
-                <span><b className="text-cyan-400">Q</b>: Tactical (Smoke/Sensor)</span>
-                <span><b className="text-cyan-400">X</b>: Switch Tactical</span>
-                <span><b className="text-cyan-400">F</b>: Laser Sight</span>
-                <span><b className="text-cyan-400">V / M-Click</b>: Melee</span>
-                <span><b className="text-cyan-400">T</b>: Weather Shift</span>
-                <span><b className="text-cyan-400">TAB</b>: Scoreboard</span>
-                <span><b className="text-cyan-400">ESC / P</b>: Pause & Return Home</span>
-              </div>
-              <span className="text-[10px] text-slate-600 font-bold">FRONTLINE OPS • TACTICAL ENGINE</span>
-            </div>
-          </div>
+            <span className="text-slate-600 font-bold">FRONTLINE OPS // ENGINE 2.0</span>
+          </footer>
         </div>
       )}
     </main>

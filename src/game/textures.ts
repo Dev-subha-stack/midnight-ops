@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { ReticleColor, ReticleStyle } from '../types';
 
 // Procedural PBR Texture and Material Generator
 // Generates photorealistic high-res textures, normal maps, and roughness maps for weapons, environment, and gear
@@ -334,53 +335,105 @@ export class TextureGenerator {
   }
 
   // --- HOLOGRAPHIC RED DOT RETICLE ---
-  public static createHoloSightTexture(): THREE.Texture {
-    const key = 'holo_reticle';
+  public static createHoloSightTexture(color: string = '#ef4444'): THREE.Texture {
+    return this.createReticleTexture(color === '#22c55e' ? 'green' : color === '#f59e0b' ? 'amber' : color === '#06b6d4' ? 'cyan' : 'red', 'mildot_circle');
+  }
+
+  public static createReticleTexture(
+    color: ReticleColor = 'red',
+    style: ReticleStyle = 'dot'
+  ): THREE.Texture {
+    const key = `reticle_${color}_${style}`;
     if (this.cache.has(key)) return this.cache.get(key)!;
 
     const canvas = document.createElement('canvas');
     canvas.width = 256;
     canvas.height = 256;
     const ctx = canvas.getContext('2d')!;
-
     ctx.clearRect(0, 0, 256, 256);
 
     const cx = 128;
     const cy = 128;
 
-    // Glowing outer ring
-    ctx.strokeStyle = '#ef4444';
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.arc(cx, cy, 64, 0, Math.PI * 2);
-    ctx.stroke();
+    const colorHex = color === 'green' ? '#22c55e' : color === 'amber' ? '#f59e0b' : color === 'cyan' ? '#06b6d4' : '#ef4444';
+    const glowRgba = color === 'green' ? 'rgba(34, 197, 94, ' : color === 'amber' ? 'rgba(245, 158, 11, ' : color === 'cyan' ? 'rgba(6, 182, 212, ' : 'rgba(239, 68, 68, ';
 
-    // Cross ticks
-    ctx.beginPath();
-    ctx.moveTo(cx - 72, cy);
-    ctx.lineTo(cx - 56, cy);
-    ctx.moveTo(cx + 56, cy);
-    ctx.lineTo(cx + 72, cy);
-    ctx.moveTo(cx, cy - 72);
-    ctx.lineTo(cx, cy - 56);
-    ctx.moveTo(cx, cy + 56);
-    ctx.lineTo(cx, cy + 72);
-    ctx.stroke();
+    if (style === 'mildot_circle' || style === 'holo_ring') {
+      // 68-MOA Halo with 4 quadrant ticks
+      ctx.strokeStyle = colorHex;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 60, 0, Math.PI * 2);
+      ctx.stroke();
 
-    // Center bright dot
-    ctx.fillStyle = '#ff0000';
-    ctx.beginPath();
-    ctx.arc(cx, cy, 4, 0, Math.PI * 2);
-    ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(cx - 72, cy); ctx.lineTo(cx - 52, cy);
+      ctx.moveTo(cx + 52, cy); ctx.lineTo(cx + 72, cy);
+      ctx.moveTo(cx, cy - 72); ctx.lineTo(cx, cy - 52);
+      ctx.moveTo(cx, cy + 52); ctx.lineTo(cx, cy + 72);
+      ctx.stroke();
 
-    // Glow effect
-    const grad = ctx.createRadialGradient(cx, cy, 1, cx, cy, 12);
-    grad.addColorStop(0, 'rgba(255, 50, 50, 0.9)');
-    grad.addColorStop(1, 'rgba(255, 0, 0, 0)');
-    ctx.fillStyle = grad;
-    ctx.beginPath();
-    ctx.arc(cx, cy, 12, 0, Math.PI * 2);
-    ctx.fill();
+      // Center 1-MOA dot
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(cx, cy, 3, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (style === 'chevron') {
+      // Illuminated Tactical Arrowhead Chevron
+      ctx.fillStyle = colorHex;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - 12);
+      ctx.lineTo(cx + 12, cy + 10);
+      ctx.lineTo(cx + 7, cy + 10);
+      ctx.lineTo(cx, cy);
+      ctx.lineTo(cx - 7, cy + 10);
+      ctx.lineTo(cx - 12, cy + 10);
+      ctx.closePath();
+      ctx.fill();
+    } else if (style === 'cross') {
+      // Hairline crosshairs with open center
+      ctx.strokeStyle = colorHex;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(cx - 50, cy); ctx.lineTo(cx - 8, cy);
+      ctx.moveTo(cx + 8, cy); ctx.lineTo(cx + 50, cy);
+      ctx.moveTo(cx, cy - 50); ctx.lineTo(cx, cy - 8);
+      ctx.moveTo(cx, cy + 8); ctx.lineTo(cx, cy + 50);
+      ctx.stroke();
+
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(cx, cy, 2, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (style === 't_post') {
+      // German T-Post
+      ctx.strokeStyle = colorHex;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(cx - 70, cy); ctx.lineTo(cx - 10, cy);
+      ctx.moveTo(cx + 10, cy); ctx.lineTo(cx + 70, cy);
+      ctx.moveTo(cx, cy + 70); ctx.lineTo(cx, cy + 10);
+      ctx.stroke();
+
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(cx, cy, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      // Precision 2-MOA dot
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(cx, cy, 4, 0, Math.PI * 2);
+      ctx.fill();
+
+      const grad = ctx.createRadialGradient(cx, cy, 2, cx, cy, 14);
+      grad.addColorStop(0, glowRgba + '0.9)');
+      grad.addColorStop(1, glowRgba + '0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 14, 0, Math.PI * 2);
+      ctx.fill();
+    }
 
     const texture = new THREE.CanvasTexture(canvas);
     this.cache.set(key, texture);
@@ -432,4 +485,338 @@ export class TextureGenerator {
     this.cache.set(key, texture);
     return texture;
   }
+
+  // --- AAA TACTICAL OPERATOR UNIFORM CAMO (MULTICAM / SHADOW / SPEC-OPS) ---
+  public static createOperatorUniformTexture(variant: 'allies_multicam' | 'axis_shadow' | 'spec_ops' | 'desert_tan'): THREE.Texture {
+    const key = `operator_uniform_${variant}`;
+    if (this.cache.has(key)) return this.cache.get(key)!;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 512;
+    const ctx = canvas.getContext('2d')!;
+
+    // Base tone
+    let baseColor = '#1e293b';
+    let palette = ['#334155', '#475569', '#0f172a', '#1e293b'];
+
+    if (variant === 'allies_multicam') {
+      baseColor = '#3b4233'; // Olive drab / Multicam base
+      palette = ['#282c20', '#4a4f3b', '#5c634c', '#6d5a43', '#1e2017'];
+    } else if (variant === 'axis_shadow') {
+      baseColor = '#18181b'; // Charcoal Black Shadow Corp
+      palette = ['#27272a', '#3f3f46', '#09090b', '#18181b', '#52525b'];
+    } else if (variant === 'spec_ops') {
+      baseColor = '#0f172a'; // Deep Navy Spec Ops
+      palette = ['#1e293b', '#334155', '#020617', '#1e1b4b', '#0369a1'];
+    } else if (variant === 'desert_tan') {
+      baseColor = '#785938'; // Coyote / Desert Tan
+      palette = ['#92704c', '#573d23', '#a88968', '#44301c', '#c2a688'];
+    }
+
+    ctx.fillStyle = baseColor;
+    ctx.fillRect(0, 0, 512, 512);
+
+    // Procedural Organic Camouflage Blobs & Fractal Noise
+    for (let i = 0; i < 450; i++) {
+      ctx.fillStyle = palette[i % palette.length];
+      const cx = Math.random() * 512;
+      const cy = Math.random() * 512;
+      const rx = Math.random() * 32 + 10;
+      const ry = Math.random() * 24 + 8;
+      const rot = Math.random() * Math.PI;
+
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, rx, ry, rot, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Micro Ripstop Fabric Grid & Stitching weave
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.15)';
+    ctx.lineWidth = 1;
+    const gridStep = 8;
+    for (let x = 0; x < 512; x += gridStep) {
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, 512);
+      ctx.stroke();
+    }
+    for (let y = 0; y < 512; y += gridStep) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(512, y);
+      ctx.stroke();
+    }
+
+    // High frequency thread noise grain
+    const imgData = ctx.getImageData(0, 0, 512, 512);
+    const data = imgData.data;
+    for (let i = 0; i < data.length; i += 4) {
+      const n = (Math.random() - 0.5) * 22;
+      data[i] = Math.min(255, Math.max(0, data[i] + n));
+      data[i + 1] = Math.min(255, Math.max(0, data[i + 1] + n));
+      data[i + 2] = Math.min(255, Math.max(0, data[i + 2] + n));
+    }
+    ctx.putImageData(imgData, 0, 0);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    this.cache.set(key, texture);
+    return texture;
+  }
+
+  // --- BALLISTIC CORDURA PLATE CARRIER & MOLLE WEBBING TEXTURE ---
+  public static createPlateCarrierTexture(variant: 'black' | 'tan' | 'multicam' = 'black'): THREE.Texture {
+    const key = `plate_carrier_${variant}`;
+    if (this.cache.has(key)) return this.cache.get(key)!;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 512;
+    const ctx = canvas.getContext('2d')!;
+
+    const baseColor = variant === 'tan' ? '#573d23' : variant === 'multicam' ? '#2e3324' : '#141416';
+    ctx.fillStyle = baseColor;
+    ctx.fillRect(0, 0, 512, 512);
+
+    // Ballistic Weave 1000D Cordura Texture
+    const imgData = ctx.getImageData(0, 0, 512, 512);
+    const data = imgData.data;
+    for (let i = 0; i < data.length; i += 4) {
+      const n = (Math.random() - 0.5) * 30;
+      data[i] = Math.min(255, Math.max(0, data[i] + n));
+      data[i + 1] = Math.min(255, Math.max(0, data[i + 1] + n));
+      data[i + 2] = Math.min(255, Math.max(0, data[i + 2] + n));
+    }
+    ctx.putImageData(imgData, 0, 0);
+
+    // MOLLE / PALS Webbing Strips with Bartack Heavy-Duty Stitching
+    const stripHeight = 32;
+    const spacing = 48;
+    for (let y = 30; y < 480; y += spacing) {
+      // Dark webbing strap
+      ctx.fillStyle = variant === 'tan' ? '#3d2b19' : 'rgba(10, 10, 12, 0.9)';
+      ctx.fillRect(20, y, 472, stripHeight);
+
+      // Strap edge highlight
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+      ctx.fillRect(20, y, 472, 2);
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+      ctx.fillRect(20, y + stripHeight - 2, 472, 2);
+
+      // Vertical Bartack Stitches every 38px
+      for (let x = 40; x < 490; x += 38) {
+        ctx.fillStyle = '#050505';
+        ctx.fillRect(x, y - 2, 4, stripHeight + 4);
+        ctx.fillStyle = '#f59e0b'; // Amber thread
+        ctx.fillRect(x + 1, y, 2, stripHeight);
+      }
+    }
+
+    // Top Velcro Loop Panel for Morale Patches
+    ctx.fillStyle = 'rgba(30, 30, 35, 0.95)';
+    ctx.fillRect(100, 15, 312, 60);
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(100, 15, 312, 60);
+
+    // Task Force / Infrared Flag Patch Stencil
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 18px monospace';
+    ctx.fillText('TF-141 [IR-IFF]', 120, 52);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    this.cache.set(key, texture);
+    return texture;
+  }
+
+  // --- TACTICAL COMBAT GLOVES TEXTURE (MECHANIX / OAKLEY STYLE) ---
+  public static createTacticalGloveTexture(): THREE.Texture {
+    const key = 'tactical_gloves_pbr';
+    if (this.cache.has(key)) return this.cache.get(key)!;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 512;
+    const ctx = canvas.getContext('2d')!;
+
+    // Carbon / Deep charcoal base
+    ctx.fillStyle = '#1e2024';
+    ctx.fillRect(0, 0, 512, 512);
+
+    // Breathable TrekDry Mesh Pattern
+    ctx.strokeStyle = 'rgba(45, 50, 60, 0.8)';
+    ctx.lineWidth = 2;
+    for (let x = 0; x < 512; x += 12) {
+      for (let y = 0; y < 512; y += 12) {
+        ctx.strokeRect(x, y, 10, 10);
+      }
+    }
+
+    // Synthetic Leather Palm Reinforcement & Micro-Grip Friction Ribs
+    ctx.fillStyle = '#111215';
+    ctx.fillRect(50, 200, 412, 280);
+
+    // Rubber Grip Tread Texturing
+    ctx.fillStyle = '#292524';
+    for (let y = 220; y < 460; y += 20) {
+      for (let x = 70; x < 440; x += 30) {
+        ctx.beginPath();
+        ctx.arc(x, y, 6, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // Molded TPR Knuckle Armor Plate & Logo
+    ctx.fillStyle = '#0f172a';
+    ctx.fillRect(80, 50, 352, 100);
+    ctx.strokeStyle = '#38bdf8';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(84, 54, 344, 92);
+
+    ctx.fillStyle = '#38bdf8';
+    ctx.font = 'bold 24px monospace';
+    ctx.fillText('TACTICAL-OPS // TPR', 110, 108);
+
+    // Double Stitching Lines
+    ctx.strokeStyle = '#d97706'; // Kevlar yellow thread
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 4]);
+    ctx.strokeRect(70, 40, 372, 120);
+    ctx.strokeRect(40, 190, 432, 300);
+    ctx.setLineDash([]);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    this.cache.set(key, texture);
+    return texture;
+  }
+
+  // --- FIRST-PERSON OPERATOR SMARTWATCH DISPLAY ---
+  public static createSmartWatchTexture(timeStr: string = '10:42:15', bpm: number = 118): THREE.Texture {
+    const key = `smartwatch_${timeStr}_${bpm}`;
+    if (this.cache.has(key)) return this.cache.get(key)!;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 256;
+    const ctx = canvas.getContext('2d')!;
+
+    // OLED Dark Screen
+    ctx.fillStyle = '#050b14';
+    ctx.fillRect(0, 0, 256, 256);
+
+    // Outer Circular Glow & Bezel Ring
+    ctx.strokeStyle = '#0284c7';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(128, 128, 118, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Subtle HUD Scanline
+    ctx.fillStyle = 'rgba(6, 182, 212, 0.08)';
+    for (let y = 0; y < 256; y += 4) {
+      ctx.fillRect(0, y, 256, 2);
+    }
+
+    // Tactical Compass Direction Ring
+    ctx.fillStyle = '#38bdf8';
+    ctx.font = 'bold 16px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('N', 128, 30);
+    ctx.fillText('E', 230, 134);
+    ctx.fillText('S', 128, 240);
+    ctx.fillText('W', 26, 134);
+
+    // Heartbeat Pulse Rate
+    ctx.fillStyle = '#ef4444';
+    ctx.font = 'bold 18px monospace';
+    ctx.fillText(`♥ ${bpm} BPM`, 128, 75);
+
+    // Digital Tactical Clock
+    ctx.fillStyle = '#22d3ee';
+    ctx.font = 'bold 36px monospace';
+    ctx.fillText(timeStr, 128, 125);
+
+    // GPS & Network Status
+    ctx.fillStyle = '#10b981';
+    ctx.font = 'bold 13px monospace';
+    ctx.fillText('SAT-SYNC [TF-141]', 128, 160);
+    ctx.fillText('GRID: 43.19° N, 12.04° E', 128, 182);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    this.cache.set(key, texture);
+    return texture;
+  }
+
+  // --- BALLISTIC TRAINING DUMMY & MANNEQUIN TARGET TEXTURE ---
+  public static createTrainingDummyTexture(): THREE.Texture {
+    const key = 'training_dummy_pbr';
+    if (this.cache.has(key)) return this.cache.get(key)!;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 512;
+    const ctx = canvas.getContext('2d')!;
+
+    // Ballistic polymer dummy tan/slate color
+    ctx.fillStyle = '#334155';
+    ctx.fillRect(0, 0, 512, 512);
+
+    // High contrast target scoring concentric circles
+    const cx = 256;
+    const cy = 256;
+
+    // Rings from 10 to 5
+    const rings = [
+      { r: 210, score: '5', stroke: '#64748b', fill: 'rgba(30, 41, 59, 0.6)' },
+      { r: 160, score: '7', stroke: '#94a3b8', fill: 'rgba(51, 65, 85, 0.7)' },
+      { r: 110, score: '9', stroke: '#cbd5e1', fill: 'rgba(71, 85, 105, 0.8)' },
+      { r: 60, score: '10', stroke: '#ef4444', fill: 'rgba(239, 68, 68, 0.85)' },
+      { r: 25, score: 'X', stroke: '#ffffff', fill: '#ffffff' },
+    ];
+
+    rings.forEach(ring => {
+      ctx.fillStyle = ring.fill;
+      ctx.beginPath();
+      ctx.arc(cx, cy, ring.r, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.strokeStyle = ring.stroke;
+      ctx.lineWidth = 3;
+      ctx.stroke();
+
+      if (ring.score !== 'X') {
+        ctx.fillStyle = ring.stroke;
+        ctx.font = 'bold 20px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(ring.score, cx, cy - ring.r + 24);
+        ctx.fillText(ring.score, cx, cy + ring.r - 10);
+      }
+    });
+
+    // Crosshairs
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(cx - 220, cy);
+    ctx.lineTo(cx + 220, cy);
+    ctx.moveTo(cx, cy - 220);
+    ctx.lineTo(cx, cy + 220);
+    ctx.stroke();
+
+    // Tactical Target Stencil
+    ctx.fillStyle = '#38bdf8';
+    ctx.font = 'bold 16px monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText('TARGET ID: T-800 BALLISTIC DUMMY', 30, 40);
+    ctx.fillText('ZONE: TACTICAL VITALS / THORAX', 30, 65);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    this.cache.set(key, texture);
+    return texture;
+  }
 }
+

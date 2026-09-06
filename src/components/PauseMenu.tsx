@@ -1,5 +1,5 @@
 import React from 'react';
-import { Play, Sliders, RotateCcw, Crosshair, Home, LogOut } from 'lucide-react';
+import { Play, Sliders, RotateCcw, Crosshair, Home } from 'lucide-react';
 import { GameMode, WeatherType } from '../types';
 
 interface PauseMenuProps {
@@ -16,7 +16,7 @@ interface PauseMenuProps {
 
 export const PauseMenu: React.FC<PauseMenuProps> = ({
   gameMode,
-  currentWeather,
+  currentWeather = 'dynamic_cycle',
   onResume,
   onOpenGunsmith,
   onOpenSettings,
@@ -26,122 +26,133 @@ export const PauseMenu: React.FC<PauseMenuProps> = ({
   onSelectWeather,
 }) => {
   return (
-    <div id="pause-menu" className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-2xl p-6 text-slate-200 select-none">
-      <div className="w-full max-w-lg bg-slate-950/95 border border-slate-800 rounded-3xl shadow-2xl p-8 flex flex-col gap-5 text-center">
+    <div id="pause-menu" className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-xl p-4 sm:p-6 text-slate-200 select-none font-sans">
+      <div className="w-full max-w-3xl bg-slate-950/95 border border-slate-800 rounded-2xl shadow-2xl p-6 sm:p-7 flex flex-col gap-5">
         {/* Header */}
-        <div className="flex flex-col items-center gap-1">
-          <span className="text-xs font-mono uppercase tracking-widest text-cyan-400 font-bold">Tactical Deployment</span>
-          <h2 className="text-3xl font-black uppercase tracking-tight text-white">Operation Paused</h2>
+        <div className="flex justify-between items-center border-b border-slate-800/80 pb-3">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-lg bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400">
+              <Crosshair className="w-5 h-5" />
+            </div>
+            <div>
+              <span className="text-[10px] font-mono uppercase tracking-widest text-cyan-400 font-bold block">
+                TACTICAL DEPLOYMENT // ACTIVE
+              </span>
+              <h2 className="text-xl font-black uppercase text-white tracking-tight">
+                Mission Paused
+              </h2>
+            </div>
+          </div>
+
+          <span className="text-[10px] font-mono uppercase bg-slate-900 border border-slate-800 px-2.5 py-1 rounded text-slate-400 font-bold">
+            PRESS [ESC] TO RESUME
+          </span>
         </div>
 
-        {/* Menu Buttons */}
-        <div className="flex flex-col gap-2.5">
-          <button
-            onClick={onResume}
-            className="w-full py-3 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black text-sm uppercase tracking-widest rounded-xl transition-all shadow-lg hover:shadow-cyan-500/25 flex items-center justify-center gap-2 cursor-pointer font-mono"
-          >
-            <Play className="w-4 h-4 fill-slate-950" /> Resume Mission
-          </button>
-
-          <button
-            onClick={onOpenGunsmith}
-            className="w-full py-3 bg-slate-900 hover:bg-slate-800 text-slate-200 font-bold text-sm uppercase tracking-widest rounded-xl border border-slate-800 transition-all flex items-center justify-center gap-2 cursor-pointer font-mono"
-          >
-            <Crosshair className="w-4 h-4 text-cyan-400" /> Gunsmith Armory
-          </button>
-
-          <button
-            onClick={onOpenSettings}
-            className="w-full py-3 bg-slate-900 hover:bg-slate-800 text-slate-200 font-bold text-sm uppercase tracking-widest rounded-xl border border-slate-800 transition-all flex items-center justify-center gap-2 cursor-pointer font-mono"
-          >
-            <Sliders className="w-4 h-4 text-cyan-400" /> Settings & Preferences
-          </button>
-
-          <button
-            onClick={onRestart}
-            className="w-full py-3 bg-slate-900 hover:bg-slate-800 text-slate-300 font-bold text-sm uppercase tracking-widest rounded-xl border border-slate-800 transition-all flex items-center justify-center gap-2 cursor-pointer font-mono"
-          >
-            <RotateCcw className="w-4 h-4 text-cyan-400" /> Restart Match
-          </button>
-
-          {onReturnToHome && (
+        {/* 2-Column Body */}
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
+          {/* Left: Primary Command Buttons */}
+          <div className="md:col-span-6 flex flex-col gap-2">
             <button
-              onClick={onReturnToHome}
-              className="w-full py-3 bg-rose-950/40 hover:bg-rose-900/50 text-rose-300 font-bold text-sm uppercase tracking-widest rounded-xl border border-rose-500/40 transition-all flex items-center justify-center gap-2 cursor-pointer font-mono shadow-md hover:shadow-rose-950/50"
+              onClick={onResume}
+              className="w-full py-3 px-4 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black text-xs uppercase tracking-wider rounded-xl transition-all shadow hover:shadow-cyan-500/20 flex items-center justify-between cursor-pointer font-mono"
             >
-              <Home className="w-4 h-4 text-rose-400" /> Exit to Main Lobby
+              <span className="flex items-center gap-2">
+                <Play className="w-4 h-4 fill-slate-950" /> Resume Mission
+              </span>
+              <span className="text-[10px] font-bold bg-slate-950/20 px-1.5 py-0.5 rounded">[ESC]</span>
             </button>
-          )}
-        </div>
 
-        {/* Environment & Weather Quick Selector */}
-        {onSelectWeather && (
-          <div className="flex flex-col gap-2 pt-3 border-t border-slate-800 text-left">
-            <div className="flex justify-between items-center">
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-400 font-mono">Environment & Time of Day</span>
-              <span className="text-[10px] font-mono text-cyan-400 font-bold">[T Key in Combat]</span>
-            </div>
-            <div className="grid grid-cols-3 gap-1.5">
-              {[
-                { id: 'clear_day', label: 'Clear Day' },
-                { id: 'golden_sunset', label: 'Sunset' },
-                { id: 'tactical_storm', label: 'Storm & Rain' },
-                { id: 'midnight_fog', label: 'Midnight Ops' },
-                { id: 'sandstorm', label: 'Sandstorm' },
-                { id: 'dynamic_cycle', label: 'Dynamic Cycle' },
-              ].map(w => (
-                <button
-                  key={w.id}
-                  onClick={() => onSelectWeather(w.id as WeatherType)}
-                  className={`py-1.5 px-2 rounded-lg text-[11px] font-bold uppercase transition-all border font-mono cursor-pointer text-center ${
-                    (currentWeather || 'dynamic_cycle') === w.id
-                      ? 'bg-cyan-950/60 border-cyan-400 text-cyan-300 shadow-[0_0_10px_rgba(6,182,212,0.3)]'
-                      : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
-                  }`}
-                >
-                  {w.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
+            <button
+              onClick={onOpenGunsmith}
+              className="w-full py-2.5 px-4 bg-slate-900 hover:bg-slate-850 text-slate-200 font-bold text-xs uppercase tracking-wider rounded-xl border border-slate-800 hover:border-slate-700 transition-all flex items-center justify-between cursor-pointer font-mono"
+            >
+              <span className="flex items-center gap-2">
+                <Crosshair className="w-4 h-4 text-cyan-400" /> Gunsmith Armory
+              </span>
+              <span className="text-[10px] text-slate-500">[B]</span>
+            </button>
 
-        {/* Mode Selector */}
-        <div className="flex flex-col gap-2 pt-2 border-t border-slate-800 text-left">
-          <span className="text-xs font-bold uppercase tracking-wider text-slate-400 font-mono">Game Mode</span>
-          <div className="grid grid-cols-3 gap-2">
-            {[
-              { id: 'tdm', label: 'Team Deathmatch' },
-              { id: 'gungame', label: 'Gun Game' },
-              { id: 'training', label: '🎯 Training Range (0 Enemies)' },
-            ].map(m => (
+            <button
+              onClick={onOpenSettings}
+              className="w-full py-2.5 px-4 bg-slate-900 hover:bg-slate-850 text-slate-200 font-bold text-xs uppercase tracking-wider rounded-xl border border-slate-800 hover:border-slate-700 transition-all flex items-center justify-between cursor-pointer font-mono"
+            >
+              <span className="flex items-center gap-2">
+                <Sliders className="w-4 h-4 text-cyan-400" /> Settings & Sensitivity
+              </span>
+            </button>
+
+            <button
+              onClick={onRestart}
+              className="w-full py-2.5 px-4 bg-slate-900 hover:bg-slate-850 text-slate-300 font-bold text-xs uppercase tracking-wider rounded-xl border border-slate-800 hover:border-slate-700 transition-all flex items-center justify-between cursor-pointer font-mono"
+            >
+              <span className="flex items-center gap-2">
+                <RotateCcw className="w-4 h-4 text-cyan-400" /> Restart Match
+              </span>
+            </button>
+
+            {onReturnToHome && (
               <button
-                key={m.id}
-                onClick={() => onChangeMode(m.id as GameMode)}
-                className={`py-2 px-3 rounded-lg text-xs font-bold uppercase transition-all border font-mono cursor-pointer ${
-                  gameMode === m.id
-                    ? 'bg-cyan-950/50 border-cyan-400 text-cyan-300 shadow-[0_0_12px_rgba(6,182,212,0.3)]'
-                    : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
-                }`}
+                onClick={onReturnToHome}
+                className="w-full py-2.5 px-4 bg-rose-950/30 hover:bg-rose-900/40 text-rose-300 font-bold text-xs uppercase tracking-wider rounded-xl border border-rose-500/30 transition-all flex items-center justify-between cursor-pointer font-mono mt-1"
               >
-                {m.label}
+                <span className="flex items-center gap-2">
+                  <Home className="w-4 h-4 text-rose-400" /> Return to Main Lobby
+                </span>
               </button>
-            ))}
+            )}
           </div>
-        </div>
 
-        {/* Controls Quick Guide */}
-        <div className="bg-slate-900/40 p-3.5 rounded-xl border border-slate-800 text-xs text-slate-400 flex flex-col gap-1 text-left">
-          <span className="font-bold text-slate-300 uppercase tracking-wider text-[10px] font-mono">Tactical Directives</span>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-1 font-mono text-[10.5px]">
-            <div><span className="text-cyan-400">WASD:</span> Move</div>
-            <div><span className="text-cyan-400">T:</span> Shift Weather / Time</div>
-            <div><span className="text-cyan-400">Right-Click:</span> ADS Zoom</div>
-            <div><span className="text-cyan-400">F:</span> Flashlight & Laser</div>
-            <div><span className="text-cyan-400">G:</span> Frag Grenade</div>
-            <div><span className="text-cyan-400">V / MMB:</span> Quick Melee</div>
-            <div><span className="text-cyan-400">C:</span> Crouch / Slide</div>
-            <div><span className="text-cyan-400">I:</span> Inspect Weapon Camo</div>
+          {/* Right: Environment Preset & Directives */}
+          <div className="md:col-span-6 flex flex-col gap-4">
+            {/* Weather / Atmosphere Presets */}
+            {onSelectWeather && (
+              <div className="flex flex-col gap-2 bg-slate-900/40 p-3.5 rounded-xl border border-slate-800/80">
+                <div className="flex justify-between items-center text-[10px] font-mono text-slate-400 uppercase font-bold">
+                  <span>Atmosphere & Time of Day</span>
+                  <span className="text-cyan-400">[T in Combat]</span>
+                </div>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {[
+                    { id: 'clear_day', label: 'High Noon' },
+                    { id: 'golden_sunset', label: 'Sunset' },
+                    { id: 'midnight_fog', label: 'Midnight' },
+                    { id: 'tactical_storm', label: 'Rain Storm' },
+                    { id: 'sandstorm', label: 'Sandstorm' },
+                    { id: 'dynamic_cycle', label: 'Dynamic' },
+                  ].map(w => (
+                    <button
+                      key={w.id}
+                      onClick={() => onSelectWeather(w.id as WeatherType)}
+                      className={`py-1.5 px-2 rounded-lg text-[10px] font-bold uppercase transition-all border font-mono cursor-pointer text-center truncate ${
+                        currentWeather === w.id
+                          ? 'bg-cyan-950/70 border-cyan-400 text-cyan-300 shadow-[0_0_8px_rgba(6,182,212,0.3)]'
+                          : 'bg-slate-900/80 border-slate-800 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      {w.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Tactical Controls Reference */}
+            <div className="flex flex-col gap-1.5 bg-slate-900/40 p-3.5 rounded-xl border border-slate-800/80 text-[10px] font-mono text-slate-400">
+              <span className="text-[10px] text-slate-300 uppercase font-bold tracking-wider">
+                Operative Hotkeys
+              </span>
+              <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+                <div><span className="text-cyan-400 font-bold">WASD:</span> Move</div>
+                <div><span className="text-cyan-400 font-bold">Right Click:</span> ADS Zoom</div>
+                <div><span className="text-cyan-400 font-bold">Shift:</span> Tac Sprint</div>
+                <div><span className="text-cyan-400 font-bold">C:</span> Slide / Crouch</div>
+                <div><span className="text-cyan-400 font-bold">G / Q:</span> Lethal / Tactical</div>
+                <div><span className="text-cyan-400 font-bold">F:</span> Tactical Laser</div>
+                <div><span className="text-cyan-400 font-bold">TAB:</span> Scoreboard</div>
+                <div><span className="text-cyan-400 font-bold">1-5:</span> Swap Weapons</div>
+              </div>
+            </div>
           </div>
         </div>
       </div>

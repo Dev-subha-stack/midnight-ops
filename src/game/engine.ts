@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { EnvironmentState, FloatingDamageNumberItem, GameMode, GameSettings, HitmarkerEvent, KillFeedItem, PlayerStats, TrainingTelemetryData, WeaponCamo, WeaponType, WeatherType } from '../types';
+import { EnvironmentState, FloatingDamageNumberItem, GameMode, GameSettings, HitmarkerEvent, KillFeedItem, PlayerEliminatedInfo, PlayerStats, TrainingTelemetryData, WeaponCamo, WeaponType, WeatherType } from '../types';
 import { TacticalMap } from './map';
 import { ParticleSystem } from './particles';
 import { BotManager } from './ai';
@@ -75,6 +75,12 @@ export class GameEngine {
   public onMotionDetectNotice: (botIds: string[]) => void = () => {};
   public onTrainingTelemetry: (data: TrainingTelemetryData) => void = () => {};
   public onFloatingNumbersUpdate: (items: FloatingDamageNumberItem[]) => void = () => {};
+  public onPlayerEliminated: (info: PlayerEliminatedInfo | null) => void = () => {};
+
+  // Player Elimination State
+  public isPlayerDead: boolean = false;
+  public playerDeathTimer: number = 0;
+  public eliminationInfo: PlayerEliminatedInfo | null = null;
 
   private lastFrameTime: number = performance.now();
   private animationFrameId: number | null = null;
@@ -87,7 +93,7 @@ export class GameEngine {
 
     // 1. Scene & Renderer setup
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(settings.fieldOfView || 85, window.innerWidth / window.innerHeight, 0.05, 500);
+    this.camera = new THREE.PerspectiveCamera(settings.fieldOfView || 85, window.innerWidth / window.innerHeight, 0.02, 500);
     this.scene.add(this.camera);
 
     this.renderer = new THREE.WebGLRenderer({
@@ -362,13 +368,13 @@ export class GameEngine {
     }
 
     if (this.stats.health <= 0) {
-      this.handlePlayerDeath(attackerName, weapon);
+      this.handlePlayerDeath(attackerName, weapon, botPos, damage);
     }
 
     this.onStatsUpdate({ ...this.stats });
   }
 
-  private handlePlayerDeath(attackerName: string, weapon: WeaponType) {
+  private handlePlayerDeath(attackerName: string, weapon: WeaponType, botPos?: THREE.Vector3, damageDealt: number = 80) {
     this.stats.deaths++;
     this.stats.currentStreak = 0;
     this.axisScore++;
@@ -376,38 +382,51 @@ export class GameEngine {
     soundManager.stopHeartbeat();
     this.isLowHealthWarning = false;
 
+    const killerBot = this.botManager.bots.find(b => b.name === attackerName);
+    const killerPos = botPos || (killerBot ? killerBot.position : new THREE.Vector3(0, 1.5, 0));
+    const distMeters = Math.max(1, Math.round(killerPos.distanceTo(this.controller.position) * 10) / 10);
+    const isHeadshot = weapon === 'sniper' || damageDealt >= 90;
+
     const feedItem: KillFeedItem = {
       id: Math.random().toString(),
       killer: attackerName,
       victim: 'YOU',
       weapon,
-      isHeadshot: false,
+      isHeadshot,
       isPlayerKiller: false,
       isPlayerVictim: true,
       timestamp: Date.now(),
     };
     this.onKillfeedEvent(feedItem);
 
-    // Respawn after delay
-    setTimeout(() => {
-      if (!this.isMatchOver) {
-        this.respawnPlayer();
-      }
-    }, 3000);
-
     if (this.axisScore >= this.scoreLimit) {
       this.endMatch(false);
+      this.onStatsUpdate({ ...this.stats });
+      return;
     }
+
+    // Fast Tactical Respawn - No Elimination Screen
+    this.isPlayerDead = true;
+    this.playerDeathTimer = 0.75;
+    this.controller.setDeadState(true);
+    this.eliminationInfo = null;
+    this.onPlayerEliminated(null);
 
     this.onStatsUpdate({ ...this.stats });
   }
 
   public respawnPlayer() {
+    this.isPlayerDead = false;
+    this.playerDeathTimer = 0;
+    this.eliminationInfo = null;
+    this.onPlayerEliminated(null);
+    this.controller.setDeadState(false);
     this.stats.health = this.stats.maxHealth;
     this.stats.armor = this.stats.maxArmor;
-    const spawnPt = this.map.spawnPoints[Math.floor(Math.random() * 3)];
+    const spawnPt = this.map.spawnPoints[Math.floor(Math.random() * this.map.spawnPoints.length)];
     this.controller.position.copy(spawnPt.position);
     this.controller.velocity.set(0, 0, 0);
+    this.timeSinceLastDamage = 10.0;
     this.onStatsUpdate({ ...this.stats });
   }
 
@@ -482,6 +501,22 @@ export class GameEngine {
   private update(dt: number) {
     // CRITICAL: When paused or match is over, FREEZE all game simulation and combat physics!
     if (this.isPaused || this.isMatchOver) return;
+
+    // Handle elimination countdown and fast respawn
+    if (this.isPlayerDead) {
+      this.playerDeathTimer -= dt;
+      if (this.eliminationInfo) {
+        this.eliminationInfo.respawnTimeRemaining = Math.max(0, this.playerDeathTimer);
+        this.onPlayerEliminated({ ...this.eliminationInfo });
+      }
+      if (this.playerDeathTimer <= 0) {
+        this.respawnPlayer();
+        return;
+      }
+      this.particles.update(dt);
+      this.environment.update(dt, this.controller.position);
+      return;
+    }
 
     // Match countdown timer
     this.matchTimeRemaining -= dt;

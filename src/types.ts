@@ -2,6 +2,32 @@ export type WeaponType = 'm4' | 'mp5' | 'sniper' | 'shotgun' | 'deagle';
 
 export type WeaponCamo = 'standard' | 'damascus' | 'gold' | 'woodland' | 'carbon';
 
+export type OpticType = 'iron_sight' | 'reflex_dot' | 'red_dot_micro' | 'holo_553' | 'acog_4x' | 'sniper_variable' | 'thermal_flir' | 'thermal_ir';
+
+export type ReticleColor = 'red' | 'green' | 'amber' | 'cyan';
+
+export type ReticleStyle = 'dot' | 'cross' | 'chevron' | 'mildot_circle' | 'holo_ring' | 't_post';
+
+export interface OpticAttachmentConfig {
+  id: OpticType;
+  name: string;
+  category: string;
+  desc?: string;
+  description?: string;
+  magnification: number; // e.g. 1.0, 1.35, 1.75, 4.0, 8.5
+  adsFov: number; // Target Field of View
+  adsSpeedMultiplier: number; // e.g. 1.15 (faster) or 0.85 (slower for heavy optics)
+  swayMultiplier: number;
+  compatibleWeapons: WeaponType[];
+  isVariableZoom?: boolean;
+  hasFullScopeOverlay?: boolean;
+  hasThermalVision?: boolean;
+  variableZoomSteps?: number[];
+  zoomLevels?: { label: string; fov: number; mag: number }[];
+  isThermal?: boolean;
+  hasRangefinder?: boolean;
+}
+
 export interface RecoilPatternPoint {
   x: number; // Horizontal drift (yaw offset)
   y: number; // Vertical rise (pitch offset)
@@ -27,6 +53,7 @@ export interface WeaponConfig {
   recoilDampingRate: number;
   recoilPattern: RecoilPatternPoint[];
   adsSpeed: number; // Seconds to transition to ADS
+  adsTimeSec?: number; // ADS transition duration in seconds
   adsFov: number; // Target FOV when aiming
   fullAuto: boolean;
   burstCount?: number;
@@ -57,6 +84,24 @@ export interface PlayerStats {
   highestStreak: number;
   shotsFired: number;
   shotsHit: number;
+  tacSprintStamina?: number; // 0 to 1
+  isTacSprinting?: boolean;
+  isTacStance?: boolean;
+  isMantling?: boolean;
+  // Dynamic Scope & Steady Aim Telemetry
+  breathStamina?: number; // 0 to 1
+  isHoldingBreath?: boolean;
+  isBreathExhausted?: boolean;
+  scopeZoomIndex?: number; // 0 or 1 for variable zoom
+  scopeZoomLevel?: number; // e.g. 4.5 or 10.0
+  targetRangeMeters?: number; // Real-time laser rangefinder reading in meters
+  elevationHoldoverMil?: number; // Real-time bullet drop holdover in milliradians
+  scopeShadowOffsetX?: number; // Dynamic physical parallax eye-relief offset X
+  scopeShadowOffsetY?: number; // Dynamic physical parallax eye-relief offset Y
+  equippedOptic?: OpticType;
+  reticleColor?: ReticleColor;
+  reticleStyle?: ReticleStyle;
+  isThermalActive?: boolean;
 }
 
 export interface KillFeedItem {
@@ -154,6 +199,14 @@ export interface EnemyBot {
 export interface HitmarkerEvent {
   type: 'body' | 'headshot' | 'kill' | 'armor' | 'destructible';
   timestamp: number;
+}
+
+export interface PlayerEliminatedInfo {
+  killerName: string;
+  killerWeapon: WeaponType;
+  distMeters: number;
+  isHeadshot: boolean;
+  respawnTimeRemaining: number;
 }
 
 export interface DirectionalDamageIndicator {

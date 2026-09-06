@@ -175,7 +175,14 @@ export class BotController {
   public rightArmMesh: THREE.Object3D | null = null;
   public leftLegMesh: THREE.Object3D | null = null;
   public rightLegMesh: THREE.Object3D | null = null;
+  public botWeaponMesh: THREE.Object3D | null = null;
   public sniperLaserMesh: THREE.Line | null = null;
+
+  // Procedural Weapon Recoil & Physical Reactions
+  public weaponRecoilKick: number = 0;
+  public deathTimer: number = 0;
+  public deathProgress: number = 0;
+  public deathDirection: THREE.Vector3 = new THREE.Vector3();
 
   // Procedural Hit Flinch & Physical Reactions
   public flinchPitch: number = 0;
@@ -183,9 +190,23 @@ export class BotController {
   public flinchRoll: number = 0;
   public headFlinchPitch: number = 0;
   public headFlinchYaw: number = 0;
+  public flinchLegBuckle: number = 0;
+  public flinchArmDisrupt: number = 0;
   public flinchDisplacement: THREE.Vector3 = new THREE.Vector3();
   public flinchVelocity: THREE.Vector3 = new THREE.Vector3();
   public aimDisruptionTimer: number = 0;
+
+  // Procedural Multi-Joint Ragdoll Physics Simulation
+  public isRagdollActive: boolean = false;
+  public ragdollVelocity: THREE.Vector3 = new THREE.Vector3();
+  public ragdollAngularVel: THREE.Vector3 = new THREE.Vector3();
+  public ragdollTorsoPitch: number = 0;
+  public ragdollTorsoRoll: number = 0;
+  public isWeaponDropped: boolean = false;
+  public droppedWeaponPos: THREE.Vector3 = new THREE.Vector3();
+  public droppedWeaponVel: THREE.Vector3 = new THREE.Vector3();
+  public droppedWeaponRot: THREE.Vector3 = new THREE.Vector3();
+  public droppedWeaponRotVel: THREE.Vector3 = new THREE.Vector3();
 
   public position: THREE.Vector3;
   public velocity: THREE.Vector3 = new THREE.Vector3();
@@ -228,6 +249,7 @@ export class BotController {
   private respawnTimer: number = 0;
   private strafeTimer: number = 0;
   private strafeDir: number = 1;
+  private footstepTimer: number = 0;
   private difficulty: string;
   private accuracy: number;
   private reactionTime: number;
@@ -309,7 +331,7 @@ export class BotController {
       this.accuracy += 0.25;
     }
 
-    this.group = ModelFactory.createBotMesh(team);
+    this.group = ModelFactory.createBotMesh(team, archetype, weapon);
     this.group.position.copy(this.position);
     this.scene.add(this.group);
 
@@ -319,6 +341,7 @@ export class BotController {
     this.rightArmMesh = this.group.getObjectByName('bot_right_arm') || null;
     this.leftLegMesh = this.group.getObjectByName('bot_left_leg') || null;
     this.rightLegMesh = this.group.getObjectByName('bot_right_leg') || null;
+    this.botWeaponMesh = this.group.getObjectByName('bot_weapon') || null;
 
     // Sniper warning laser
     if (this.archetype === 'sniper') {
@@ -426,7 +449,7 @@ export class BotController {
     this.squad.reportPlayerSpotted(this.position.clone().add(hitDir?.clone().negate() || new THREE.Vector3(0, 0, 10)), this);
 
     // Procedural pain & voice
-    soundManager.playBotPain(isHeadshot || damage > 35);
+    soundManager.playFleshImpact();
 
     const botForward = new THREE.Vector3(0, 0, 1).applyEuler(this.group.rotation);
     const botRight = new THREE.Vector3(1, 0, 0).applyEuler(this.group.rotation);
@@ -437,29 +460,32 @@ export class BotController {
     const dmgScale = Math.min(2.5, Math.max(0.6, damage / 30));
 
     if (isHeadshot) {
-      this.headFlinchPitch = -0.55 * dmgScale;
-      this.headFlinchYaw = (Math.random() - 0.5) * 0.6 * dmgScale;
-      this.flinchPitch = -0.3 * dmgScale;
-      this.flinchRoll = (rightDot > 0 ? 0.25 : -0.25) * dmgScale;
-      this.flinchVelocity.copy(impactDir).multiplyScalar(3.5 * dmgScale);
-      this.aimDisruptionTimer = 0.7; // Severe aim disruption on headshot
+      this.headFlinchPitch = -0.75 * dmgScale;
+      this.headFlinchYaw = (Math.random() - 0.5) * 0.9 * dmgScale;
+      this.flinchPitch = -0.45 * dmgScale;
+      this.flinchRoll = (rightDot > 0 ? 0.4 : -0.4) * dmgScale;
+      this.flinchLegBuckle = 0.5 * dmgScale;
+      this.flinchArmDisrupt = 0.8 * dmgScale;
+      this.flinchVelocity.copy(impactDir).multiplyScalar(4.2 * dmgScale);
+      this.aimDisruptionTimer = 0.8; // Severe aim disruption on headshot
     } else {
-      this.flinchPitch = (forwardDot > 0 ? 0.28 : -0.38) * dmgScale;
-      this.flinchRoll = (rightDot > 0 ? 0.32 : -0.32) * dmgScale;
-      this.flinchYaw = (Math.random() - 0.5) * 0.3 * dmgScale;
+      this.flinchPitch = (forwardDot > 0 ? 0.38 : -0.48) * dmgScale;
+      this.flinchRoll = (rightDot > 0 ? 0.45 : -0.45) * dmgScale;
+      this.flinchYaw = (Math.random() - 0.5) * 0.45 * dmgScale;
+      this.headFlinchPitch = -0.35 * dmgScale;
+      this.headFlinchYaw = (Math.random() - 0.5) * 0.5 * dmgScale;
+      this.flinchLegBuckle = 0.35 * dmgScale;
+      this.flinchArmDisrupt = 0.55 * dmgScale;
 
-      this.headFlinchPitch = -0.25 * dmgScale;
-      this.headFlinchYaw = (Math.random() - 0.5) * 0.35 * dmgScale;
-
-      this.flinchVelocity.copy(impactDir).multiplyScalar(2.0 * dmgScale);
-      this.aimDisruptionTimer = 0.45; // Suppression aim disruption
+      this.flinchVelocity.copy(impactDir).multiplyScalar(2.8 * dmgScale);
+      this.aimDisruptionTimer = 0.5; // Suppression aim disruption
     }
 
     // Interrupt current burst when taking heavy fire
-    this.burstPauseTimer = Math.max(this.burstPauseTimer, 0.4);
+    this.burstPauseTimer = Math.max(this.burstPauseTimer, 0.45);
 
-    if (this.leftArmMesh) this.leftArmMesh.rotation.x -= 0.5 * dmgScale;
-    if (this.rightArmMesh) this.rightArmMesh.rotation.x -= 0.6 * dmgScale;
+    if (this.leftArmMesh) this.leftArmMesh.rotation.x -= 0.6 * dmgScale;
+    if (this.rightArmMesh) this.rightArmMesh.rotation.x -= 0.7 * dmgScale;
 
     // Tactical self-preservation: Fall back to cover when low health (< 55 HP)
     if (this.state !== 'cover' && this.health < 55) {
@@ -480,13 +506,13 @@ export class BotController {
     this.particles.emitBloodSplatter(hitPos, hitDir || new THREE.Vector3(0, 1, 0), isHeadshot);
 
     if (this.health <= 0) {
-      this.die();
+      this.die(impactDir, isHeadshot, damage);
       return true;
     }
     return false;
   }
 
-  public die() {
+  public die(hitDir?: THREE.Vector3, isHeadshot: boolean = false, damage: number = 80) {
     this.isDead = true;
     this.health = 0;
     this.state = 'dead';
@@ -499,12 +525,47 @@ export class BotController {
       this.sniperLaserMesh.visible = false;
     }
 
-    this.group.rotation.x = -Math.PI / 2;
-    this.group.position.y = 0.25;
+    this.isRagdollActive = true;
+    const botForward = new THREE.Vector3(0, 0, 1).applyEuler(this.group.rotation);
+    const botRight = new THREE.Vector3(1, 0, 0).applyEuler(this.group.rotation);
+    const impact = hitDir ? hitDir.clone().normalize() : botForward.clone().negate();
+    const forwardDot = impact.dot(botForward);
+    const rightDot = impact.dot(botRight);
+
+    // Dynamic bullet impulse momentum transfer
+    const force = isHeadshot ? 3.2 : Math.min(8.5, 4.0 + damage * 0.05);
+    this.ragdollVelocity.set(impact.x * force, isHeadshot ? 1.0 : 2.5, impact.z * force);
+    this.ragdollAngularVel.set(
+      forwardDot > 0 ? 3.6 : -4.5,
+      (Math.random() - 0.5) * 4.8,
+      rightDot > 0 ? 3.2 : -3.2
+    );
+
+    // Initial joint limpness targets
+    this.ragdollTorsoPitch = forwardDot > 0 ? Math.PI / 2 : -Math.PI / 2;
+    this.ragdollTorsoRoll = rightDot > 0 ? 0.45 : -0.45;
+
+    // Drop and tumble weapon to the ground
+    if (this.botWeaponMesh) {
+      this.isWeaponDropped = true;
+      this.droppedWeaponPos.copy(this.botWeaponMesh.position);
+      this.droppedWeaponVel.set(
+        impact.x * 3.2 + (Math.random() - 0.5) * 1.5,
+        2.8,
+        impact.z * 3.2 + (Math.random() - 0.5) * 1.5
+      );
+      this.droppedWeaponRot.set(0, Math.PI, 0);
+      this.droppedWeaponRotVel.set(
+        (Math.random() - 0.5) * 10,
+        (Math.random() - 0.5) * 10,
+        (Math.random() - 0.5) * 10
+      );
+    }
   }
 
   public respawn() {
     this.isDead = false;
+    this.isRagdollActive = false;
     this.health = this.maxHealth;
     this.armor = this.maxArmor;
     this.magAmmo = this.magCapacity;
@@ -514,9 +575,26 @@ export class BotController {
     this.targetAcquisitionTimer = 0;
     this.state = 'patrol';
     this.alertLevel = 'unalerted';
+
+    // Reset all joint and limb angles to upright combat stance
+    if (this.headMesh) this.headMesh.rotation.set(0, 0, 0);
+    if (this.torsoMesh) this.torsoMesh.rotation.set(0, 0, 0);
+    if (this.leftArmMesh) this.leftArmMesh.rotation.set(0.5, 0, 0);
+    if (this.rightArmMesh) this.rightArmMesh.rotation.set(0.7, 0, 0);
+    if (this.leftLegMesh) this.leftLegMesh.rotation.set(0, 0, 0);
+    if (this.rightLegMesh) this.rightLegMesh.rotation.set(0, 0, 0);
+
+    // Reset Weapon to Hand
+    if (this.botWeaponMesh) {
+      this.isWeaponDropped = false;
+      this.botWeaponMesh.position.set(0.18, 1.15, 0.35);
+      this.botWeaponMesh.rotation.set(0, Math.PI, 0);
+    }
+
     const spawnPt = this.map.spawnPoints[Math.floor(Math.random() * this.map.spawnPoints.length)];
     this.position.set(spawnPt.position.x, 0, spawnPt.position.z);
     this.velocity.set(0, 0, 0);
+    this.ragdollVelocity.set(0, 0, 0);
     this.group.position.copy(this.position);
     this.group.rotation.set(0, 0, 0);
     this.currentCover = null;
@@ -542,7 +620,88 @@ export class BotController {
       this.respawnTimer -= dt;
       if (this.respawnTimer <= 0) {
         this.respawn();
+        return;
       }
+
+      // --- PROCEDURAL MULTI-JOINT RAGDOLL COLLAPSE SIMULATION ---
+      const onCatwalk = Math.abs(this.position.x) <= 7.5 && Math.abs(this.position.z) <= 6.5 && this.position.y > 2.0;
+      const floorY = onCatwalk ? 3.8 : 0.0;
+
+      // Integrate Ragdoll Linear Velocity & Gravity
+      this.ragdollVelocity.y -= 19.6 * dt; // Realistic gravity
+      this.position.x += this.ragdollVelocity.x * dt;
+      this.position.z += this.ragdollVelocity.z * dt;
+      this.position.y += this.ragdollVelocity.y * dt;
+
+      // Ground Collision Clamping & Friction
+      if (this.position.y <= floorY + 0.18) {
+        this.position.y = floorY + 0.18;
+        if (this.ragdollVelocity.y < -1.0) {
+          this.ragdollVelocity.y = -this.ragdollVelocity.y * 0.22; // Low restitution ground bounce
+        } else {
+          this.ragdollVelocity.y = 0;
+        }
+        // Ground sliding friction
+        this.ragdollVelocity.x *= Math.max(0, 1.0 - 7.5 * dt);
+        this.ragdollVelocity.z *= Math.max(0, 1.0 - 7.5 * dt);
+      }
+
+      // Angular Momentum damping
+      this.ragdollAngularVel.multiplyScalar(Math.max(0, 1.0 - 5.5 * dt));
+
+      // 1. Torso Multi-Axis Ragdoll Tilt & Ground Settlement
+      this.group.rotation.x = THREE.MathUtils.lerp(this.group.rotation.x, this.ragdollTorsoPitch, Math.min(1.0, 7.5 * dt));
+      this.group.rotation.z = THREE.MathUtils.lerp(this.group.rotation.z, this.ragdollTorsoRoll, Math.min(1.0, 6.0 * dt));
+
+      // 2. Limp Head Ragdoll Flop
+      if (this.headMesh) {
+        this.headMesh.rotation.x = THREE.MathUtils.lerp(this.headMesh.rotation.x, -0.65, Math.min(1.0, 8.0 * dt));
+        this.headMesh.rotation.z = THREE.MathUtils.lerp(this.headMesh.rotation.z, 0.45, Math.min(1.0, 7.0 * dt));
+      }
+
+      // 3. Limp Arms Natural Splaying
+      if (this.leftArmMesh && this.rightArmMesh) {
+        this.leftArmMesh.rotation.x = THREE.MathUtils.lerp(this.leftArmMesh.rotation.x, -1.3, Math.min(1.0, 8.5 * dt));
+        this.leftArmMesh.rotation.z = THREE.MathUtils.lerp(this.leftArmMesh.rotation.z, 0.85, Math.min(1.0, 8.5 * dt));
+        this.rightArmMesh.rotation.x = THREE.MathUtils.lerp(this.rightArmMesh.rotation.x, -1.1, Math.min(1.0, 8.5 * dt));
+        this.rightArmMesh.rotation.z = THREE.MathUtils.lerp(this.rightArmMesh.rotation.z, -0.85, Math.min(1.0, 8.5 * dt));
+      }
+
+      // 4. Limp Legs Sprawl & Knee Buckle
+      if (this.leftLegMesh && this.rightLegMesh) {
+        this.leftLegMesh.rotation.x = THREE.MathUtils.lerp(this.leftLegMesh.rotation.x, 0.45, Math.min(1.0, 6.5 * dt));
+        this.leftLegMesh.rotation.z = THREE.MathUtils.lerp(this.leftLegMesh.rotation.z, -0.4, Math.min(1.0, 6.5 * dt));
+        this.rightLegMesh.rotation.x = THREE.MathUtils.lerp(this.rightLegMesh.rotation.x, -0.25, Math.min(1.0, 6.5 * dt));
+        this.rightLegMesh.rotation.z = THREE.MathUtils.lerp(this.rightLegMesh.rotation.z, 0.4, Math.min(1.0, 6.5 * dt));
+      }
+
+      // 5. Dropped Weapon Tumbling & Ground Clatter
+      if (this.botWeaponMesh && this.isWeaponDropped) {
+        this.droppedWeaponVel.y -= 19.6 * dt;
+        this.droppedWeaponPos.addScaledVector(this.droppedWeaponVel, dt);
+        this.droppedWeaponRot.addScaledVector(this.droppedWeaponRotVel, dt);
+
+        if (this.droppedWeaponPos.y <= 0.08) {
+          this.droppedWeaponPos.y = 0.08;
+          if (this.droppedWeaponVel.y < -0.8) {
+            this.droppedWeaponVel.y = -this.droppedWeaponVel.y * 0.3;
+          } else {
+            this.droppedWeaponVel.y = 0;
+          }
+          this.droppedWeaponVel.x *= Math.max(0, 1.0 - 8.0 * dt);
+          this.droppedWeaponVel.z *= Math.max(0, 1.0 - 8.0 * dt);
+          this.droppedWeaponRotVel.multiplyScalar(Math.max(0, 1.0 - 6.0 * dt));
+        }
+
+        this.botWeaponMesh.position.copy(this.droppedWeaponPos);
+        this.botWeaponMesh.rotation.set(
+          this.droppedWeaponRot.x,
+          this.droppedWeaponRot.y,
+          this.droppedWeaponRot.z
+        );
+      }
+
+      this.group.position.copy(this.position);
       return;
     }
 
@@ -558,6 +717,21 @@ export class BotController {
       if (this.reloadTimer <= 0) {
         this.magAmmo = this.magCapacity;
         this.isReloading = false;
+      }
+    }
+
+    // 3D Spatial Directional Footsteps with Occlusion & Surface Detection
+    const isStepMoving = this.velocity.lengthSq() > 0.15;
+    if (isStepMoving) {
+      const isSprinting = this.velocity.length() > 4.2;
+      this.footstepTimer += dt * (isSprinting ? 2.8 : 1.8);
+      if (this.footstepTimer >= 1.0) {
+        this.footstepTimer = 0;
+        const isCatwalk = Math.abs(this.position.x) <= 8 && Math.abs(this.position.z) <= 7 && this.position.y > 2.0;
+        const isDirt = Math.abs(this.position.x) > 30 || Math.abs(this.position.z) > 30;
+        const surf = isCatwalk ? 'metal' : isDirt ? 'dirt' : 'concrete';
+        const isOccluded = !this.checkLineOfSight(playerPos);
+        soundManager.playSpatialFootstep(this.position, isSprinting, surf, isOccluded);
       }
     }
 
@@ -644,12 +818,15 @@ export class BotController {
     this.position.y = onCatwalk ? 3.8 : 0.0;
     this.velocity.y = 0;
 
-    // Spring decay for procedural flinch physics
+    // Spring decay for procedural flinch & weapon recoil physics
+    this.weaponRecoilKick += (0 - this.weaponRecoilKick) * Math.min(1.0, 22.0 * dt);
     this.flinchPitch += (0 - this.flinchPitch) * Math.min(1.0, 12.0 * dt);
     this.flinchYaw += (0 - this.flinchYaw) * Math.min(1.0, 14.0 * dt);
     this.flinchRoll += (0 - this.flinchRoll) * Math.min(1.0, 12.0 * dt);
     this.headFlinchPitch += (0 - this.headFlinchPitch) * Math.min(1.0, 16.0 * dt);
     this.headFlinchYaw += (0 - this.headFlinchYaw) * Math.min(1.0, 16.0 * dt);
+    this.flinchLegBuckle += (0 - this.flinchLegBuckle) * Math.min(1.0, 10.0 * dt);
+    this.flinchArmDisrupt += (0 - this.flinchArmDisrupt) * Math.min(1.0, 12.0 * dt);
 
     // Physical stumble impulse decay (Zero out Y to strictly prevent any vertical flight)
     this.flinchVelocity.y = 0;
@@ -660,27 +837,75 @@ export class BotController {
     this.flinchDisplacement.y = 0;
     if (this.aimDisruptionTimer > 0) this.aimDisruptionTimer -= dt;
 
-    // Apply procedural flinch transforms to sub-meshes
+    // Movement speed & locomotion cadence
+    const speedSq = this.velocity.x * this.velocity.x + this.velocity.z * this.velocity.z;
+    const moveSpeed = Math.sqrt(speedSq);
+    const isMoving = speedSq > 0.08;
+    const isCombat = this.state === 'attack' || this.state === 'cover' || this.isPeeking;
+
+    // 1. Torso & Spine Kinematics
+    if (this.torsoMesh) {
+      // Forward tilt during sprint/run, subtle breathing sway when standing
+      const forwardLean = isMoving ? Math.min(0.22, moveSpeed * 0.04) : 0;
+      const breathingSway = Math.sin(this.animTimer * 1.5) * 0.015;
+      this.torsoMesh.rotation.x = forwardLean + breathingSway + this.flinchPitch * 0.7;
+      this.torsoMesh.rotation.z = (isMoving ? Math.sin(this.animTimer * 0.5) * 0.03 : 0) + this.flinchRoll * 0.7;
+      this.torsoMesh.rotation.y = this.flinchYaw * 0.7;
+    }
+
+    // 2. Head Look & Flinch
     if (this.headMesh) {
       this.headMesh.rotation.x = this.headFlinchPitch;
       this.headMesh.rotation.y = this.headFlinchYaw;
-    }
-    if (this.torsoMesh) {
-      this.torsoMesh.rotation.x = this.flinchPitch * 0.6;
-      this.torsoMesh.rotation.z = this.flinchRoll * 0.6;
-      this.torsoMesh.rotation.y = this.flinchYaw * 0.6;
+      this.headMesh.rotation.z = this.flinchRoll * 0.4;
     }
 
-    // Walking animation for legs
+    // 3. Fluid Leg Locomotion with Natural Stride & Knee Lift + Flinch Stagger
     if (this.leftLegMesh && this.rightLegMesh) {
-      const isMoving = (this.velocity.x * this.velocity.x + this.velocity.z * this.velocity.z) > 0.01;
       if (isMoving) {
-        this.leftLegMesh.rotation.x = Math.sin(this.animTimer) * 0.5;
-        this.rightLegMesh.rotation.x = -Math.sin(this.animTimer) * 0.5;
+        const strideAngle = Math.sin(this.animTimer) * Math.min(0.7, 0.35 + moveSpeed * 0.08);
+        this.leftLegMesh.rotation.x = strideAngle + this.flinchLegBuckle * 0.6;
+        this.rightLegMesh.rotation.x = -strideAngle - this.flinchLegBuckle * 0.4;
       } else {
-        this.leftLegMesh.rotation.x = 0;
-        this.rightLegMesh.rotation.x = 0;
+        this.leftLegMesh.rotation.x = this.leftLegMesh.rotation.x * 0.85 + this.flinchLegBuckle * 0.5;
+        this.rightLegMesh.rotation.x = this.rightLegMesh.rotation.x * 0.85 - this.flinchLegBuckle * 0.3;
       }
+      this.leftLegMesh.rotation.z = -this.flinchRoll * 0.25;
+      this.rightLegMesh.rotation.z = this.flinchRoll * 0.25;
+    }
+
+    // 4. Arms & Weapon Posing (Aim Ready vs Stride Swing vs Reload Gesture + Flinch Disrupt)
+    if (this.leftArmMesh && this.rightArmMesh) {
+      if (this.isReloading) {
+        // Tactical Reloading Gesture: Lower weapon, left arm dips to chest pouch and slaps back
+        const reloadProgress = 1 - (this.reloadTimer / Math.max(0.1, this.reloadTotalTime));
+        const magPull = Math.sin(reloadProgress * Math.PI);
+        this.rightArmMesh.rotation.x = 0.45 - this.flinchArmDisrupt * 0.4;
+        this.leftArmMesh.rotation.x = 0.2 + magPull * 0.6 - this.flinchArmDisrupt * 0.4;
+        this.leftArmMesh.rotation.y = -0.3 + magPull * 0.4;
+      } else if (isCombat) {
+        // High-Ready Aim Stance with Recoil Kick & Flinch Disruption
+        const recoilOffset = this.weaponRecoilKick;
+        this.rightArmMesh.rotation.x = 0.75 + recoilOffset * 0.4 - this.flinchArmDisrupt * 0.6;
+        this.leftArmMesh.rotation.x = 0.55 + recoilOffset * 0.3 - this.flinchArmDisrupt * 0.5;
+        this.leftArmMesh.rotation.y = -0.4;
+      } else if (isMoving) {
+        // Natural arm counter-swing during patrol / sprint
+        const armSwing = Math.sin(this.animTimer) * 0.35;
+        this.rightArmMesh.rotation.x = 0.6 + armSwing * 0.5 - this.flinchArmDisrupt * 0.4;
+        this.leftArmMesh.rotation.x = 0.4 - armSwing * 0.5 - this.flinchArmDisrupt * 0.4;
+      } else {
+        // Idle combat patrol stance
+        this.rightArmMesh.rotation.x = 0.65 - this.flinchArmDisrupt * 0.4;
+        this.leftArmMesh.rotation.x = 0.45 - this.flinchArmDisrupt * 0.4;
+        this.leftArmMesh.rotation.y = -0.35;
+      }
+    }
+
+    // 5. Bot Weapon Recoil Kick & Jolt
+    if (this.botWeaponMesh) {
+      this.botWeaponMesh.position.z = 0.35 - this.weaponRecoilKick * 0.08;
+      this.botWeaponMesh.rotation.x = this.weaponRecoilKick * 0.35;
     }
 
     // Apply world position clamped firmly to ground
@@ -1021,7 +1246,7 @@ export class BotController {
       const dir = new THREE.Vector3().subVectors(playerChestTarget, origin).normalize();
       this.particles.emitMuzzleFlash(origin, dir);
       this.particles.spawnBulletTracer(origin, directCheck.hitPoint);
-      soundManager.playBotGunshot(this.weapon, dist);
+      soundManager.playSpatialGunshot(this.weapon, this.position, true);
       this.particles.emitImpactSparks(directCheck.hitPoint, new THREE.Vector3(0, 1, 0));
       return;
     }
@@ -1056,7 +1281,7 @@ export class BotController {
     if (!bulletCheck.isClear && bulletCheck.hitPoint) {
       this.particles.emitMuzzleFlash(origin, dir);
       this.particles.spawnBulletTracer(origin, bulletCheck.hitPoint);
-      soundManager.playBotGunshot(this.weapon, dist);
+      soundManager.playSpatialGunshot(this.weapon, this.position, true);
       this.particles.emitImpactSparks(bulletCheck.hitPoint, new THREE.Vector3(0, 1, 0));
 
       if (bulletCheck.hitObject) {
@@ -1073,9 +1298,20 @@ export class BotController {
 
     // Unobstructed shot
     this.lastShotTime = Date.now();
+    this.weaponRecoilKick = 0.45; // Physical muzzle kick
     this.particles.emitMuzzleFlash(origin, dir);
     this.particles.spawnBulletTracer(origin, aimTarget);
-    soundManager.playBotGunshot(this.weapon, dist);
+    soundManager.playSpatialGunshot(this.weapon, this.position, false);
+
+    if (!isAccurate) {
+      // Supersonic bullet flyby / snap-thump doppler effect near player
+      const bulletLine = new THREE.Line3(origin, aimTarget);
+      const closestPoint = new THREE.Vector3();
+      bulletLine.closestPointToPoint(playerPos, true, closestPoint);
+      if (closestPoint.distanceTo(playerPos) < 3.8) {
+        soundManager.playSupersonicFlyby(closestPoint, dir, 780);
+      }
+    }
 
     if (isAccurate) {
       let effectiveDmg = wpnCfg.damage;

@@ -1,11 +1,11 @@
 import * as THREE from 'three';
-import { GameSettings, HitmarkerEvent, WeaponCamo, WeaponType } from '../types';
+import { GameSettings, HitmarkerEvent, OpticType, ReticleColor, ReticleStyle, WeaponCamo, WeaponType } from '../types';
 import { soundManager } from './audio';
 import { ModelFactory } from './models';
 import { ParticleSystem } from './particles';
 import { TacticalMap } from './map';
 import { BotManager } from './ai';
-import { WEAPON_REGISTRY, WEAPON_VIEWMODEL_OFFSETS } from './weapons';
+import { DEFAULT_WEAPON_OPTICS, OPTIC_REGISTRY, WEAPON_REGISTRY, WEAPON_VIEWMODEL_OFFSETS } from './weapons';
 import { CollisionSystem } from './collision';
 import { GrenadeManager } from './grenades';
 import { TrainingManager } from './training';
@@ -25,16 +25,76 @@ export class FPSController {
   public velocity: THREE.Vector3 = new THREE.Vector3();
   public isGrounded: boolean = true;
   public isSprinting: boolean = false;
+  public isTacSprinting: boolean = false;
+  public tacSprintStamina: number = 1.0;
   public isCrouching: boolean = false;
   public isSliding: boolean = false;
+  public isDiving: boolean = false;
+  public isMantling: boolean = false;
+  public isMounted: boolean = false;
+  public isTacStance: boolean = false;
   public isAiming: boolean = false;
   public isReloading: boolean = false;
   public isShooting: boolean = false;
+  public isDrawing: boolean = false;
+
+  // Tactical Optic Attachment & Scope System
+  public equippedOptics: Record<WeaponType, OpticType> = { ...DEFAULT_WEAPON_OPTICS };
+  public opticReticleColors: Record<WeaponType, ReticleColor> = {
+    m4: 'red',
+    mp5: 'green',
+    sniper: 'red',
+    shotgun: 'red',
+    deagle: 'green',
+  };
+  public opticReticleStyles: Record<WeaponType, ReticleStyle> = {
+    m4: 'dot',
+    mp5: 'dot',
+    sniper: 'mildot_circle',
+    shotgun: 'dot',
+    deagle: 'dot',
+  };
+
+  // Steady Aim Breath & Variable Magnification
+  public isHoldingBreath: boolean = false;
+  public breathStamina: number = 1.0;
+  public isHyperventilating: boolean = false;
+  private lastHeartbeatTime: number = 0;
+  public opticZoomStepIndex: number = 0;
+  public isThermalEnabled: boolean = false;
+
+  // High-Precision Telemetry & Laser Rangefinder
+  public targetRangeMeters: number = 0;
+  public elevationHoldoverMil: number = 0;
+  public targetedEnemyId: string | null = null;
+  public scopeShadowOffsetX: number = 0;
+  public scopeShadowOffsetY: number = 0;
+  private prevYaw: number = 0;
+  private prevPitch: number = 0;
+  private angularVelYaw: number = 0;
+  private angularVelPitch: number = 0;
 
   public slideTimer: number = 0;
-  public slideDuration: number = 0.8;
+  public readonly slideDuration: number = 0.85;
+  public diveTimer: number = 0;
+  public readonly diveDuration: number = 0.65;
+  public drawTimer: number = 0;
+  public readonly drawDuration: number = 0.28;
   public currentEyeHeight: number = 1.7;
   public targetEyeHeight: number = 1.7;
+
+  // Ledge Mantle / Vault State
+  private mantleTimer: number = 0;
+  private readonly mantleDuration: number = 0.36;
+  private mantleStartPos: THREE.Vector3 = new THREE.Vector3();
+  private mantleTargetPos: THREE.Vector3 = new THREE.Vector3();
+  public mountType: 'top' | 'left' | 'right' | null = null;
+
+  // Dynamic Camera & Recoil Physics
+  private cameraRoll: number = 0;
+  private landingJolt: number = 0;
+  private lastShiftPressTime: number = 0;
+  private reloadAudioStage: number = 0;
 
   // Weapons & Ammo
   public currentWeapon: WeaponType = 'm4';
@@ -109,6 +169,27 @@ export class FPSController {
   // Key tracking
   private keys: Record<string, boolean> = {};
   public isLocked: boolean = false;
+  public isDead: boolean = false;
+
+  public setDeadState(dead: boolean) {
+    this.isDead = dead;
+    if (this.viewmodelRig) {
+      this.viewmodelRig.visible = !dead;
+    }
+    if (this.laserDot) this.laserDot.visible = false;
+    if (this.laserBeam) this.laserBeam.visible = false;
+    if (this.flashlight) this.flashlight.visible = false;
+    if (dead) {
+      this.isShooting = false;
+      this.isAiming = false;
+      this.isSprinting = false;
+      this.isTacSprinting = false;
+      this.isHoldingBreath = false;
+      this.targetEyeHeight = 0.35; // Collapse toward ground on elimination
+    } else {
+      this.targetEyeHeight = 1.7;
+    }
+  }
 
   // Event Callbacks
   public onHitmarker: (event: HitmarkerEvent) => void = () => {};
@@ -170,22 +251,41 @@ export class FPSController {
     this.flashlight.visible = true;
   }
 
-  public equipWeapon(type: WeaponType, camo: WeaponCamo = this.currentCamo) {
+  public equipWeapon(
+    type: WeaponType,
+    camo: WeaponCamo = this.currentCamo,
+    optic?: OpticType,
+    reticleColor?: ReticleColor,
+    reticleStyle?: ReticleStyle
+  ) {
     this.currentWeapon = type;
     this.currentCamo = camo;
+    if (optic) this.equippedOptics[type] = optic;
+    if (reticleColor) this.opticReticleColors[type] = reticleColor;
+    if (reticleStyle) this.opticReticleStyles[type] = reticleStyle;
+
+    const currentOptic = this.equippedOptics[type] || 'holo_553';
+    const currentColor = this.opticReticleColors[type] || 'red';
+    const currentStyle = this.opticReticleStyles[type] || 'dot';
+
+    this.opticZoomStepIndex = 0;
+    this.isHoldingBreath = false;
+    this.isHyperventilating = false;
     this.burstShotIndex = 0;
     this.isReloading = false;
     this.isInspecting = false;
     this.isMeleeing = false;
+    this.isDrawing = true;
+    this.drawTimer = this.drawDuration;
 
     if (this.weaponMesh) {
       this.viewmodelRig.remove(this.weaponMesh);
     }
 
-    this.weaponMesh = ModelFactory.createWeaponMesh(type, camo);
+    this.weaponMesh = ModelFactory.createWeaponMesh(type, camo, currentOptic, currentColor, currentStyle);
     this.viewmodelRig.add(this.weaponMesh);
 
-    soundManager.playReload(type, 'cock');
+    soundManager.playDrawWeapon();
     this.onAmmoChange(this.ammoInMag[type], this.ammoReserve[type]);
   }
 
@@ -193,14 +293,80 @@ export class FPSController {
     window.addEventListener('keydown', e => {
       this.keys[e.code] = true;
 
-      // Reload
-      if (e.code === 'KeyR' && !this.isReloading && !this.isMeleeing) {
-        this.reload();
+      // Tactical Stance Toggle (Z or B Key)
+      if (e.code === 'KeyZ' || e.code === 'KeyB') {
+        this.isTacStance = !this.isTacStance;
+        soundManager.playTacStanceToggle();
       }
 
-      // Quick Melee (V Key)
+      // Variable Zoom Optic / Thermal Toggle / Quick Melee (V Key)
       if (e.code === 'KeyV' && !this.isMeleeing) {
-        this.performMelee();
+        if (this.isAiming) {
+          const currentOptic = this.equippedOptics[this.currentWeapon] || 'holo_553';
+          const opticCfg = OPTIC_REGISTRY[currentOptic];
+          if (opticCfg?.variableZoomSteps && opticCfg.variableZoomSteps.length > 1) {
+            this.opticZoomStepIndex = (this.opticZoomStepIndex + 1) % opticCfg.variableZoomSteps.length;
+            soundManager.playOpticZoomClick();
+          } else if (opticCfg?.hasThermalVision) {
+            this.isThermalEnabled = !this.isThermalEnabled;
+            soundManager.playThermalToggle();
+          } else {
+            this.performMelee();
+          }
+        } else {
+          this.performMelee();
+        }
+      }
+
+      // Steady Aim / Hold Breath / Tactical Sprint Trigger (Shift Key)
+      if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') {
+        if (this.isAiming && this.breathStamina > 0.12 && !this.isHyperventilating) {
+          const currentOptic = this.equippedOptics[this.currentWeapon] || 'holo_553';
+          const opticCfg = OPTIC_REGISTRY[currentOptic];
+          if (opticCfg && (opticCfg.magnification >= 2.0 || opticCfg.variableZoomSteps)) {
+            this.isHoldingBreath = true;
+            soundManager.playInhale();
+          }
+        } else if (!this.isAiming && !this.isCrouching) {
+          const now = performance.now();
+          if (now - this.lastShiftPressTime < 380 && this.tacSprintStamina > 0.2) {
+            this.isTacSprinting = true;
+            soundManager.playTacSprintStart();
+          } else if (!this.isTacSprinting && this.tacSprintStamina > 0.4) {
+            this.isTacSprinting = true;
+            soundManager.playTacSprintStart();
+          }
+          this.lastShiftPressTime = now;
+        }
+      }
+
+      // Weapon Mount / Dismount Toggle (E Key)
+      if (e.code === 'KeyE' && !this.isMeleeing && !this.isMantling) {
+        this.toggleMount();
+      }
+
+      // Slide / Dive Cancel trigger: Pressing Crouch or Jump instantly cancels slide/dive and resets tac-sprint!
+      if (this.isSliding || this.isDiving) {
+        if (e.code === 'KeyC' || e.code === 'ControlLeft') {
+          this.cancelSlide(false);
+          return;
+        }
+        if (e.code === 'Space') {
+          this.cancelSlide(true);
+          return;
+        }
+      }
+
+      // Ledge Mantle / Vault trigger on Jump near obstacle
+      if (e.code === 'Space' && !this.isMantling && !this.isSliding && !this.isDiving) {
+        if (this.tryLedgeMantle()) {
+          return;
+        }
+      }
+
+      // Reload (R Key)
+      if (e.code === 'KeyR' && !this.isReloading && !this.isMeleeing) {
+        this.reload();
       }
 
       // Frag Grenade (G Key)
@@ -230,8 +396,19 @@ export class FPSController {
         }
       }
 
-      // Inspect Weapon (I Key)
-      if (e.code === 'KeyI' && !this.isReloading && !this.isShooting && !this.isMeleeing) {
+      // Variable Zoom Toggle (V Key) while Aiming
+      if (e.code === 'KeyV' && this.isAiming) {
+        const currentOptic = this.equippedOptics[this.currentWeapon] || 'holo_553';
+        const opticCfg = OPTIC_REGISTRY[currentOptic];
+        if (opticCfg?.variableZoomSteps && opticCfg.variableZoomSteps.length > 1) {
+          this.opticZoomStepIndex = (this.opticZoomStepIndex + 1) % opticCfg.variableZoomSteps.length;
+          soundManager.playOpticZoomClick();
+          return;
+        }
+      }
+
+      // Inspect Weapon (I Key or H Key)
+      if ((e.code === 'KeyI' || e.code === 'KeyH') && !this.isReloading && !this.isShooting && !this.isMeleeing) {
         this.inspectWeapon();
       }
 
@@ -247,14 +424,56 @@ export class FPSController {
         this.trainingManager.resetAllTargets();
       }
 
-      // Slide trigger (Crouch while sprinting)
-      if ((e.code === 'KeyC' || e.code === 'ControlLeft') && this.isSprinting && this.isGrounded && !this.isSliding) {
-        this.startSlide();
+      // Slide & Dolphin Dive triggers:
+      // While in Tactical Sprint -> Dolphin Dive!
+      // While in Standard Sprint -> Slide!
+      if ((e.code === 'KeyC' || e.code === 'ControlLeft') && this.isGrounded && !this.isSliding && !this.isDiving) {
+        if (this.isTacSprinting) {
+          this.startDolphinDive();
+        } else if (this.isSprinting) {
+          this.startSlide();
+        }
       }
     });
 
     window.addEventListener('keyup', e => {
       this.keys[e.code] = false;
+      if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') {
+        this.isTacSprinting = false;
+        if (this.isHoldingBreath) {
+          this.isHoldingBreath = false;
+          soundManager.playExhale();
+        }
+      }
+    });
+
+    // Mouse Wheel Weapon Switching / Optic Variable Zoom
+    this.domElement.addEventListener('wheel', e => {
+      if (!this.isLocked) return;
+
+      if (this.isAiming) {
+        const currentOptic = this.equippedOptics[this.currentWeapon] || 'holo_553';
+        const opticCfg = OPTIC_REGISTRY[currentOptic];
+        if (opticCfg?.variableZoomSteps && opticCfg.variableZoomSteps.length > 1) {
+          if (e.deltaY > 0) {
+            this.opticZoomStepIndex = (this.opticZoomStepIndex + 1) % opticCfg.variableZoomSteps.length;
+          } else {
+            this.opticZoomStepIndex = (this.opticZoomStepIndex - 1 + opticCfg.variableZoomSteps.length) % opticCfg.variableZoomSteps.length;
+          }
+          soundManager.playOpticZoomClick();
+          return;
+        }
+      }
+
+      const weapons: WeaponType[] = ['m4', 'mp5', 'sniper', 'shotgun', 'deagle'];
+      const currentIndex = weapons.indexOf(this.currentWeapon);
+      if (e.deltaY > 0) {
+        const nextIndex = (currentIndex + 1) % weapons.length;
+        this.equipWeapon(weapons[nextIndex]);
+      } else if (e.deltaY < 0) {
+        const prevIndex = (currentIndex - 1 + weapons.length) % weapons.length;
+        this.equipWeapon(weapons[prevIndex]);
+      }
     });
 
     this.domElement.addEventListener('mousedown', e => {
@@ -272,6 +491,7 @@ export class FPSController {
         this.performMelee();
       } else if (e.button === 2) {
         this.isAiming = true;
+        soundManager.playScopeRaise();
       }
     });
 
@@ -280,6 +500,13 @@ export class FPSController {
         this.isShooting = false;
       } else if (e.button === 2) {
         this.isAiming = false;
+        if (this.isHoldingBreath) {
+          this.isHoldingBreath = false;
+          soundManager.playExhale();
+        }
+        if (this.isMounted) {
+          this.isMounted = false;
+        }
       }
     });
 
@@ -306,12 +533,126 @@ export class FPSController {
     });
   }
 
+  private toggleMount() {
+    if (this.isMounted) {
+      this.isMounted = false;
+      this.mountType = null;
+      soundManager.playMount();
+      return;
+    }
+
+    const forwardDir = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw)).normalize();
+    const rightDir = new THREE.Vector3(forwardDir.z, 0, -forwardDir.x).normalize();
+    const eyePos = this.camera.position.clone();
+
+    // Check forward low barrier / cover
+    const rayForward = new THREE.Raycaster(eyePos.clone().add(new THREE.Vector3(0, -0.4, 0)), forwardDir, 0.1, 1.5);
+    const obstacleMeshes = this.map.obstacles.map(o => o.mesh);
+    const fwdHits = rayForward.intersectObjects(obstacleMeshes, true);
+
+    if (fwdHits.length > 0) {
+      this.isMounted = true;
+      this.mountType = 'top';
+      this.isAiming = true;
+      soundManager.playMount();
+      return;
+    }
+
+    // Check side corner mounting
+    const rayLeft = new THREE.Raycaster(eyePos, rightDir.clone().negate(), 0.1, 1.2);
+    const leftHits = rayLeft.intersectObjects(obstacleMeshes, true);
+    if (leftHits.length > 0) {
+      this.isMounted = true;
+      this.mountType = 'left';
+      this.isAiming = true;
+      soundManager.playMount();
+      return;
+    }
+
+    const rayRight = new THREE.Raycaster(eyePos, rightDir, 0.1, 1.2);
+    const rightHits = rayRight.intersectObjects(obstacleMeshes, true);
+    if (rightHits.length > 0) {
+      this.isMounted = true;
+      this.mountType = 'right';
+      this.isAiming = true;
+      soundManager.playMount();
+      return;
+    }
+  }
+
+  private startDolphinDive() {
+    this.isDiving = true;
+    this.isSliding = false;
+    this.diveTimer = this.diveDuration;
+    this.isGrounded = false;
+    this.velocity.y = 2.4; // Jump-launch trajectory forward
+    this.landingJolt = -0.12;
+    soundManager.playDolphinDive();
+    this.botManager?.notifySound(this.position, 25, false);
+  }
+
   private startSlide() {
     this.isSliding = true;
+    this.isDiving = false;
     this.slideTimer = this.slideDuration;
     soundManager.playSlide();
     this.particles.emitImpactSparks(this.position.clone().add(new THREE.Vector3(0, 0.1, 0)), new THREE.Vector3(0, 1, 0));
     this.botManager?.notifySound(this.position, 18, false);
+  }
+
+  private cancelSlide(jump: boolean = false) {
+    this.isSliding = false;
+    this.isDiving = false;
+    this.slideTimer = 0;
+    this.diveTimer = 0;
+    // Classic COD Slide Cancel reward: instantly resets full Tac-Sprint stamina!
+    this.tacSprintStamina = 1.0;
+    soundManager.playSlideCancel();
+
+    if (jump && this.isGrounded) {
+      this.velocity.y = 6.2;
+      this.isGrounded = false;
+      soundManager.playJump();
+    }
+  }
+
+  private tryLedgeMantle(): boolean {
+    const forwardDir = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw)).normalize();
+    const waistPos = this.position.clone().add(new THREE.Vector3(0, -0.6, 0));
+    const ray = new THREE.Raycaster(waistPos, forwardDir, 0.1, 1.4);
+
+    const obstacleMeshes = this.map.obstacles.map(o => o.mesh);
+    const hits = ray.intersectObjects(obstacleMeshes, true);
+
+    if (hits.length > 0) {
+      const hit = hits[0];
+      // Test ledge height by casting downward from above the hit point
+      const abovePos = hit.point.clone().add(new THREE.Vector3(0, 2.5, 0)).addScaledVector(forwardDir, 0.4);
+      const downRay = new THREE.Raycaster(abovePos, new THREE.Vector3(0, -1, 0), 0.1, 2.6);
+      const topHits = downRay.intersectObjects(obstacleMeshes, true);
+
+      if (topHits.length > 0) {
+        const topHit = topHits[0];
+        const ledgeElevation = topHit.point.y;
+        const currentFeet = this.position.y - this.currentEyeHeight;
+        const heightDiff = ledgeElevation - currentFeet;
+
+        if (heightDiff >= 0.65 && heightDiff <= 2.3) {
+          // Initiate smooth COD mantle/vault
+          this.isMantling = true;
+          this.mantleTimer = this.mantleDuration;
+          this.mantleStartPos.copy(this.position);
+          this.mantleTargetPos.set(
+            topHit.point.x + forwardDir.x * 0.45,
+            ledgeElevation + this.currentEyeHeight,
+            topHit.point.z + forwardDir.z * 0.45
+          );
+          soundManager.playMantle();
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   public reload() {
@@ -319,7 +660,7 @@ export class FPSController {
     const current = this.ammoInMag[this.currentWeapon];
     const reserve = this.ammoReserve[this.currentWeapon];
 
-    if (reserve <= 0 || this.isReloading || this.isMeleeing) return;
+    if (reserve <= 0 || this.isReloading || this.isMeleeing || this.isMantling) return;
 
     // Check tactical reload: magazine not empty, round already in chamber (+1 capacity enabled)
     const isTactical = current > 0;
@@ -331,25 +672,79 @@ export class FPSController {
     this.isInspecting = false;
     this.reloadDuration = isTactical ? (wpnCfg.tacticalReloadTimeSec || wpnCfg.reloadTimeSec * 0.7) : wpnCfg.reloadTimeSec;
     this.reloadTimer = this.reloadDuration;
+    this.reloadAudioStage = 0;
 
+    // Initial audio cue
     soundManager.playReload(this.currentWeapon, 'mag_out');
+
     if (isTactical) {
       setTimeout(() => {
         if (this.isReloading && this.isTacticalReload) {
           soundManager.playReload(this.currentWeapon, 'mag_in');
         }
-      }, (this.reloadDuration * 0.5) * 1000);
+      }, (this.reloadDuration * 0.48) * 1000);
     } else {
-      setTimeout(() => {
-        if (this.isReloading && !this.isTacticalReload) {
-          soundManager.playReload(this.currentWeapon, 'mag_in');
-        }
-      }, (this.reloadDuration * 0.45) * 1000);
-      setTimeout(() => {
-        if (this.isReloading && !this.isTacticalReload) {
-          soundManager.playReload(this.currentWeapon, 'cock');
-        }
-      }, (this.reloadDuration * 0.8) * 1000);
+      // Weapon-specific empty reload audio choreography
+      if (this.currentWeapon === 'mp5') {
+        // MP5 HK Slap reload sequence
+        setTimeout(() => {
+          if (this.isReloading && !this.isTacticalReload) {
+            soundManager.playReload(this.currentWeapon, 'mag_in');
+          }
+        }, (this.reloadDuration * 0.45) * 1000);
+        setTimeout(() => {
+          if (this.isReloading && !this.isTacticalReload) {
+            soundManager.playReload(this.currentWeapon, 'hk_slap');
+          }
+        }, (this.reloadDuration * 0.74) * 1000);
+      } else if (this.currentWeapon === 'deagle') {
+        // Desert Eagle slide rack
+        setTimeout(() => {
+          if (this.isReloading && !this.isTacticalReload) {
+            soundManager.playReload(this.currentWeapon, 'mag_in');
+          }
+        }, (this.reloadDuration * 0.44) * 1000);
+        setTimeout(() => {
+          if (this.isReloading && !this.isTacticalReload) {
+            soundManager.playReload(this.currentWeapon, 'slide_rack');
+          }
+        }, (this.reloadDuration * 0.72) * 1000);
+      } else if (this.currentWeapon === 'sniper') {
+        // AX-50 Bolt cycle
+        setTimeout(() => {
+          if (this.isReloading && !this.isTacticalReload) {
+            soundManager.playReload(this.currentWeapon, 'mag_in');
+          }
+        }, (this.reloadDuration * 0.46) * 1000);
+        setTimeout(() => {
+          if (this.isReloading && !this.isTacticalReload) {
+            soundManager.playReload(this.currentWeapon, 'bolt_cycle');
+          }
+        }, (this.reloadDuration * 0.78) * 1000);
+      } else if (this.currentWeapon === 'shotgun') {
+        // Model 680 Shell insertion & pump
+        setTimeout(() => {
+          if (this.isReloading) soundManager.playReload(this.currentWeapon, 'shell_insert');
+        }, (this.reloadDuration * 0.3) * 1000);
+        setTimeout(() => {
+          if (this.isReloading) soundManager.playReload(this.currentWeapon, 'shell_insert');
+        }, (this.reloadDuration * 0.5) * 1000);
+        setTimeout(() => {
+          if (this.isReloading) soundManager.playPumpAction();
+        }, (this.reloadDuration * 0.78) * 1000);
+      } else {
+        // M4 ping-pong bolt catch release
+        setTimeout(() => {
+          if (this.isReloading && !this.isTacticalReload) {
+            soundManager.playReload(this.currentWeapon, 'mag_in');
+          }
+        }, (this.reloadDuration * 0.44) * 1000);
+        setTimeout(() => {
+          if (this.isReloading && !this.isTacticalReload) {
+            soundManager.playReload(this.currentWeapon, 'cock');
+          }
+        }, (this.reloadDuration * 0.74) * 1000);
+      }
     }
   }
 
@@ -698,11 +1093,11 @@ export class FPSController {
 
   // --- FRAME UPDATE ---
   public update(dt: number) {
-    if (!this.isLocked) return;
+    if (!this.isLocked || this.isDead) return;
 
     // Automatic fire trigger
     const wpnCfg = WEAPON_REGISTRY[this.currentWeapon];
-    if (this.isShooting && wpnCfg.fullAuto) {
+    if (this.isShooting && wpnCfg.fullAuto && !this.isMantling && !this.isReloading) {
       this.tryShoot();
     }
 
@@ -745,10 +1140,171 @@ export class FPSController {
     // Update Tactical Laser Sight
     this.updateLaserSight();
 
-    // Camera FOV & ADS Zoom
-    const targetFov = this.isAiming ? wpnCfg.adsFov : this.settings.fieldOfView || 85;
-    this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, dt * 16);
+    // Camera FOV & ADS Zoom (with dynamic Optic magnification, Variable Zoom & Tac-Sprint)
+    const currentOptic = this.equippedOptics[this.currentWeapon] || 'holo_553';
+    const opticCfg = OPTIC_REGISTRY[currentOptic];
+    let targetFov = this.settings.fieldOfView || 85;
+
+    const isFullScope = this.isAiming && !this.isTacStance && (opticCfg?.hasFullScopeOverlay || opticCfg?.magnification >= 3.0);
+
+    if (this.isAiming) {
+      if (this.isTacStance) {
+        targetFov = targetFov - 10;
+      } else if (opticCfg?.variableZoomSteps && opticCfg.variableZoomSteps.length > 0) {
+        const mag = opticCfg.variableZoomSteps[this.opticZoomStepIndex % opticCfg.variableZoomSteps.length];
+        if (mag >= 8) {
+          targetFov = 12; // 10X Extreme Sniper Zoom
+        } else if (mag >= 4) {
+          targetFov = 24; // 4.5X Tactical Sniper Zoom
+        } else {
+          targetFov = Math.max(10, Math.round(75 / mag));
+        }
+      } else if (opticCfg?.id === 'acog_4x') {
+        targetFov = 28; // Crisp 4.0X Combat Optic
+      } else if (opticCfg?.id === 'thermal_flir' || opticCfg?.id === 'thermal_ir') {
+        targetFov = 30; // 3.5X Thermal Scope
+      } else if (opticCfg?.id === 'holo_553') {
+        targetFov = 52;
+      } else if (opticCfg?.id === 'reflex_dot' || opticCfg?.id === 'red_dot_micro') {
+        targetFov = 56;
+      } else if (opticCfg?.id === 'iron_sight') {
+        targetFov = 66;
+      } else if (opticCfg) {
+        targetFov = Math.max(12, Math.round(75 / opticCfg.magnification));
+      } else {
+        targetFov = wpnCfg.adsFov || 55;
+      }
+    } else if (this.isTacSprinting) {
+      targetFov += 12; // COD tactical sprint dynamic speed FOV expansion
+    } else if (this.isSprinting) {
+      targetFov += 6;
+    }
+
+    const adsSpeedMultiplier = opticCfg?.adsSpeedMultiplier || 1.0;
+    const adsRate = this.isAiming ? 20 * adsSpeedMultiplier : 18;
+    this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, dt * adsRate);
     this.camera.updateProjectionMatrix();
+
+    // Toggle Viewmodel and laser visibility for Scoped Optics
+    if (this.viewmodelRig) {
+      if (isFullScope) {
+        this.viewmodelRig.visible = false;
+        if (this.laserBeam) this.laserBeam.visible = false;
+      } else if (!this.isDead) {
+        this.viewmodelRig.visible = true;
+      }
+    }
+
+    // Steady Aim / Breath Mechanics Update
+    const holdingShift = this.keys['ShiftLeft'] || this.keys['ShiftRight'];
+    const canHoldBreath = this.isAiming && opticCfg && (opticCfg.magnification >= 2.0 || opticCfg.variableZoomSteps);
+
+    if (holdingShift && canHoldBreath && !this.isHyperventilating && this.breathStamina > 0.04) {
+      if (!this.isHoldingBreath) {
+        this.isHoldingBreath = true;
+        soundManager.playInhale();
+      }
+      this.breathStamina = Math.max(0, this.breathStamina - dt * 0.18);
+
+      // Low-stamina heartbeat audio cues
+      const now = performance.now();
+      const bpm = Math.min(165, Math.round(85 + (1 - this.breathStamina) * 80));
+      const intervalMs = (60 / bpm) * 1000;
+      if (this.breathStamina < 0.45 && now - this.lastHeartbeatTime >= intervalMs) {
+        this.lastHeartbeatTime = now;
+        soundManager.playHeartbeat(bpm);
+      }
+
+      if (this.breathStamina <= 0) {
+        this.isHoldingBreath = false;
+        this.isHyperventilating = true;
+        soundManager.playHeavyExhaleGasp();
+      }
+    } else {
+      if (this.isHoldingBreath) {
+        this.isHoldingBreath = false;
+        soundManager.playExhale();
+      }
+      const recoverySpeed = this.isHyperventilating ? 0.12 : 0.22;
+      this.breathStamina = Math.min(1.0, this.breathStamina + dt * recoverySpeed);
+      if (this.isHyperventilating && this.breathStamina >= 0.35) {
+        this.isHyperventilating = false;
+      }
+    }
+
+    // High-Precision Telemetry: Laser Rangefinder & Ballistic Holdover Drop
+    if (this.isAiming) {
+      const eyePos = this.camera.position.clone();
+      const forwardDir = this.camera.getWorldDirection(new THREE.Vector3());
+      const rangeRay = new THREE.Raycaster(eyePos, forwardDir, 0.2, 350);
+
+      const testMeshes: THREE.Object3D[] = [...this.map.obstacles.map(o => o.mesh)];
+      if (this.botManager) {
+        for (const b of this.botManager.bots) {
+          if (!b.isDead && b.group) testMeshes.push(b.group);
+        }
+      }
+      if (this.trainingManager) {
+        for (const d of this.trainingManager.dummies) {
+          if (!d.isDown && d.group) testMeshes.push(d.group);
+        }
+        for (const p of this.trainingManager.steelPlates) {
+          if (!p.isDown && p.group) testMeshes.push(p.group);
+        }
+      }
+
+      const hits = rangeRay.intersectObjects(testMeshes, true);
+      if (hits.length > 0) {
+        const hitDist = hits[0].distance;
+        this.targetRangeMeters = Math.round(hitDist * 10) / 10;
+        const bulletDropRate = wpnCfg.bulletDropRate || 1.0;
+        const muzzleVel = wpnCfg.muzzleVelocity || 800;
+        const flightTime = hitDist / muzzleVel;
+        const dropMeters = 0.5 * 9.81 * bulletDropRate * (flightTime * flightTime);
+        this.elevationHoldoverMil = Math.round((dropMeters / Math.max(1, hitDist)) * 1000 * 10) / 10;
+
+        let detectedEnemy: string | null = null;
+        if (this.botManager) {
+          for (const bot of this.botManager.bots) {
+            if (!bot.isDead) {
+              let cur: THREE.Object3D | null = hits[0].object;
+              while (cur) {
+                if (cur === bot.group) {
+                  detectedEnemy = bot.name;
+                  break;
+                }
+                cur = cur.parent;
+              }
+            }
+          }
+        }
+        this.targetedEnemyId = detectedEnemy;
+      } else {
+        this.targetRangeMeters = 0;
+        this.elevationHoldoverMil = 0;
+        this.targetedEnemyId = null;
+      }
+
+      // Parallax Scope Shadow calculation based on angular velocity and strafing
+      this.angularVelYaw = (this.yaw - this.prevYaw) / Math.max(0.001, dt);
+      this.angularVelPitch = (this.pitch - this.prevPitch) / Math.max(0.001, dt);
+      this.prevYaw = this.yaw;
+      this.prevPitch = this.pitch;
+
+      const strafeVel = this.velocity.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), -this.yaw);
+      const targetShadowX = Math.max(-1, Math.min(1, -this.angularVelYaw * 0.12 - strafeVel.x * 0.04));
+      const targetShadowY = Math.max(-1, Math.min(1, this.angularVelPitch * 0.12 - this.velocity.y * 0.02));
+      this.scopeShadowOffsetX = THREE.MathUtils.lerp(this.scopeShadowOffsetX, targetShadowX, dt * 16);
+      this.scopeShadowOffsetY = THREE.MathUtils.lerp(this.scopeShadowOffsetY, targetShadowY, dt * 16);
+    } else {
+      this.targetRangeMeters = 0;
+      this.elevationHoldoverMil = 0;
+      this.targetedEnemyId = null;
+      this.scopeShadowOffsetX = 0;
+      this.scopeShadowOffsetY = 0;
+      this.prevYaw = this.yaw;
+      this.prevPitch = this.pitch;
+    }
 
     // Spring-Damper Physics Recoil Integration
     const k = wpnCfg.recoilSpringRate; // Spring stiffness
@@ -777,18 +1333,40 @@ export class FPSController {
     this.swayInertiaX = THREE.MathUtils.lerp(this.swayInertiaX, 0, dt * 10);
     this.swayInertiaY = THREE.MathUtils.lerp(this.swayInertiaY, 0, dt * 10);
 
-    // Apply Camera Rotation with Recoil
+    // Decay Landing Jolt
+    this.landingJolt = THREE.MathUtils.lerp(this.landingJolt, 0, dt * 12);
+
+    // Calculate Dynamic Camera Roll (Strafe Banking + Sliding Lean)
+    let targetRoll = 0;
+    if (this.keys['KeyA'] || this.keys['ArrowLeft']) targetRoll += 0.038;
+    if (this.keys['KeyD'] || this.keys['ArrowRight']) targetRoll -= 0.038;
+    if (this.isSliding) targetRoll += 0.085;
+    this.cameraRoll = THREE.MathUtils.lerp(this.cameraRoll, targetRoll, dt * 10);
+
+    // Apply Camera Rotation with Recoil & Dynamic Roll
     this.camera.rotation.order = 'YXZ';
     this.camera.rotation.y = this.yaw + this.recoilYaw;
-    this.camera.rotation.x = this.pitch + this.recoilPitch;
-    this.camera.rotation.z = this.recoilRoll;
+    this.camera.rotation.x = this.pitch + this.recoilPitch + this.landingJolt;
+    this.camera.rotation.z = this.recoilRoll + this.cameraRoll;
 
     // Viewmodel Positioning, Breathing Sway, Reload & Melee Choreography
     this.updateViewmodel(dt);
+
+    // Update 3D Spatial Web Audio Listener orientation & velocity
+    const forwardDir = new THREE.Vector3();
+    this.camera.getWorldDirection(forwardDir);
+    soundManager.updateListener(this.camera.position, forwardDir, this.camera.up, this.velocity);
   }
 
   private updateLaserSight() {
-    if (!this.laserActive || !this.laserDot || !this.laserBeam) return;
+    if (!this.laserDot || !this.laserBeam) return;
+    const shouldBeActive = this.laserActive || this.isTacStance;
+
+    if (!shouldBeActive) {
+      this.laserDot.visible = false;
+      this.laserBeam.visible = false;
+      return;
+    }
 
     const eyePos = this.camera.position.clone();
     const forwardDir = this.camera.getWorldDirection(new THREE.Vector3());
@@ -808,31 +1386,99 @@ export class FPSController {
   }
 
   private updateMovement(dt: number) {
-    this.isCrouching = this.keys['KeyC'] || this.keys['ControlLeft'];
-    this.isSprinting = (this.keys['ShiftLeft'] || this.keys['ShiftRight']) && (this.keys['KeyW'] || this.keys['ArrowUp']) && !this.isCrouching && !this.isAiming;
+    // 1. Handle Ledge Mantle Interpolation
+    if (this.isMantling) {
+      this.mantleTimer -= dt;
+      const progress = Math.max(0, Math.min(1, 1 - (this.mantleTimer / this.mantleDuration)));
+      
+      // COD smooth S-curve vault: vertical lift first 45%, forward pull second 55%
+      if (progress < 0.45) {
+        const sub = progress / 0.45;
+        const liftCurve = Math.sin(sub * Math.PI * 0.5);
+        this.position.y = THREE.MathUtils.lerp(this.mantleStartPos.y, this.mantleTargetPos.y, liftCurve);
+        this.position.x = THREE.MathUtils.lerp(this.mantleStartPos.x, this.mantleTargetPos.x, liftCurve * 0.25);
+        this.position.z = THREE.MathUtils.lerp(this.mantleStartPos.z, this.mantleTargetPos.z, liftCurve * 0.25);
+      } else {
+        const sub = (progress - 0.45) / 0.55;
+        const easeOut = 1 - Math.pow(1 - sub, 3);
+        this.position.y = THREE.MathUtils.lerp(this.mantleStartPos.y, this.mantleTargetPos.y, 1);
+        this.position.x = THREE.MathUtils.lerp(this.mantleStartPos.x, this.mantleTargetPos.x, 0.25 + 0.75 * easeOut);
+        this.position.z = THREE.MathUtils.lerp(this.mantleStartPos.z, this.mantleTargetPos.z, 0.25 + 0.75 * easeOut);
+      }
 
-    // Eye height lerp
-    this.targetEyeHeight = this.isSliding ? 0.7 : this.isCrouching ? 0.95 : 1.7;
-    this.currentEyeHeight = THREE.MathUtils.lerp(this.currentEyeHeight, this.targetEyeHeight, dt * 14);
+      this.velocity.set(0, 0, 0);
+      this.camera.position.copy(this.position);
+
+      if (this.mantleTimer <= 0) {
+        this.isMantling = false;
+        this.isGrounded = true;
+      }
+      return;
+    }
+
+    this.isCrouching = this.keys['KeyC'] || this.keys['ControlLeft'];
+    
+    // Sprint and Tactical Sprint state resolution
+    const movingForward = (this.keys['KeyW'] || this.keys['ArrowUp']) && !this.keys['KeyS'] && !this.keys['ArrowDown'];
+    const holdingShift = this.keys['ShiftLeft'] || this.keys['ShiftRight'];
+
+    if (holdingShift && movingForward && !this.isCrouching && !this.isAiming) {
+      if (this.isTacSprinting && this.tacSprintStamina > 0.05) {
+        // Continue Tactical Sprint
+        this.tacSprintStamina = Math.max(0, this.tacSprintStamina - dt * 0.28);
+        this.isSprinting = true;
+      } else {
+        // Standard Sprint
+        this.isTacSprinting = false;
+        this.isSprinting = true;
+        // Stamina slowly recovers if not in tac sprint
+        this.tacSprintStamina = Math.min(1.0, this.tacSprintStamina + dt * 0.15);
+      }
+    } else {
+      this.isSprinting = false;
+      this.isTacSprinting = false;
+      // Stamina recharges rapidly when walking or resting
+      this.tacSprintStamina = Math.min(1.0, this.tacSprintStamina + dt * 0.55);
+    }
+
+    // Eye height lerp (Dive, Slide, Crouch, Stand)
+    this.targetEyeHeight = this.isDiving ? 0.38 : this.isSliding ? 0.65 : this.isCrouching ? 0.95 : 1.7;
+    this.currentEyeHeight = THREE.MathUtils.lerp(this.currentEyeHeight, this.targetEyeHeight, dt * 16);
 
     let baseSpeed = 6.0;
-    if (this.isAiming) baseSpeed = 3.0;
+    if (this.isAiming) baseSpeed = this.isTacStance ? 4.2 : 3.0;
     else if (this.isCrouching) baseSpeed = 3.2;
-    else if (this.isSprinting) baseSpeed = 9.5;
+    else if (this.isTacSprinting) baseSpeed = 13.0; // COD super sprint velocity
+    else if (this.isSprinting) baseSpeed = 9.2;
 
-    if (this.isSliding) {
+    if (this.isDiving) {
+      this.diveTimer -= dt;
+      const diveRatio = Math.max(0, this.diveTimer / this.diveDuration);
+      baseSpeed = 15.5 * Math.pow(diveRatio, 0.9);
+      if (this.diveTimer <= 0) {
+        this.isDiving = false;
+        this.isCrouching = true;
+      }
+    } else if (this.isSliding) {
       this.slideTimer -= dt;
-      baseSpeed = 12.0 * (this.slideTimer / this.slideDuration);
+      // Exponential decay slide velocity starting from 14.0 m/s
+      const slideRatio = Math.max(0, this.slideTimer / this.slideDuration);
+      baseSpeed = 14.0 * Math.pow(slideRatio, 1.2);
       if (this.slideTimer <= 0) {
         this.isSliding = false;
       }
     }
 
     const moveVector = new THREE.Vector3();
-    if (this.keys['KeyW'] || this.keys['ArrowUp']) moveVector.z -= 1;
-    if (this.keys['KeyS'] || this.keys['ArrowDown']) moveVector.z += 1;
-    if (this.keys['KeyA'] || this.keys['ArrowLeft']) moveVector.x -= 1;
-    if (this.keys['KeyD'] || this.keys['ArrowRight']) moveVector.x += 1;
+    if (this.isDiving) {
+      // In dive, player commits to forward camera trajectory
+      moveVector.z -= 1;
+    } else {
+      if (this.keys['KeyW'] || this.keys['ArrowUp']) moveVector.z -= 1;
+      if (this.keys['KeyS'] || this.keys['ArrowDown']) moveVector.z += 1;
+      if (this.keys['KeyA'] || this.keys['ArrowLeft']) moveVector.x -= 1;
+      if (this.keys['KeyD'] || this.keys['ArrowRight']) moveVector.x += 1;
+    }
 
     if (moveVector.lengthSq() > 0) {
       moveVector.normalize();
@@ -840,13 +1486,17 @@ export class FPSController {
       this.velocity.x = moveVector.x * baseSpeed;
       this.velocity.z = moveVector.z * baseSpeed;
 
-      // Footstep audio
-      this.footstepTimer += dt * (this.isSprinting ? 2.8 : 1.8);
-      if (this.footstepTimer >= 1.0 && this.isGrounded && !this.isSliding) {
+      // Footstep audio (frequency increases with tactical sprint)
+      const stepFreq = this.isTacSprinting ? 3.6 : this.isSprinting ? 2.8 : 1.8;
+      this.footstepTimer += dt * stepFreq;
+      if (this.footstepTimer >= 1.0 && this.isGrounded && !this.isSliding && !this.isDiving) {
         this.footstepTimer = 0;
-        soundManager.playFootstep(this.isSprinting);
-        if (this.isSprinting) {
-          this.botManager?.notifySound(this.position, 16, false);
+        const isCatwalk = Math.abs(this.position.x) <= 8 && Math.abs(this.position.z) <= 7 && this.position.y > 2.0;
+        const isDirt = Math.abs(this.position.x) > 30 || Math.abs(this.position.z) > 30;
+        const surf = isCatwalk ? 'metal' : isDirt ? 'dirt' : 'concrete';
+        soundManager.playFootstep(this.isTacSprinting || this.isSprinting, surf);
+        if (this.isTacSprinting || this.isSprinting) {
+          this.botManager?.notifySound(this.position, this.isTacSprinting ? 22 : 16, false);
         }
       }
     } else {
@@ -855,14 +1505,14 @@ export class FPSController {
     }
 
     // Jump & Gravity
-    if (this.keys['Space'] && this.isGrounded && !this.isSliding) {
+    if (this.keys['Space'] && this.isGrounded && !this.isSliding && !this.isDiving) {
       this.velocity.y = 6.2;
       this.isGrounded = false;
       soundManager.playJump();
     }
 
     if (!this.isGrounded) {
-      this.velocity.y -= 18.0 * dt;
+      this.velocity.y -= (this.isDiving ? 14.5 : 19.5) * dt;
     }
 
     // Integrate Position
@@ -872,8 +1522,15 @@ export class FPSController {
 
     // Floor collision
     if (this.position.y <= this.currentEyeHeight) {
-      if (!this.isGrounded && this.velocity.y < -4) {
-        soundManager.playLand();
+      if (!this.isGrounded && (this.velocity.y < -3 || this.isDiving)) {
+        if (this.isDiving) {
+          soundManager.playLand();
+          this.landingJolt = -0.14; // Heavy chest thud on floor impact
+          this.particles.emitImpactSparks(this.position.clone().add(new THREE.Vector3(0, 0.05, 0)), new THREE.Vector3(0, 1, 0));
+        } else {
+          soundManager.playLand();
+          this.landingJolt = -0.06; // Camera dip on hard impact
+        }
       }
       this.position.y = this.currentEyeHeight;
       this.velocity.y = 0;
@@ -895,36 +1552,142 @@ export class FPSController {
 
     const wpnCfg = WEAPON_REGISTRY[this.currentWeapon];
     const offsetCfg = WEAPON_VIEWMODEL_OFFSETS[this.currentWeapon];
-    let targetOffset = this.isAiming ? { ...offsetCfg.ads } : this.isSprinting ? { ...offsetCfg.sprint } : { ...offsetCfg.hip };
+    const currentOptic = this.equippedOptics[this.currentWeapon] || 'holo_553';
+    
+    // Choose base target offset based on active stance
+    let targetOffset = { ...offsetCfg.hip };
+    if (this.isMounted) {
+      // Stabilized Weapon Mount against cover
+      if (this.mountType === 'top') {
+        targetOffset = {
+          x: 0,
+          y: -0.06,
+          z: -0.22,
+          rx: 0.02,
+          ry: 0,
+          rz: 0,
+        };
+      } else if (this.mountType === 'left') {
+        targetOffset = {
+          x: -0.12,
+          y: -0.12,
+          z: -0.24,
+          rx: 0.02,
+          ry: 0.15,
+          rz: 0.22, // Canted side-mount
+        };
+      } else {
+        targetOffset = {
+          x: 0.12,
+          y: -0.12,
+          z: -0.24,
+          rx: 0.02,
+          ry: -0.15,
+          rz: -0.22,
+        };
+      }
+    } else if (this.isAiming) {
+      if (this.isTacStance) {
+        // Tactical Stance (Canted Weapon ADS)
+        targetOffset = {
+          x: 0.06,
+          y: -0.16,
+          z: -0.32,
+          rx: 0.05,
+          ry: 0.22,
+          rz: -0.68, // Canted ~39 degrees
+        };
+      } else {
+        targetOffset = { ...offsetCfg.ads };
+        // Optic elevation alignment: aligns sight reticle / front post directly with camera optical axis
+        if (currentOptic === 'reflex_dot' || currentOptic === 'red_dot_micro') {
+          if (this.currentWeapon === 'm4') targetOffset.y = -0.128;
+          else if (this.currentWeapon === 'mp5') targetOffset.y = -0.108;
+          else if (this.currentWeapon === 'shotgun') targetOffset.y = -0.118;
+          else if (this.currentWeapon === 'deagle') targetOffset.y = -0.133;
+          else if (this.currentWeapon === 'sniper') targetOffset.y = -0.155;
+        } else if (currentOptic === 'holo_553') {
+          if (this.currentWeapon === 'm4') targetOffset.y = -0.132;
+          else if (this.currentWeapon === 'mp5') targetOffset.y = -0.112;
+          else if (this.currentWeapon === 'shotgun') targetOffset.y = -0.122;
+          else if (this.currentWeapon === 'deagle') targetOffset.y = -0.135;
+          else if (this.currentWeapon === 'sniper') targetOffset.y = -0.158;
+        } else if (currentOptic === 'iron_sight') {
+          if (this.currentWeapon === 'm4') targetOffset.y = -0.098;
+          else if (this.currentWeapon === 'mp5') targetOffset.y = -0.088;
+          else if (this.currentWeapon === 'shotgun') targetOffset.y = -0.065;
+          else if (this.currentWeapon === 'deagle') targetOffset.y = -0.085;
+          else if (this.currentWeapon === 'sniper') targetOffset.y = -0.135;
+        }
+      }
+    } else if (this.isDiving) {
+      // Dolphin Dive Weapon Position: pushed forward horizontally flat against chest
+      targetOffset = {
+        x: 0.05,
+        y: -0.32,
+        z: -0.42,
+        rx: 0.35,
+        ry: 0.05,
+        rz: -0.18,
+      };
+    } else if (this.isTacSprinting) {
+      // MW-Style Tactical Sprint High-Ready Weapon Position
+      targetOffset = {
+        x: 0.18,
+        y: -0.26,
+        z: -0.28,
+        rx: 0.65,
+        ry: -0.35,
+        rz: 0.48, // Gun pointed straight up
+      };
+    } else if (this.isSprinting) {
+      targetOffset = { ...offsetCfg.sprint };
+    }
 
-    // Dual-harmonic breathing sway
-    this.swayTime += dt * wpnCfg.swaySpeed;
-    const swayAmp = this.isAiming ? wpnCfg.swayAmplitude * 0.15 : wpnCfg.swayAmplitude;
+    // Dual-harmonic breathing sway (heavily suppressed if mounted or holding breath)
+    const opticCfg = OPTIC_REGISTRY[currentOptic];
+    const opticSwayMult = opticCfg?.swayMultiplier || 1.0;
+    const steadyAimMult = this.isHoldingBreath ? 0.05 : (this.isHyperventilating ? 2.2 : 1.0);
+
+    this.swayTime += dt * (this.isMounted ? wpnCfg.swaySpeed * 0.3 : (this.isHoldingBreath ? wpnCfg.swaySpeed * 0.15 : wpnCfg.swaySpeed));
+    const baseSwayAmp = this.isMounted ? wpnCfg.swayAmplitude * 0.08 : this.isAiming ? (this.isTacStance ? wpnCfg.swayAmplitude * 0.35 : wpnCfg.swayAmplitude * 0.15) : wpnCfg.swayAmplitude;
+    const swayAmp = baseSwayAmp * opticSwayMult * steadyAimMult;
     const swayX = Math.cos(this.swayTime * 0.8) * swayAmp;
     const swayY = Math.sin(this.swayTime * 1.6) * swayAmp;
 
-    // Walk & sprint bobbing
+    // Walk, sprint, and tac-sprint bobbing
     const isMoving = this.velocity.x !== 0 || this.velocity.z !== 0;
-    this.bobTimer += dt * (this.isSprinting ? 14 : isMoving ? 9 : 2);
-    const bobX = Math.cos(this.bobTimer * 0.5) * (this.isAiming ? 0.0006 : isMoving ? 0.015 : 0.003);
-    const bobY = Math.sin(this.bobTimer) * (this.isAiming ? 0.0006 : isMoving ? 0.018 : 0.004);
+    const bobSpeed = this.isTacSprinting ? 18 : this.isSprinting ? 14 : isMoving ? 9 : 2;
+    this.bobTimer += dt * bobSpeed;
+
+    const bobMult = this.isMounted ? 0.0002 : this.isAiming ? 0.0006 : this.isTacSprinting ? 0.028 : isMoving ? 0.015 : 0.003;
+    const bobX = Math.cos(this.bobTimer * 0.5) * bobMult;
+    const bobY = Math.sin(this.bobTimer) * (bobMult * 1.2);
 
     // Strafe banking roll
     const strafeRoll = (this.keys['KeyA'] || this.keys['ArrowLeft']) ? 0.04 : (this.keys['KeyD'] || this.keys['ArrowRight']) ? -0.04 : 0;
 
-    // --- PROCEDURAL ANIMATIONS (RELOAD, MELEE, INSPECT) ---
+    // --- PROCEDURAL ANIMATIONS (RELOAD, MELEE, INSPECT, MANTLE, DRAW) ---
     let reloadOffX = 0, reloadOffY = 0, reloadOffZ = 0;
     let reloadRotX = 0, reloadRotY = 0, reloadRotZ = 0;
 
-    // Find magazine and slide sub-meshes for dynamic part translation
+    // Find all dynamic mechanical sub-meshes
     let magMesh: THREE.Object3D | undefined;
     let slideMesh: THREE.Object3D | undefined;
     let pumpMesh: THREE.Object3D | undefined;
+    let boltCarrierMesh: THREE.Object3D | undefined;
+    let boltHandleMesh: THREE.Object3D | undefined;
+    let cockingHandleMesh: THREE.Object3D | undefined;
+    let boltCatchMesh: THREE.Object3D | undefined;
 
     this.weaponMesh.traverse(child => {
       if (child.name === 'magazine') magMesh = child;
       if (child.name === 'pistol_slide') slideMesh = child;
       if (child.name === 'pump_handle') pumpMesh = child;
+      if (child.name === 'bolt_carrier') boltCarrierMesh = child;
+      if (child.name === 'bolt_handle') boltHandleMesh = child;
+      if (child.name === 'cocking_handle') cockingHandleMesh = child;
+      if (child.name === 'bolt_catch') boltCatchMesh = child;
     });
 
     if (this.isReloading) {
@@ -967,111 +1730,204 @@ export class FPSController {
           reloadRotZ = 0.06 * (1 - sub);
         }
       } else {
-        // --- FULL EMPTY RELOAD (MAG DROP + INSERT + BOLT / SLIDE / PUMP RACK) ---
-        if (this.currentWeapon === 'sniper') {
-          // SNIPER BOLT-ACTION FULL RELOAD
+        // --- FULL EMPTY RELOAD (MAG DROP + INSERT + BOLT / SLIDE / HK SLAP / PUMP RACK) ---
+        if (this.currentWeapon === 'mp5') {
+          // MP5 ICONIC HK SLAP FULL RELOAD
+          if (p < 0.22) {
+            // Phase 1: Left hand pulls cocking handle back and locks up into detent notch
+            const sub = p / 0.22;
+            reloadRotX = -0.12 * sub;
+            reloadRotZ = 0.32 * sub;
+            reloadOffZ = -0.04 * sub;
+            if (cockingHandleMesh) {
+              cockingHandleMesh.position.z = -0.08 * sub;
+              cockingHandleMesh.position.y = 0.02 * sub;
+            }
+          } else if (p < 0.48) {
+            // Phase 2: Discard empty 9mm mag, retrieve fresh curved steel mag
+            const sub = (p - 0.22) / 0.26;
+            reloadOffY = -0.12 * sub;
+            reloadRotX = -0.12 - 0.1 * sub;
+            reloadRotZ = 0.32 + 0.08 * sub;
+            if (magMesh) magMesh.position.y = -0.42 * sub;
+            if (cockingHandleMesh) {
+              cockingHandleMesh.position.z = -0.08;
+              cockingHandleMesh.position.y = 0.02;
+            }
+          } else if (p < 0.72) {
+            // Phase 3: Slap fresh 9mm mag into magwell with positive click
+            const sub = (p - 0.48) / 0.24;
+            reloadOffY = -0.12 + 0.06 * Math.sin(sub * Math.PI);
+            reloadRotX = -0.22 + 0.12 * sub;
+            reloadRotZ = 0.40 - 0.15 * sub;
+            if (magMesh) magMesh.position.y = -0.42 * (1 - sub);
+            if (cockingHandleMesh) {
+              cockingHandleMesh.position.z = -0.08;
+              cockingHandleMesh.position.y = 0.02;
+            }
+          } else if (p < 0.86) {
+            // Phase 4: THE HK SLAP! Downward palm chop releases handle into battery
+            const sub = (p - 0.72) / 0.14;
+            if (magMesh) magMesh.position.y = 0;
+            reloadOffY = -0.06 + 0.04 * Math.sin(sub * Math.PI);
+            reloadRotX = -0.10 + 0.08 * Math.sin(sub * Math.PI);
+            reloadRotZ = 0.25 * (1 - sub);
+            if (cockingHandleMesh) {
+              cockingHandleMesh.position.z = -0.08 * (1 - sub);
+              cockingHandleMesh.position.y = 0.02 * (1 - sub);
+            }
+          } else {
+            // Phase 5: Settle to ready
+            const sub = (p - 0.86) / 0.14;
+            if (magMesh) magMesh.position.y = 0;
+            if (cockingHandleMesh) cockingHandleMesh.position.set(0, 0, 0);
+            reloadOffY = -0.04 * (1 - sub);
+            reloadRotX = -0.04 * (1 - sub);
+          }
+        } else if (this.currentWeapon === 'sniper') {
+          // AX-50 BOLT-ACTION FULL RELOAD
           if (p < 0.20) {
-            // Unlock & Pull Bolt Handle Back
+            // Unlock & Pull Bolt Handle Back (casing ejects)
             const sub = p / 0.20;
             reloadRotX = 0.08 * sub;
             reloadRotZ = -0.15 * sub;
-            if (slideMesh) slideMesh.position.z = -0.12 * sub;
-          } else if (p < 0.45) {
+            if (boltCarrierMesh) boltCarrierMesh.position.z = -0.14 * sub;
+            if (boltHandleMesh) {
+              boltHandleMesh.rotation.z = -0.35 * sub;
+              boltHandleMesh.position.z = -0.14 * sub;
+            }
+          } else if (p < 0.46) {
             // Eject empty box magazine
-            const sub = (p - 0.20) / 0.25;
-            reloadOffY = -0.12 * sub;
+            const sub = (p - 0.20) / 0.26;
+            reloadOffY = -0.14 * sub;
             reloadRotX = 0.08 - 0.25 * sub;
             reloadRotZ = -0.15 + 0.35 * sub;
-            if (slideMesh) slideMesh.position.z = -0.12;
-            if (magMesh) magMesh.position.y = -0.4 * sub;
-          } else if (p < 0.70) {
-            // Insert fresh high-caliber magazine
-            const sub = (p - 0.45) / 0.25;
-            reloadOffY = -0.12 + 0.06 * Math.sin(sub * Math.PI);
+            if (boltCarrierMesh) boltCarrierMesh.position.z = -0.14;
+            if (boltHandleMesh) {
+              boltHandleMesh.rotation.z = -0.35;
+              boltHandleMesh.position.z = -0.14;
+            }
+            if (magMesh) magMesh.position.y = -0.45 * sub;
+          } else if (p < 0.74) {
+            // Insert fresh high-caliber .50 BMG magazine
+            const sub = (p - 0.46) / 0.28;
+            reloadOffY = -0.14 + 0.07 * Math.sin(sub * Math.PI);
             reloadRotX = -0.17 + 0.15 * sub;
             reloadRotZ = 0.20 - 0.15 * sub;
-            if (slideMesh) slideMesh.position.z = -0.12;
-            if (magMesh) magMesh.position.y = -0.4 * (1 - sub);
-          } else if (p < 0.88) {
+            if (boltCarrierMesh) boltCarrierMesh.position.z = -0.14;
+            if (boltHandleMesh) {
+              boltHandleMesh.rotation.z = -0.35;
+              boltHandleMesh.position.z = -0.14;
+            }
+            if (magMesh) magMesh.position.y = -0.45 * (1 - sub);
+          } else if (p < 0.90) {
             // Slam Bolt Forward & Lock Down
-            const sub = (p - 0.70) / 0.18;
+            const sub = (p - 0.74) / 0.16;
             if (magMesh) magMesh.position.y = 0;
             reloadOffZ = 0.04 * Math.sin(sub * Math.PI);
             reloadRotX = 0.05 * (1 - sub);
             reloadRotZ = -0.12 * (1 - sub);
-            if (slideMesh) slideMesh.position.z = -0.12 * (1 - sub);
+            if (boltCarrierMesh) boltCarrierMesh.position.z = -0.14 * (1 - sub);
+            if (boltHandleMesh) {
+              boltHandleMesh.rotation.z = -0.35 * (1 - sub);
+              boltHandleMesh.position.z = -0.14 * (1 - sub);
+            }
           } else {
             // Ready stance
-            const sub = (p - 0.88) / 0.12;
+            const sub = (p - 0.90) / 0.10;
             if (magMesh) magMesh.position.y = 0;
-            if (slideMesh) slideMesh.position.z = 0;
+            if (boltCarrierMesh) boltCarrierMesh.position.z = 0;
+            if (boltHandleMesh) {
+              boltHandleMesh.rotation.z = 0;
+              boltHandleMesh.position.z = 0;
+            }
             reloadOffY = -0.04 * (1 - sub);
           }
         } else if (this.currentWeapon === 'shotgun') {
           // SHOTGUN TACTICAL SHELL LOAD & PUMP ACTION
-          if (p < 0.30) {
-            // Roll shotgun to expose loading gate
-            const sub = p / 0.30;
+          if (p < 0.25) {
+            // Roll shotgun to expose loading elevator gate
+            const sub = p / 0.25;
             reloadOffY = -0.06 * sub;
             reloadRotX = -0.15 * sub;
-            reloadRotZ = 0.45 * sub;
-          } else if (p < 0.70) {
-            // Load shells into magazine tube
-            const sub = (p - 0.30) / 0.40;
-            reloadOffZ = 0.03 * Math.sin(sub * Math.PI * 2);
-            reloadRotX = -0.15 + 0.08 * Math.sin(sub * Math.PI * 2);
-            reloadRotZ = 0.45;
+            reloadRotZ = 0.48 * sub;
+          } else if (p < 0.72) {
+            // Push 12-gauge shells into tube
+            const sub = (p - 0.25) / 0.47;
+            reloadOffZ = 0.03 * Math.sin(sub * Math.PI * 3);
+            reloadRotX = -0.15 + 0.08 * Math.sin(sub * Math.PI * 3);
+            reloadRotZ = 0.48;
           } else if (p < 0.90) {
             // Heavy pump rack back and forward
-            const sub = (p - 0.70) / 0.20;
-            reloadRotZ = 0.45 * (1 - sub);
-            reloadOffZ = -0.05 * Math.sin(sub * Math.PI);
+            const sub = (p - 0.72) / 0.18;
+            reloadRotZ = 0.48 * (1 - sub);
+            reloadOffZ = -0.06 * Math.sin(sub * Math.PI);
             if (pumpMesh) pumpMesh.position.z = -0.14 * Math.sin(sub * Math.PI);
           } else {
             const sub = (p - 0.90) / 0.10;
             if (pumpMesh) pumpMesh.position.z = 0;
             reloadOffY = -0.03 * (1 - sub);
           }
+        } else if (this.currentWeapon === 'deagle') {
+          // DESERT EAGLE .50 GS SLIDE RACK FULL RELOAD
+          if (p < 0.24) {
+            const sub = p / 0.24;
+            reloadOffY = -0.10 * sub;
+            reloadRotX = -0.20 * sub;
+            reloadRotZ = 0.35 * sub;
+            if (magMesh) magMesh.position.y = -0.38 * sub;
+          } else if (p < 0.56) {
+            const sub = (p - 0.24) / 0.32;
+            reloadOffY = -0.10 + 0.05 * Math.sin(sub * Math.PI);
+            reloadRotX = -0.20 + 0.12 * sub;
+            reloadRotZ = 0.35 - 0.15 * sub;
+            if (magMesh) magMesh.position.y = -0.38 * (1 - sub);
+          } else if (p < 0.84) {
+            // Left hand reaches over slide, racks rearward and releases slide lock
+            const sub = (p - 0.56) / 0.28;
+            if (magMesh) magMesh.position.y = 0;
+            reloadOffZ = -0.05 * Math.sin(sub * Math.PI);
+            reloadRotX = -0.08 * (1 - sub) + 0.06 * Math.sin(sub * Math.PI);
+            reloadRotZ = 0.20 * (1 - sub);
+            if (slideMesh) slideMesh.position.z = -0.07 * Math.sin(sub * Math.PI);
+          } else {
+            const sub = (p - 0.84) / 0.16;
+            if (magMesh) magMesh.position.y = 0;
+            if (slideMesh) slideMesh.position.z = 0;
+            reloadOffY = -0.04 * (1 - sub);
+          }
         } else {
-          // ASSAULT RIFLE / SMG / DEAGLE FULL EMPTY RELOAD
+          // M4A1 BOLT CATCH SLAP FULL RELOAD
           if (p < 0.22) {
-            // Phase 1: Cant weapon left, discard spent magazine
             const sub = p / 0.22;
             reloadOffY = -0.11 * Math.sin(sub * Math.PI * 0.5);
             reloadRotX = -0.22 * sub;
             reloadRotY = 0.06 * sub;
             reloadRotZ = 0.38 * sub;
             if (magMesh) magMesh.position.y = -0.42 * sub;
-          } else if (p < 0.58) {
-            // Phase 2: Insert fresh mag with forceful upward palm thrust
-            const sub = (p - 0.22) / 0.36;
+          } else if (p < 0.56) {
+            const sub = (p - 0.22) / 0.34;
             reloadOffY = -0.11 + 0.05 * Math.sin(sub * Math.PI);
             reloadRotX = -0.22 + 0.12 * sub;
             reloadRotY = 0.06 - 0.04 * sub;
             reloadRotZ = 0.38 - 0.18 * sub;
-            if (magMesh) {
-              magMesh.position.y = -0.42 * (1 - sub);
-            }
-            if (p > 0.48 && p < 0.56) {
+            if (magMesh) magMesh.position.y = -0.42 * (1 - sub);
+            if (p > 0.46 && p < 0.54) {
               reloadOffY += 0.038;
               reloadRotX += 0.07;
             }
-          } else if (p < 0.86) {
-            // Phase 3: Chambering round (Slide rack on Deagle / HK slap on MP5 / Bolt catch on M4)
-            const sub = (p - 0.58) / 0.28;
+          } else if (p < 0.84) {
+            // Left palm slaps bolt catch release paddle on left of receiver
+            const sub = (p - 0.56) / 0.28;
             if (magMesh) magMesh.position.y = 0;
             reloadOffZ = -0.04 * Math.sin(sub * Math.PI);
-            reloadRotX = -0.10 * (1 - sub) + 0.06 * Math.sin(sub * Math.PI);
+            reloadRotX = -0.10 * (1 - sub) + 0.07 * Math.sin(sub * Math.PI);
             reloadRotZ = 0.20 * (1 - sub);
-
-            if (slideMesh) {
-              slideMesh.position.z = -0.06 * Math.sin(sub * Math.PI);
-            }
+            if (boltCatchMesh) boltCatchMesh.position.x = 0.015 * Math.sin(sub * Math.PI);
           } else {
-            // Phase 4: Settle to weapon ready
-            const sub = (p - 0.86) / 0.14;
+            const sub = (p - 0.84) / 0.16;
             if (magMesh) magMesh.position.y = 0;
-            if (slideMesh) slideMesh.position.z = 0;
+            if (boltCatchMesh) boltCatchMesh.position.x = 0;
             reloadOffY = -0.04 * (1 - sub);
             reloadRotX = -0.04 * (1 - sub);
           }
@@ -1081,6 +1937,13 @@ export class FPSController {
       if (magMesh) magMesh.position.y = 0;
       if (slideMesh) slideMesh.position.z = 0;
       if (pumpMesh) pumpMesh.position.z = 0;
+      if (boltCarrierMesh) boltCarrierMesh.position.z = 0;
+      if (boltHandleMesh) {
+        boltHandleMesh.rotation.z = 0;
+        boltHandleMesh.position.z = 0;
+      }
+      if (cockingHandleMesh) cockingHandleMesh.position.set(0, 0, 0);
+      if (boltCatchMesh) boltCatchMesh.position.x = 0;
     }
 
     // Quick Melee Swipe Animation
@@ -1103,25 +1966,54 @@ export class FPSController {
       }
     }
 
-    // Weapon Camo Inspect Animation
+    // Weapon Camo Inspect & Chamber-Check Animation
     let inspectRotX = 0, inspectRotY = 0, inspectRotZ = 0;
     if (this.isInspecting) {
       const ip = 1 - (this.inspectTimer / this.inspectDuration);
       inspectRotY = Math.sin(ip * Math.PI * 2) * 0.45;
       inspectRotZ = -Math.sin(ip * Math.PI) * 0.65;
       inspectRotX = Math.sin(ip * Math.PI) * 0.15;
+
+      // Authentic COD Chamber Check in first third of inspect animation
+      if (ip < 0.40) {
+        const pullProgress = Math.sin((ip / 0.40) * Math.PI);
+        if (slideMesh) slideMesh.position.z = -0.04 * pullProgress;
+        if (boltCarrierMesh) boltCarrierMesh.position.z = -0.045 * pullProgress;
+        if (boltHandleMesh) boltHandleMesh.position.z = -0.045 * pullProgress;
+        if (cockingHandleMesh) cockingHandleMesh.position.z = -0.04 * pullProgress;
+      }
+    }
+
+    // Weapon Draw / Swap Animation (Smooth rise from below)
+    let drawOffY = 0, drawRotX = 0;
+    if (this.isDrawing) {
+      this.drawTimer -= dt;
+      const dp = Math.max(0, this.drawTimer / this.drawDuration);
+      drawOffY = -0.25 * Math.pow(dp, 2);
+      drawRotX = -0.35 * Math.pow(dp, 1.5);
+      if (this.drawTimer <= 0) {
+        this.isDrawing = false;
+      }
+    }
+
+    // Mantling Weapon Drop/Recovery
+    let mantleOffY = 0, mantleRotX = 0;
+    if (this.isMantling) {
+      const mp = 1 - (this.mantleTimer / this.mantleDuration);
+      mantleOffY = -0.28 * Math.sin(mp * Math.PI);
+      mantleRotX = -0.45 * Math.sin(mp * Math.PI);
     }
 
     // Final Position & Rotation integration
     const finalX = targetOffset.x + bobX + swayX + this.swayInertiaX + reloadOffX + meleeOffX;
-    const finalY = targetOffset.y + bobY + swayY + this.swayInertiaY + reloadOffY + meleeOffY;
+    const finalY = targetOffset.y + bobY + swayY + this.swayInertiaY + reloadOffY + meleeOffY + mantleOffY + drawOffY;
     const finalZ = targetOffset.z + this.weaponKickZ + reloadOffZ + meleeOffZ;
 
     this.weaponMesh.position.x = THREE.MathUtils.lerp(this.weaponMesh.position.x, finalX, dt * 20);
     this.weaponMesh.position.y = THREE.MathUtils.lerp(this.weaponMesh.position.y, finalY, dt * 20);
     this.weaponMesh.position.z = THREE.MathUtils.lerp(this.weaponMesh.position.z, finalZ, dt * 25);
 
-    const finalRotX = targetOffset.rx + this.weaponKickRotX - this.swayInertiaY * 1.5 + reloadRotX + meleeRotX + inspectRotX;
+    const finalRotX = targetOffset.rx + this.weaponKickRotX - this.swayInertiaY * 1.5 + reloadRotX + meleeRotX + inspectRotX + mantleRotX + drawRotX;
     const finalRotY = targetOffset.ry + this.swayInertiaX * 1.5 + reloadRotY + meleeRotY + inspectRotY;
     const finalRotZ = targetOffset.rz + strafeRoll + reloadRotZ + meleeRotZ + inspectRotZ;
 
@@ -1129,10 +2021,70 @@ export class FPSController {
     this.weaponMesh.rotation.y = THREE.MathUtils.lerp(this.weaponMesh.rotation.y, finalRotY, dt * 20);
     this.weaponMesh.rotation.z = THREE.MathUtils.lerp(this.weaponMesh.rotation.z, finalRotZ, dt * 18);
 
-    // Sync Viewmodel Arms to Weapon Position
+    // Sync & Dynamically Articulate Viewmodel Arms to Weapon Position
     if (this.armsMesh) {
       this.armsMesh.position.copy(this.weaponMesh.position);
       this.armsMesh.rotation.copy(this.weaponMesh.rotation);
+
+      const leftArm = this.armsMesh.getObjectByName('left_arm_group');
+      const rightArm = this.armsMesh.getObjectByName('right_arm_group');
+
+      if (this.isMantling && leftArm && rightArm) {
+        // Arms reach out and push down against the ledge
+        const mp = 1 - (this.mantleTimer / this.mantleDuration);
+        const reach = Math.sin(mp * Math.PI);
+        leftArm.position.set(-0.2 + reach * 0.05, -0.05 + reach * 0.22, -0.35 - reach * 0.2);
+        leftArm.rotation.set(-reach * 0.6, 0, reach * 0.3);
+        rightArm.position.set(0.2 - reach * 0.05, -0.05 + reach * 0.22, -0.35 - reach * 0.2);
+        rightArm.rotation.set(-reach * 0.6, 0, -reach * 0.3);
+      } else if (this.isDiving && leftArm && rightArm) {
+        // Arms extended forward cushioning dive
+        leftArm.position.set(-0.22, -0.22, -0.38);
+        leftArm.rotation.set(0.35, 0.1, -0.25);
+        rightArm.position.set(0.22, -0.22, -0.38);
+        rightArm.rotation.set(0.35, -0.1, 0.25);
+      } else if (this.isReloading && leftArm) {
+        const p = Math.max(0, Math.min(1, 1 - (this.reloadTimer / this.reloadDuration)));
+        if (p < 0.45) {
+          // Phase 1: Left arm breaks grip, reaches down to plate carrier pouch
+          const sub = p / 0.45;
+          const reachCurve = Math.sin(sub * Math.PI * 0.5);
+          leftArm.position.y = -0.17 - reachCurve * 0.22;
+          leftArm.position.z = -0.14 - reachCurve * 0.15;
+          leftArm.position.x = -0.17 - reachCurve * 0.05;
+          leftArm.rotation.x = reachCurve * 0.45;
+          leftArm.rotation.z = -reachCurve * 0.2;
+        } else if (p < 0.78) {
+          // Phase 2: Insert fresh magazine with forceful palm thrust
+          const sub = (p - 0.45) / 0.33;
+          leftArm.position.y = -0.39 + sub * 0.22;
+          leftArm.position.z = -0.29 + sub * 0.15;
+          leftArm.position.x = -0.22 + sub * 0.05;
+          leftArm.rotation.x = 0.45 * (1 - sub);
+          leftArm.rotation.z = -0.2 * (1 - sub);
+        } else {
+          // Phase 3: Chamber round / slap bolt and return to handguard
+          const sub = (p - 0.78) / 0.22;
+          leftArm.position.set(-0.17, -0.17, -0.14);
+          leftArm.rotation.set(0, 0, 0);
+        }
+      } else if (this.isTacSprinting && leftArm && rightArm) {
+        // High-speed one-handed tactical sprint carry
+        leftArm.position.set(-0.24, -0.35, -0.05);
+        leftArm.rotation.set(-0.45, 0.2, -0.35);
+        rightArm.position.set(0.18, -0.18, 0.2);
+        rightArm.rotation.set(0.35, -0.1, 0.25);
+      } else if (this.isSprinting && leftArm && rightArm) {
+        // Standard sprint carry
+        leftArm.position.set(-0.19, -0.22, -0.08);
+        leftArm.rotation.set(-0.25, 0.1, -0.15);
+        rightArm.rotation.set(0.15, -0.05, 0.1);
+      } else if (leftArm && rightArm) {
+        leftArm.position.set(-0.17, -0.17, -0.14);
+        leftArm.rotation.set(0, 0, 0);
+        rightArm.position.set(0.19, -0.19, 0.22);
+        rightArm.rotation.set(0, 0, 0);
+      }
     }
   }
 }

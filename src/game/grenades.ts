@@ -460,7 +460,7 @@ export class GrenadeManager {
         p.velocity.x *= 0.65;
         p.velocity.z *= 0.65;
         if (Math.abs(p.velocity.y) > 0.8) {
-          soundManager.playGrenadeBounce();
+          soundManager.playSpatialGrenadeBounce(p.position);
         }
       }
 
@@ -478,7 +478,7 @@ export class GrenadeManager {
         ) {
           p.velocity.x = -p.velocity.x * 0.45;
           p.velocity.z = -p.velocity.z * 0.45;
-          soundManager.playGrenadeBounce();
+          soundManager.playSpatialGrenadeBounce(p.position);
           break;
         }
       }
@@ -495,7 +495,7 @@ export class GrenadeManager {
 
         if (p.type === 'frag') {
           // Frag Grenade Explosion
-          soundManager.playExplosion();
+          soundManager.playSpatialExplosion(p.position, false);
           this.particles.emitExplosion(p.position, 1.8);
           if (onExplosion) onExplosion(p.position.clone(), 9.0, 160.0);
           if (this.onExplode) this.onExplode(p.position.clone(), 9.0, 160.0);

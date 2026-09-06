@@ -3,6 +3,7 @@ import { WeaponType } from '../types';
 import { WEAPON_REGISTRY } from './weapons';
 import { ParticleSystem } from './particles';
 import { soundManager } from './audio';
+import { TextureGenerator } from './textures';
 
 export interface FloatingDamageNumber {
   id: string;
@@ -83,13 +84,18 @@ export class TargetDummy {
 
     // Materials
     const baseMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.8, metalness: 0.6 });
-    const torsoMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.6, metalness: 0.3 });
-    const armorPlateMat = new THREE.MeshStandardMaterial({ color: 0x0284c7, roughness: 0.4, metalness: 0.5 }); // Cyan armor vest
+    const dummyTexture = TextureGenerator.createTrainingDummyTexture();
+    const torsoMat = new THREE.MeshStandardMaterial({
+      map: dummyTexture,
+      roughness: 0.6,
+      metalness: 0.2,
+    });
+    const armorPlateMat = new THREE.MeshStandardMaterial({ color: 0x0284c7, roughness: 0.35, metalness: 0.7 }); // Ballistic Strike Face
     const targetRingMat = new THREE.MeshStandardMaterial({ color: 0xe2e8f0, roughness: 0.3 });
-    const bullseyeMat = new THREE.MeshStandardMaterial({ color: 0xef4444, roughness: 0.3 }); // Red bullseye center
-    const headMat = new THREE.MeshStandardMaterial({ color: 0xf59e0b, roughness: 0.5, metalness: 0.2 }); // Amber ballistic helmet
+    const bullseyeMat = new THREE.MeshStandardMaterial({ color: 0xef4444, roughness: 0.3, emissive: 0x991b1b, emissiveIntensity: 0.3 });
+    const headMat = new THREE.MeshStandardMaterial({ color: 0xf59e0b, roughness: 0.4, metalness: 0.3 }); // Ballistic helmet
 
-    // 1. Heavy Metal Stand / Pole
+    // 1. Heavy Metal Stand / Pole & Hydraulic Piston
     const baseGeo = new THREE.CylinderGeometry(0.5, 0.6, 0.1, 16);
     const basePlate = new THREE.Mesh(baseGeo, baseMat);
     basePlate.position.y = 0.05;
@@ -99,7 +105,13 @@ export class TargetDummy {
     this.standMesh = new THREE.Mesh(poleGeo, baseMat);
     this.standMesh.position.y = 0.5;
     this.standMesh.name = 'stand';
-    this.group.add(this.standMesh);
+
+    // Hydraulic Shock Absorber Cylinder
+    const pistonGeo = new THREE.CylinderGeometry(0.04, 0.04, 0.4, 12);
+    const pistonMat = new THREE.MeshStandardMaterial({ color: 0xd4d4d8, roughness: 0.2, metalness: 0.9 });
+    const pistonMesh = new THREE.Mesh(pistonGeo, pistonMat);
+    pistonMesh.position.y = 0.65;
+    this.group.add(this.standMesh, pistonMesh);
 
     // 2. Pelvis / Lower Torso
     const pelvisGeo = new THREE.BoxGeometry(0.42, 0.3, 0.24);
