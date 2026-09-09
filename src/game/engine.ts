@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { EnvironmentState, FloatingDamageNumberItem, GameMode, GameSettings, HitmarkerEvent, KillFeedItem, PlayerEliminatedInfo, PlayerStats, TrainingTelemetryData, WeaponCamo, WeaponType, WeatherType } from '../types';
+import { BattleRoyaleState, EnvironmentState, FloatingDamageNumberItem, GameMode, GameSettings, HitmarkerEvent, KillFeedItem, PlayerEliminatedInfo, PlayerStats, TrainingTelemetryData, WeaponCamo, WeaponType, WeatherType } from '../types';
 import { TacticalMap } from './map';
 import { ParticleSystem } from './particles';
 import { BotManager } from './ai';
@@ -39,6 +39,14 @@ export class GameEngine {
   public alliesScore: number = 0;
   public axisScore: number = 0;
   public scoreLimit: number = 50;
+
+  // Battle Royale Mode Systems
+  public battleRoyaleState: BattleRoyaleState | null = null;
+  public onBattleRoyaleUpdate?: (state: BattleRoyaleState) => void;
+  private safeZoneMesh: THREE.Mesh | null = null;
+  private safeZoneRingMesh: THREE.Mesh | null = null;
+  private airdropGroup: THREE.Group | null = null;
+  private shrinkPhaseTimeRemaining: number = 0;
 
   // Player Stats
   public stats: PlayerStats = {
@@ -93,7 +101,7 @@ export class GameEngine {
 
     // 1. Scene & Renderer setup
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(settings.fieldOfView || 85, window.innerWidth / window.innerHeight, 0.02, 500);
+    this.camera = new THREE.PerspectiveCamera(settings.fieldOfView || 85, window.innerWidth / window.innerHeight, 0.01, 500);
     this.scene.add(this.camera);
 
     this.renderer = new THREE.WebGLRenderer({
@@ -147,11 +155,66 @@ export class GameEngine {
     // 3. Connect Callbacks & Handlers
     this.setupEvents();
 
-    // 4. Start Match: If in training mode, spawn ZERO enemies!
+    // Spawn player at designated Allied base
+    const playerSpawns = this.map.spawnPoints.filter(s => s.team === 'allies');
+    const startSpawn = (playerSpawns.length > 0 ? playerSpawns : this.map.spawnPoints)[0];
+    if (startSpawn) {
+      this.controller.position.copy(startSpawn.position);
+    }
+
+    // 4. Initialize Battle Royale Safe Zone if BR Mode
+    if (this.gameMode === 'battleroyale') {
+      this.battleRoyaleState = {
+        phase: 1,
+        maxPhases: 4,
+        aliveCount: 50,
+        totalPlayers: 50,
+        circleCenter: { x: 0, z: 0 },
+        circleRadius: 46,
+        nextCircleCenter: { x: (Math.random() - 0.5) * 12, z: (Math.random() - 0.5) * 12 },
+        nextCircleRadius: 28,
+        shrinkTimer: 35,
+        isShrinking: false,
+        shrinkDuration: 25,
+        zoneDamagePerSec: 5,
+        isOutsideSafeZone: false,
+        airdropPosition: null,
+      };
+
+      // 3D Safe Zone Boundary Cylinder
+      const safeZoneGeo = new THREE.CylinderGeometry(1, 1, 28, 64, 1, true);
+      const safeZoneMat = new THREE.MeshBasicMaterial({
+        color: 0x0284c7,
+        transparent: true,
+        opacity: 0.22,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      });
+      this.safeZoneMesh = new THREE.Mesh(safeZoneGeo, safeZoneMat);
+      this.safeZoneMesh.scale.set(46, 1, 46);
+      this.safeZoneMesh.position.set(0, 14, 0);
+      this.scene.add(this.safeZoneMesh);
+
+      // Safe Zone Perimeter Ground Ring
+      const ringGeo = new THREE.RingGeometry(0.96, 1.04, 64);
+      const ringMat = new THREE.MeshBasicMaterial({
+        color: 0x38bdf8,
+        transparent: true,
+        opacity: 0.85,
+        side: THREE.DoubleSide,
+      });
+      this.safeZoneRingMesh = new THREE.Mesh(ringGeo, ringMat);
+      this.safeZoneRingMesh.rotateX(-Math.PI / 2);
+      this.safeZoneRingMesh.scale.set(46, 46, 1);
+      this.safeZoneRingMesh.position.set(0, 0.08, 0);
+      this.scene.add(this.safeZoneRingMesh);
+    }
+
+    // 5. Start Match: Spawn bots according to mode
     if (this.gameMode === 'training' || this.gameMode === 'targetrange') {
-      this.botManager.spawnBots(0, settings.botDifficulty || 'regular');
+      this.botManager.spawnBots(0, settings.botDifficulty || 'regular', this.gameMode);
     } else {
-      this.botManager.spawnBots(settings.botCount || 6, settings.botDifficulty || 'regular');
+      this.botManager.spawnBots(settings.botCount || 6, settings.botDifficulty || 'regular', this.gameMode);
     }
 
     window.addEventListener('resize', this.onResize);
@@ -179,6 +242,35 @@ export class GameEngine {
 
     this.controller.onTacticalChange = (count, type) => {
       this.onTacticalUpdate(count, type);
+    };
+
+    // Bot vs Bot kills synchronization
+    this.botManager.onBotKillBot = (killerTeam, killerName, victimName, weapon) => {
+      if (killerTeam === 'allies') {
+        this.alliesScore++;
+      } else {
+        this.axisScore++;
+      }
+      this.onScoreUpdate(this.alliesScore, this.axisScore, Math.max(0, Math.floor(this.matchTimeRemaining)));
+
+      this.onKillfeedEvent({
+        id: Math.random().toString(),
+        killer: killerName,
+        victim: victimName,
+        weapon,
+        isHeadshot: false,
+        isPlayerKiller: false,
+        isPlayerVictim: false,
+        timestamp: Date.now(),
+      });
+
+      if (this.gameMode === 'battleroyale' && this.battleRoyaleState) {
+        this.battleRoyaleState.aliveCount = Math.max(1, this.battleRoyaleState.aliveCount - 1);
+        this.onBattleRoyaleUpdate?.({ ...this.battleRoyaleState });
+        if (this.battleRoyaleState.aliveCount <= 1 && !this.isPlayerDead) {
+          this.endMatch(true);
+        }
+      }
     };
 
     this.grenadeManager.onMotionDetect = (botIds) => {
@@ -329,7 +421,13 @@ export class GameEngine {
     }
 
     // Check Win Condition
-    if (this.alliesScore >= this.scoreLimit) {
+    if (this.gameMode === 'battleroyale' && this.battleRoyaleState) {
+      this.battleRoyaleState.aliveCount = Math.max(1, this.battleRoyaleState.aliveCount - 1);
+      this.onBattleRoyaleUpdate?.({ ...this.battleRoyaleState });
+      if (this.battleRoyaleState.aliveCount <= 1 && !this.isPlayerDead) {
+        this.endMatch(true);
+      }
+    } else if (this.alliesScore >= this.scoreLimit) {
       this.endMatch(true);
     }
 
@@ -423,7 +521,11 @@ export class GameEngine {
     this.controller.setDeadState(false);
     this.stats.health = this.stats.maxHealth;
     this.stats.armor = this.stats.maxArmor;
-    const spawnPt = this.map.spawnPoints[Math.floor(Math.random() * this.map.spawnPoints.length)];
+
+    // Designated Team Spawn Base for Allies
+    const playerSpawns = this.map.spawnPoints.filter(s => s.team === 'allies');
+    const spawnList = playerSpawns.length > 0 ? playerSpawns : this.map.spawnPoints;
+    const spawnPt = spawnList[Math.floor(Math.random() * spawnList.length)];
     this.controller.position.copy(spawnPt.position);
     this.controller.velocity.set(0, 0, 0);
     this.timeSinceLastDamage = 10.0;
@@ -596,7 +698,141 @@ export class GameEngine {
       isUavActive
     );
 
+    // BATTLE ROYALE MODE LOGIC: Circle Shrinking, Zone Gas Damage, and Care Packages
+    if (this.gameMode === 'battleroyale' && this.battleRoyaleState) {
+      const br = this.battleRoyaleState;
+
+      if (!br.isShrinking) {
+        br.shrinkTimer -= dt;
+        if (br.shrinkTimer <= 0) {
+          br.isShrinking = true;
+          this.shrinkPhaseTimeRemaining = br.shrinkDuration;
+          soundManager.playVoiceCallout('Warning: Safe zone is collapsing! Move to the safe area.');
+        }
+      } else {
+        this.shrinkPhaseTimeRemaining -= dt;
+        const progress = Math.min(1, 1 - this.shrinkPhaseTimeRemaining / br.shrinkDuration);
+        
+        // Linear interpolation of circle radius and center towards target
+        const startRad = br.phase === 1 ? 46 : (br.phase === 2 ? 34 : 22);
+        br.circleRadius = THREE.MathUtils.lerp(startRad, br.nextCircleRadius, progress);
+        br.circleCenter.x = THREE.MathUtils.lerp(br.circleCenter.x, br.nextCircleCenter.x, 0.05);
+        br.circleCenter.z = THREE.MathUtils.lerp(br.circleCenter.z, br.nextCircleCenter.z, 0.05);
+
+        if (this.shrinkPhaseTimeRemaining <= 0) {
+          br.isShrinking = false;
+          br.phase++;
+          br.shrinkTimer = 35;
+          br.zoneDamagePerSec += 3; // Later zones deal heavier damage
+
+          // Set up next circle phase
+          const newTargetRad = Math.max(6, br.nextCircleRadius * 0.6);
+          const angle = Math.random() * Math.PI * 2;
+          const offsetDist = Math.random() * (br.circleRadius - newTargetRad) * 0.5;
+          br.nextCircleRadius = newTargetRad;
+          br.nextCircleCenter = {
+            x: br.circleCenter.x + Math.cos(angle) * offsetDist,
+            z: br.circleCenter.z + Math.sin(angle) * offsetDist,
+          };
+
+          // Spawn Airdrop Care Package in current safe zone!
+          this.spawnAirdropCrate(br.circleCenter.x + (Math.random() - 0.5) * 10, br.circleCenter.z + (Math.random() - 0.5) * 10);
+          soundManager.playVoiceCallout('Care package incoming at designated coordinates.');
+        }
+      }
+
+      // Check if Player is Outside the Safe Zone
+      const distFromCircle = Math.hypot(this.controller.position.x - br.circleCenter.x, this.controller.position.z - br.circleCenter.z);
+      const isOutside = distFromCircle > br.circleRadius;
+      br.isOutsideSafeZone = isOutside;
+
+      if (isOutside) {
+        // Deal ticking gas damage to the player
+        this.takePlayerDamage(br.zoneDamagePerSec * dt, 'THE ZONE GAS', 'm4');
+      }
+
+      // Update 3D Safe Zone Boundary Mesh & Ring
+      if (this.safeZoneMesh) {
+        this.safeZoneMesh.scale.set(br.circleRadius, 1, br.circleRadius);
+        this.safeZoneMesh.position.set(br.circleCenter.x, 14, br.circleCenter.z);
+      }
+      if (this.safeZoneRingMesh) {
+        this.safeZoneRingMesh.scale.set(br.circleRadius, br.circleRadius, 1);
+        this.safeZoneRingMesh.position.set(br.circleCenter.x, 0.08, br.circleCenter.z);
+      }
+
+      // Check Airdrop Proximity Looting
+      if (br.airdropPosition && !br.airdropPosition.isLooted) {
+        const dToAirdrop = Math.hypot(this.controller.position.x - br.airdropPosition.x, this.controller.position.z - br.airdropPosition.z);
+        if (dToAirdrop < 3.0) {
+          br.airdropPosition.isLooted = true;
+          this.stats.armor = 100;
+          this.controller.equipWeapon('sniper', 'obsidian');
+          this.onAccoladeEvent({
+            id: Math.random().toString(),
+            title: 'AIRDROP LOOTED',
+            points: 250,
+            subtext: 'LEVEL 3 ARMOR + AX-50 .50 CAL',
+            icon: 'streak',
+            timestamp: Date.now(),
+          });
+          soundManager.playVoiceCallout('Care package secured. Weapon upgraded.');
+        }
+      }
+
+      this.onBattleRoyaleUpdate?.({ ...br });
+    }
+
     this.onScoreUpdate(this.alliesScore, this.axisScore, Math.max(0, Math.floor(this.matchTimeRemaining)));
+  }
+
+  private spawnAirdropCrate(x: number, z: number) {
+    if (this.airdropGroup) {
+      this.scene.remove(this.airdropGroup);
+    }
+    const group = new THREE.Group();
+    group.position.set(x, 0, z);
+
+    // Crate Body
+    const crateGeo = new THREE.BoxGeometry(1.6, 1.2, 1.6);
+    const crateMat = new THREE.MeshStandardMaterial({
+      color: 0x15803d, // Military olive green
+      roughness: 0.6,
+      metalness: 0.4,
+    });
+    const crate = new THREE.Mesh(crateGeo, crateMat);
+    crate.position.y = 0.6;
+    group.add(crate);
+
+    // Yellow Caution Edge Trim
+    const trimGeo = new THREE.BoxGeometry(1.64, 0.2, 1.64);
+    const trimMat = new THREE.MeshBasicMaterial({ color: 0xeab308 });
+    const trim = new THREE.Mesh(trimGeo, trimMat);
+    trim.position.y = 0.6;
+    group.add(trim);
+
+    // Green Beacon Smoke Flare
+    const flareGeo = new THREE.CylinderGeometry(0.1, 0.4, 4, 8);
+    const flareMat = new THREE.MeshBasicMaterial({
+      color: 0x22c55e,
+      transparent: true,
+      opacity: 0.4,
+    });
+    const flare = new THREE.Mesh(flareGeo, flareMat);
+    flare.position.y = 3.2;
+    group.add(flare);
+
+    this.scene.add(group);
+    this.airdropGroup = group;
+
+    if (this.battleRoyaleState) {
+      this.battleRoyaleState.airdropPosition = {
+        x,
+        y: 0,
+        z,
+        isLooted: false,
+      };
+    }
   }
 
   public setWeatherPreset(preset: WeatherType) {

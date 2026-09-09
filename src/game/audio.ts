@@ -29,8 +29,36 @@ export class SoundEngine {
   // Cached Impulse Buffers for Reverb & Noise
   private noiseBuffers: Map<string, AudioBuffer> = new Map();
 
+  // --- PUBG Gun Sound Dataset (https://github.com/junwoopark92/PUBG-Gun-Sound-Dataset.git) ---
+  private pubgGunBuffers: Map<string, AudioBuffer[]> = new Map();
+  private pubgPreloadedRaw: Map<string, ArrayBuffer> = new Map();
+  private pubgLoadingStarted: boolean = false;
+  private pubgSoundsReady: boolean = false;
+  private activePlayerGunshots: { source: AudioBufferSourceNode; gain: GainNode }[] = [];
+
   constructor() {
-    // AudioContext will be initialized on first user interaction
+    // Early network prefetch of PUBG audio assets so they are ready before first fire
+    this.prefetchPubgAssets();
+  }
+
+  private prefetchPubgAssets() {
+    const allPaths = [
+      '/sounds/weapons/m4_0.mp3', '/sounds/weapons/m4_1.mp3', '/sounds/weapons/m4_2.mp3', '/sounds/weapons/m4_3.mp3',
+      '/sounds/weapons/m4_dist.mp3', '/sounds/weapons/m4_far.mp3',
+      '/sounds/weapons/mp5_0.mp3', '/sounds/weapons/mp5_1.mp3', '/sounds/weapons/mp5_2.mp3', '/sounds/weapons/mp5_3.mp3',
+      '/sounds/weapons/sniper_0.mp3', '/sounds/weapons/sniper_1.mp3', '/sounds/weapons/sniper_2.mp3', '/sounds/weapons/sniper_3.mp3',
+      '/sounds/weapons/sniper_dist.mp3', '/sounds/weapons/sniper_far.mp3',
+      '/sounds/weapons/shotgun_0.mp3', '/sounds/weapons/shotgun_1.mp3', '/sounds/weapons/shotgun_2.mp3', '/sounds/weapons/shotgun_3.mp3',
+      '/sounds/weapons/deagle_0.mp3', '/sounds/weapons/deagle_1.mp3', '/sounds/weapons/deagle_2.mp3', '/sounds/weapons/deagle_3.mp3',
+    ];
+    for (const p of allPaths) {
+      fetch(p)
+        .then(res => res.ok ? res.arrayBuffer() : null)
+        .then(ab => {
+          if (ab) this.pubgPreloadedRaw.set(p, ab);
+        })
+        .catch(() => {});
+    }
   }
 
   public init() {
@@ -62,6 +90,81 @@ export class SoundEngine {
     this.ambientGain = this.ctx.createGain();
     this.ambientGain.gain.setValueAtTime(0.75, this.ctx.currentTime);
     this.ambientGain.connect(this.masterGain);
+
+    // Load authentic PUBG weapon sound dataset from https://github.com/junwoopark92/PUBG-Gun-Sound-Dataset.git
+    this.loadPubgSoundDataset();
+  }
+
+  public async loadPubgSoundDataset(): Promise<void> {
+    if (this.pubgLoadingStarted || !this.ctx) return;
+    this.pubgLoadingStarted = true;
+
+    const PUBG_WEAPON_AUDIO_MAP: Record<string, string[]> = {
+      m4: [
+        '/sounds/weapons/m4_0.mp3',
+        '/sounds/weapons/m4_1.mp3',
+        '/sounds/weapons/m4_2.mp3',
+        '/sounds/weapons/m4_3.mp3',
+      ],
+      mp5: [
+        '/sounds/weapons/mp5_0.mp3',
+        '/sounds/weapons/mp5_1.mp3',
+        '/sounds/weapons/mp5_2.mp3',
+        '/sounds/weapons/mp5_3.mp3',
+      ],
+      sniper: [
+        '/sounds/weapons/sniper_0.mp3',
+        '/sounds/weapons/sniper_1.mp3',
+        '/sounds/weapons/sniper_2.mp3',
+        '/sounds/weapons/sniper_3.mp3',
+      ],
+      shotgun: [
+        '/sounds/weapons/shotgun_0.mp3',
+        '/sounds/weapons/shotgun_1.mp3',
+        '/sounds/weapons/shotgun_2.mp3',
+        '/sounds/weapons/shotgun_3.mp3',
+      ],
+      deagle: [
+        '/sounds/weapons/deagle_0.mp3',
+        '/sounds/weapons/deagle_1.mp3',
+        '/sounds/weapons/deagle_2.mp3',
+        '/sounds/weapons/deagle_3.mp3',
+      ],
+      m4_dist: ['/sounds/weapons/m4_dist.mp3', '/sounds/weapons/m4_far.mp3'],
+      sniper_dist: ['/sounds/weapons/sniper_dist.mp3', '/sounds/weapons/sniper_far.mp3'],
+    };
+
+    const promises: Promise<void>[] = [];
+    for (const [key, paths] of Object.entries(PUBG_WEAPON_AUDIO_MAP)) {
+      const bufferList: AudioBuffer[] = [];
+      this.pubgGunBuffers.set(key, bufferList);
+
+      for (const path of paths) {
+        const getArrayBuffer = async (): Promise<ArrayBuffer> => {
+          const preloaded = this.pubgPreloadedRaw.get(path);
+          if (preloaded) return preloaded.slice(0);
+          const res = await fetch(path);
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          return res.arrayBuffer();
+        };
+
+        const p = getArrayBuffer()
+          .then((ab) => {
+            if (!this.ctx) return null;
+            return this.ctx.decodeAudioData(ab);
+          })
+          .then((decoded) => {
+            if (decoded) bufferList.push(decoded);
+          })
+          .catch((err) => {
+            console.warn(`[PUBG Audio] Load notice for ${path}:`, err);
+          });
+        promises.push(p);
+      }
+    }
+
+    await Promise.allSettled(promises);
+    this.pubgSoundsReady = true;
   }
 
   public setVolumes(master: number, sfx: number) {
@@ -169,6 +272,74 @@ export class SoundEngine {
     if (!this.ctx || !this.sfxGain) return;
     const t = this.ctx.currentTime;
 
+    // --- STRICTLY USE PUBG WEAPON SOUND DATASET (junwoopark92/PUBG-Gun-Sound-Dataset) ---
+    const pubgList = this.pubgGunBuffers.get(type);
+    if (pubgList && pubgList.length > 0) {
+      const buffer = pubgList[Math.floor(Math.random() * pubgList.length)];
+      const source = this.ctx.createBufferSource();
+      source.buffer = buffer;
+      // Slight shot-to-shot organic timbre variation (±2%)
+      source.playbackRate.setValueAtTime(0.98 + Math.random() * 0.04, t);
+
+      const gain = this.ctx.createGain();
+      let volume = 1.0;
+      if (type === 'sniper') volume = 1.35;
+      else if (type === 'shotgun') volume = 1.25;
+      else if (type === 'deagle') volume = 1.15;
+      else if (type === 'mp5') volume = 0.95;
+      else if (type === 'm4') volume = 1.05;
+
+      if (isSilenced) {
+        // Silencer acoustic muzzle damping
+        const silencerFilter = this.ctx.createBiquadFilter();
+        silencerFilter.type = 'lowpass';
+        silencerFilter.frequency.setValueAtTime(1900, t);
+        silencerFilter.Q.setValueAtTime(1.1, t);
+        gain.gain.setValueAtTime(volume * 0.72, t);
+        source.connect(silencerFilter);
+        silencerFilter.connect(gain);
+      } else {
+        gain.gain.setValueAtTime(volume, t);
+        source.connect(gain);
+      }
+
+      gain.connect(this.sfxGain);
+
+      // Voice limiting for rapid automatic fire: choke oldest active voice so gunshots remain articulate and never clip
+      if (this.activePlayerGunshots.length >= 3) {
+        const oldest = this.activePlayerGunshots.shift();
+        if (oldest) {
+          try {
+            oldest.gain.gain.setValueAtTime(oldest.gain.gain.value, t);
+            oldest.gain.gain.linearRampToValueAtTime(0.001, t + 0.015);
+            setTimeout(() => {
+              try { oldest.source.stop(); oldest.source.disconnect(); oldest.gain.disconnect(); } catch (_) {}
+            }, 20);
+          } catch (_) {}
+        }
+      }
+
+      this.activePlayerGunshots.push({ source, gain });
+      source.onended = () => {
+        const idx = this.activePlayerGunshots.findIndex(item => item.source === source);
+        if (idx !== -1) this.activePlayerGunshots.splice(idx, 1);
+        try { source.disconnect(); gain.disconnect(); } catch (_) {}
+      };
+
+      source.start(t);
+
+      // Weapon mechanical cycle and casing ejection
+      if (type === 'shotgun') {
+        setTimeout(() => this.playPumpAction(), 310);
+      } else if (type === 'sniper') {
+        this.createBulletCasingDrop(t + 0.35);
+      } else {
+        this.createBulletCasingDrop(t + 0.12);
+      }
+      return;
+    }
+
+    // Immediate fallback while initial asset decoding completes in first frame
     switch (type) {
       case 'm4': {
         // High-energy 5.56x45mm NATO Assault Rifle
@@ -231,11 +402,45 @@ export class SoundEngine {
   ) {
     if (!this.ctx || !this.sfxGain) return;
     const distance = this.listenerPos.distanceTo(botPos);
-    const spatial = this.create3DPanner(botPos, isOccluded, isOccluded ? 0.9 : 0, 3.0, 95);
+    const spatial = this.create3DPanner(botPos, isOccluded, isOccluded ? 0.9 : 0, 3.0, 110);
     if (!spatial) return;
 
     const t = this.ctx.currentTime;
     const { panner } = spatial;
+
+    // Determine if distance sound from PUBG dataset should be selected
+    let soundKey: string = type;
+    if (distance > 35) {
+      if (type === 'm4' && (this.pubgGunBuffers.get('m4_dist')?.length ?? 0) > 0) {
+        soundKey = 'm4_dist';
+      } else if (type === 'sniper' && (this.pubgGunBuffers.get('sniper_dist')?.length ?? 0) > 0) {
+        soundKey = 'sniper_dist';
+      }
+    }
+
+    // --- STRICTLY USE PUBG WEAPON SOUND DATASET FOR 3D SPATIAL GUNFIRE ---
+    const pubgList = this.pubgGunBuffers.get(soundKey) || this.pubgGunBuffers.get(type);
+    if (pubgList && pubgList.length > 0) {
+      const buffer = pubgList[Math.floor(Math.random() * pubgList.length)];
+      const source = this.ctx.createBufferSource();
+      source.buffer = buffer;
+      source.playbackRate.setValueAtTime(0.97 + Math.random() * 0.06, t);
+
+      const gain = this.ctx.createGain();
+      let volume = 0.95;
+      if (type === 'sniper') volume = 1.35;
+      else if (type === 'shotgun') volume = 1.15;
+      else if (type === 'deagle') volume = 1.05;
+      gain.gain.setValueAtTime(volume, t);
+
+      source.connect(gain);
+      gain.connect(panner);
+      source.onended = () => {
+        try { source.disconnect(); gain.disconnect(); } catch (_) {}
+      };
+      source.start(t);
+      return;
+    }
 
     // Caliber specific sound parameters spatialized through PannerNode
     let subStart = 140, subEnd = 45, subDuration = 0.2, transientFreq = 2200, transientDur = 0.1;

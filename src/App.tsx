@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { GameEngine } from './game/engine';
 import {
+  BattleRoyaleState,
   EliminationAccolade,
   EnemyBot,
   EnvironmentState,
@@ -51,7 +52,7 @@ import {
   Volume2,
 } from 'lucide-react';
 import { soundManager } from './game/audio';
-import { WEAPON_REGISTRY } from './game/weapons';
+import { DEFAULT_WEAPON_OPTICS, WEAPON_REGISTRY } from './game/weapons';
 
 export default function App() {
   const canvasContainerRef = useRef<HTMLDivElement | null>(null);
@@ -144,6 +145,7 @@ export default function App() {
   const [playerYaw, setPlayerYaw] = useState<number>(0);
   const [playerPitch, setPlayerPitch] = useState<number>(0);
   const [uavActive, setUavActive] = useState<boolean>(false);
+  const [battleRoyaleState, setBattleRoyaleState] = useState<BattleRoyaleState | null>(null);
 
   // Training Mode Telemetry & Floating 3D Numbers
   const [trainingTelemetry, setTrainingTelemetry] = useState<TrainingTelemetryData>({
@@ -191,6 +193,21 @@ export default function App() {
     setIsGameOver(false);
     setIsPaused(false);
   };
+
+  // Prime audio engine on first user interaction so sounds are pre-decoded
+  useEffect(() => {
+    const handleGesture = () => {
+      soundManager.init();
+      window.removeEventListener('pointerdown', handleGesture);
+      window.removeEventListener('keydown', handleGesture);
+    };
+    window.addEventListener('pointerdown', handleGesture, { passive: true });
+    window.addEventListener('keydown', handleGesture, { passive: true });
+    return () => {
+      window.removeEventListener('pointerdown', handleGesture);
+      window.removeEventListener('keydown', handleGesture);
+    };
+  }, []);
 
   // Lobby keyboard shortcut [Enter] to deploy
   useEffect(() => {
@@ -294,11 +311,18 @@ export default function App() {
         setIsReloading(engine.controller.isReloading);
         setIsSprinting(engine.controller.isSprinting);
         setCurrentWeapon(engine.controller.currentWeapon);
+        const activeOptic = engine.controller.equippedOptics[engine.controller.currentWeapon] || DEFAULT_WEAPON_OPTICS[engine.controller.currentWeapon] || 'holo_553';
+        setCurrentOptic(activeOptic);
+        const activeColor = engine.controller.opticReticleColors[engine.controller.currentWeapon] || 'red';
+        setCurrentReticleColor(activeColor);
+        const activeStyle = engine.controller.opticReticleStyles[engine.controller.currentWeapon] || 'dot';
+        setCurrentReticleStyle(activeStyle);
         setGrenadesCount(engine.controller.grenadesCount);
         setTacticalCount(engine.grenadeManager.getTacticalCount());
         setTacticalType(engine.grenadeManager.getTacticalType());
         setLaserActive(engine.controller.laserActive);
         setUavActive(engine.streakManager.uavActive);
+        setBattleRoyaleState(engine.battleRoyaleState);
 
         // Scope & Steady Aim Telemetry
         setIsHoldingBreath(engine.controller.isHoldingBreath);
@@ -419,18 +443,23 @@ export default function App() {
 
   const handleSelectWeapon = (
     weapon: WeaponType,
-    camo: WeaponCamo = currentCamo,
-    optic: OpticType = currentOptic,
-    reticleColor: ReticleColor = currentReticleColor,
-    reticleStyle: ReticleStyle = currentReticleStyle
+    camo?: WeaponCamo,
+    optic?: OpticType,
+    reticleColor?: ReticleColor,
+    reticleStyle?: ReticleStyle
   ) => {
+    const resolvedCamo = camo ?? currentCamo;
+    const resolvedOptic = optic ?? engineRef.current?.controller.equippedOptics[weapon] ?? DEFAULT_WEAPON_OPTICS[weapon] ?? 'holo_553';
+    const resolvedColor = reticleColor ?? engineRef.current?.controller.opticReticleColors[weapon] ?? currentReticleColor;
+    const resolvedStyle = reticleStyle ?? engineRef.current?.controller.opticReticleStyles[weapon] ?? currentReticleStyle;
+
     setCurrentWeapon(weapon);
-    setCurrentCamo(camo);
-    setCurrentOptic(optic);
-    setCurrentReticleColor(reticleColor);
-    setCurrentReticleStyle(reticleStyle);
+    setCurrentCamo(resolvedCamo);
+    setCurrentOptic(resolvedOptic);
+    setCurrentReticleColor(resolvedColor);
+    setCurrentReticleStyle(resolvedStyle);
     if (engineRef.current) {
-      engineRef.current.controller.equipWeapon(weapon, camo, optic, reticleColor, reticleStyle);
+      engineRef.current.controller.equipWeapon(weapon, resolvedCamo, resolvedOptic, resolvedColor, resolvedStyle);
     }
   };
 
@@ -497,6 +526,7 @@ export default function App() {
         <HUD
           stats={stats}
           gameMode={gameMode}
+          battleRoyaleState={battleRoyaleState}
           currentWeapon={currentWeapon}
           equippedOptic={currentOptic}
           reticleColor={currentReticleColor}
@@ -692,13 +722,13 @@ export default function App() {
                 id="btn-test-audio"
                 onClick={() => {
                   soundManager.init();
-                  soundManager.playSpatialGunshot(currentWeapon, { x: 4, y: 1.6, z: 2 } as any, false);
+                  soundManager.playGunshot(currentWeapon, false);
                 }}
-                title="Audition 3D HRTF firearm audio"
+                title="Audition PUBG weapon sound dataset (M416/UMP/AWM/Pump/Deagle)"
                 className="px-3.5 py-2 rounded-lg bg-slate-900/80 hover:bg-slate-800 border border-slate-800 hover:border-cyan-500/50 text-cyan-400 font-bold text-xs tracking-wider uppercase transition-all flex items-center gap-1.5 cursor-pointer"
               >
-                <Volume2 className="w-3.5 h-3.5" />
-                <span>AUDIO</span>
+                <Volume2 className="w-3.5 h-3.5 text-amber-400" />
+                <span>PUBG SFX</span>
               </button>
             </nav>
 
@@ -728,7 +758,8 @@ export default function App() {
               {/* Clean Playlist Cards */}
               <div className="flex flex-col gap-2.5">
                 {[
-                  { id: 'tdm', title: 'Team Deathmatch', badge: '5v5 TACTICAL', desc: 'Squad elimination. First team to reach 50 eliminations wins.', icon: Users },
+                  { id: 'tdm', title: 'Team Deathmatch', badge: '5v5 TACTICAL', desc: 'Squad elimination. Allies vs Axis with designated spawn points.', icon: Users },
+                  { id: 'battleroyale', title: 'Battle Royale', badge: 'SURVIVAL CIRCLE', desc: 'PUBG / Free Fire mode. Shrinking safe zone circle, gas damage, and airdrops.', icon: ShieldAlert },
                   { id: 'ffa', title: 'Free For All', badge: 'SOLO COMBAT', desc: 'Every operative for themselves. Eliminate all hostiles on sight.', icon: Flame },
                   { id: 'gungame', title: 'Gun Game Escalation', badge: 'WEAPON LADDER', desc: 'Advance through weapon tiers with each elimination.', icon: Award },
                   { id: 'training', title: 'Ballistic Range', badge: 'TELEMETRY & DPS', desc: 'Dynamic moving steel targets with real-time ballistic accuracy metrics.', icon: Target },

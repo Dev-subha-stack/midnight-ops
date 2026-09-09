@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { AIAlertLevel, AIArchetype, EnemyBot, WeaponType } from '../types';
+import { AIAlertLevel, AIArchetype, EnemyBot, GameMode, WeaponType } from '../types';
 import { ModelFactory } from './models';
 import { TacticalCoverPoint, TacticalMap } from './map';
 import { ParticleSystem } from './particles';
@@ -13,6 +13,7 @@ export class BotManager {
   public particles: ParticleSystem;
   public bots: BotController[] = [];
   public smokeClouds: { position: THREE.Vector3; radius: number; duration: number }[] = [];
+  public onBotKillBot?: (killerTeam: 'allies' | 'axis', killerName: string, victimName: string, weapon: WeaponType) => void;
 
   // Squad Shared Intelligence
   public squadAlertLevel: AIAlertLevel = 'unalerted';
@@ -30,42 +31,108 @@ export class BotManager {
     this.smokeClouds = clouds;
   }
 
-  public spawnBots(count: number, difficulty: 'recruit' | 'regular' | 'hardened' | 'veteran' = 'regular') {
+  public spawnBots(
+    count: number,
+    difficulty: 'recruit' | 'regular' | 'hardened' | 'veteran' = 'regular',
+    gameMode: GameMode = 'tdm'
+  ) {
     // Clear existing
     this.bots.forEach(b => b.destroy());
     this.bots = [];
 
-    const botRoster = [
-      { name: 'Ghost_Riley', archetype: 'flanker' as AIArchetype, weapon: 'mp5' as WeaponType },
-      { name: 'Soap_MacTavish', archetype: 'assault' as AIArchetype, weapon: 'm4' as WeaponType },
-      { name: 'Price_Bravo6', archetype: 'heavy' as AIArchetype, weapon: 'shotgun' as WeaponType },
-      { name: 'Grinch_Scout', archetype: 'sniper' as AIArchetype, weapon: 'sniper' as WeaponType },
-      { name: 'Roach_01', archetype: 'assault' as AIArchetype, weapon: 'm4' as WeaponType },
-      { name: 'Kruger_SpecOps', archetype: 'flanker' as AIArchetype, weapon: 'deagle' as WeaponType },
-      { name: 'Minotaur_Enforcer', archetype: 'heavy' as AIArchetype, weapon: 'm4' as WeaponType },
-      { name: 'Bale_Vanguard', archetype: 'assault' as AIArchetype, weapon: 'mp5' as WeaponType },
-    ];
+    if (count <= 0) return;
 
-    for (let i = 0; i < count; i++) {
-      const rosterItem = botRoster[i % botRoster.length];
-      const spawnPt = this.map.spawnPoints[(i + 3) % this.map.spawnPoints.length];
-      const team = 'axis';
+    if (gameMode === 'tdm') {
+      // In TDM: 5v5 Match (Task Force 141 Allies vs Kortac Axis)
+      // Player is squad leader of Allies team!
+      // Allies team bots (4 friendly bots): Ghost, Soap, Price, Gaz
+      const alliesRoster = [
+        { name: 'Ghost_Riley', archetype: 'flanker' as AIArchetype, weapon: 'mp5' as WeaponType },
+        { name: 'Soap_MacTavish', archetype: 'assault' as AIArchetype, weapon: 'm4' as WeaponType },
+        { name: 'Price_Bravo6', archetype: 'heavy' as AIArchetype, weapon: 'shotgun' as WeaponType },
+        { name: 'Gaz_Garrick', archetype: 'sniper' as AIArchetype, weapon: 'sniper' as WeaponType },
+      ];
 
-      const bot = new BotController(
-        `bot_${i}`,
-        rosterItem.name + (i >= botRoster.length ? `_${i}` : ''),
-        team,
-        rosterItem.archetype,
-        rosterItem.weapon,
-        spawnPt.position.clone(),
-        difficulty,
-        this.scene,
-        this.map,
-        this.particles,
-        this
-      );
+      // Axis team bots (5 enemy bots): Viper, Kruger, Minotaur, Bale, Shadow
+      const axisRoster = [
+        { name: 'Viper_01', archetype: 'assault' as AIArchetype, weapon: 'm4' as WeaponType },
+        { name: 'Kruger_SpecOps', archetype: 'flanker' as AIArchetype, weapon: 'deagle' as WeaponType },
+        { name: 'Minotaur_Enforcer', archetype: 'heavy' as AIArchetype, weapon: 'shotgun' as WeaponType },
+        { name: 'Bale_Vanguard', archetype: 'assault' as AIArchetype, weapon: 'mp5' as WeaponType },
+        { name: 'Shadow_Lead', archetype: 'sniper' as AIArchetype, weapon: 'sniper' as WeaponType },
+      ];
 
-      this.bots.push(bot);
+      const allySpawns = this.map.spawnPoints.filter(s => s.team === 'allies');
+      const axisSpawns = this.map.spawnPoints.filter(s => s.team === 'axis');
+
+      // Spawn Allied bots at Allied Base (South)
+      alliesRoster.forEach((r, idx) => {
+        const spawnPt = allySpawns[idx % (allySpawns.length || 1)] || this.map.spawnPoints[0];
+        const bot = new BotController(
+          `ally_${idx}`,
+          r.name,
+          'allies',
+          r.archetype,
+          r.weapon,
+          spawnPt.position.clone(),
+          difficulty,
+          this.scene,
+          this.map,
+          this.particles,
+          this
+        );
+        this.bots.push(bot);
+      });
+
+      // Spawn Axis bots at Axis Base (North)
+      axisRoster.forEach((r, idx) => {
+        const spawnPt = axisSpawns[idx % (axisSpawns.length || 1)] || this.map.spawnPoints[this.map.spawnPoints.length - 1];
+        const bot = new BotController(
+          `axis_${idx}`,
+          r.name,
+          'axis',
+          r.archetype,
+          r.weapon,
+          spawnPt.position.clone(),
+          difficulty,
+          this.scene,
+          this.map,
+          this.particles,
+          this
+        );
+        this.bots.push(bot);
+      });
+    } else {
+      // FFA, Battle Royale, or Gun Game
+      const freeRoster = [
+        { name: 'Viper_01', archetype: 'assault' as AIArchetype, weapon: 'm4' as WeaponType },
+        { name: 'Kruger_SpecOps', archetype: 'flanker' as AIArchetype, weapon: 'deagle' as WeaponType },
+        { name: 'Minotaur_Enforcer', archetype: 'heavy' as AIArchetype, weapon: 'shotgun' as WeaponType },
+        { name: 'Bale_Vanguard', archetype: 'assault' as AIArchetype, weapon: 'mp5' as WeaponType },
+        { name: 'Shadow_Lead', archetype: 'sniper' as AIArchetype, weapon: 'sniper' as WeaponType },
+        { name: 'Ghost_Operative', archetype: 'flanker' as AIArchetype, weapon: 'mp5' as WeaponType },
+        { name: 'Ronin_Tactical', archetype: 'assault' as AIArchetype, weapon: 'm4' as WeaponType },
+        { name: 'Mace_Carnage', archetype: 'heavy' as AIArchetype, weapon: 'shotgun' as WeaponType },
+      ];
+
+      for (let i = 0; i < count; i++) {
+        const rosterItem = freeRoster[i % freeRoster.length];
+        const spawnPt = this.map.spawnPoints[i % this.map.spawnPoints.length];
+        const bot = new BotController(
+          `bot_${i}`,
+          rosterItem.name + (i >= freeRoster.length ? `_${i}` : ''),
+          'axis',
+          rosterItem.archetype,
+          rosterItem.weapon,
+          spawnPt.position.clone(),
+          difficulty,
+          this.scene,
+          this.map,
+          this.particles,
+          this
+        );
+        this.bots.push(bot);
+      }
     }
   }
 
@@ -591,7 +658,10 @@ export class BotController {
       this.botWeaponMesh.rotation.set(0, Math.PI, 0);
     }
 
-    const spawnPt = this.map.spawnPoints[Math.floor(Math.random() * this.map.spawnPoints.length)];
+    // Designated Team Spawn Points
+    const teamSpawns = this.map.spawnPoints.filter(s => s.team === this.team);
+    const spawnList = teamSpawns.length > 0 ? teamSpawns : this.map.spawnPoints;
+    const spawnPt = spawnList[Math.floor(Math.random() * spawnList.length)];
     this.position.set(spawnPt.position.x, 0, spawnPt.position.z);
     this.velocity.set(0, 0, 0);
     this.ragdollVelocity.set(0, 0, 0);
@@ -735,40 +805,55 @@ export class BotController {
       }
     }
 
+    const isNight = weatherPreset === 'midnight_fog' || weatherPreset === 'tactical_storm';
+
+    // 1. Target Acquisition: Find nearest valid visible hostile target
+    // Allied bots ONLY target Axis bots! (Never the player)
+    // Axis bots target the Player OR Allied bots!
+    let targetEntity: { type: 'player'; pos: THREE.Vector3; dist: number } | { type: 'bot'; bot: BotController; pos: THREE.Vector3; dist: number } | null = null;
+    let closestHostileDist = 999;
+
+    // Check Player if this bot is Axis
+    if (this.team === 'axis' && playerHealth > 0) {
+      const distToPlayer = this.position.distanceTo(playerPos);
+      if (this.canSeeTarget(playerPos, weatherPreset, playerFlashlightActive, playerIsCrouching, isPlayerSprinting)) {
+        targetEntity = { type: 'player', pos: playerPos, dist: distToPlayer };
+        closestHostileDist = distToPlayer;
+      }
+    }
+
+    // Check Enemy Bots
+    for (const other of allBots) {
+      if (other === this || other.isDead || other.team === this.team) continue;
+      const d = this.position.distanceTo(other.position);
+      if (d < closestHostileDist) {
+        const isOtherSprinting = other.velocity.lengthSq() > 14;
+        if (this.canSeeTarget(other.position, weatherPreset, false, false, isOtherSprinting)) {
+          targetEntity = { type: 'bot', bot: other, pos: other.position, dist: d };
+          closestHostileDist = d;
+        }
+      }
+    }
+
     const distToPlayer = this.position.distanceTo(playerPos);
-    const hasLineOfSight = this.checkLineOfSight(playerPos);
-    this.isVisibleToPlayer = hasLineOfSight;
+    this.isVisibleToPlayer = this.checkLineOfSight(playerPos);
 
-    // Dynamic Visibility / Darkness / Weather Range Calculation
-    let maxSightDist = this.archetype === 'sniper' ? 70 : 45;
-    if (weatherPreset === 'midnight_fog') {
-      // In dark night / fog: vision severely limited unless player shines light
-      maxSightDist = playerFlashlightActive ? 45 : (this.archetype === 'sniper' ? 24 : 14);
-    } else if (weatherPreset === 'sandstorm') {
-      maxSightDist = playerFlashlightActive ? 38 : (this.archetype === 'sniper' ? 32 : 20);
-    } else if (weatherPreset === 'tactical_storm') {
-      maxSightDist = playerFlashlightActive ? 42 : (this.archetype === 'sniper' ? 38 : 26);
-    }
-
-    // Stealth stance detection reduction
-    if (playerIsCrouching) {
-      maxSightDist *= 0.75;
-    }
-
-    // Perception & State Machine with Human Acquisition Delay
-    if (playerHealth > 0 && distToPlayer <= maxSightDist && hasLineOfSight) {
+    // Perception & State Machine with Human Reaction Delay
+    if (targetEntity) {
       if (this.alertLevel !== 'combat') {
         this.alertLevel = 'combat';
-        this.targetAcquisitionTimer = this.reactionTime; // Human reaction time delay!
-        this.squad.reportPlayerSpotted(playerPos, this);
+        // Human reaction delay: recruit=0.85s, regular=0.55s, plus darkness delay in night
+        this.targetAcquisitionTimer = this.reactionTime + (isNight && !playerFlashlightActive ? 0.45 : 0);
+        if (targetEntity.type === 'player') {
+          this.squad.reportPlayerSpotted(playerPos, this);
+        }
       }
 
       if (this.state !== 'cover' && this.state !== 'flank') {
         this.state = 'attack';
       }
-    } else if (this.state === 'attack' && (!hasLineOfSight || distToPlayer > maxSightDist * 1.25)) {
+    } else if (this.state === 'attack') {
       this.state = 'chase';
-      this.targetPos = new THREE.Vector3(playerPos.x, 0, playerPos.z);
       this.targetAcquisitionTimer = 0;
       this.burstShotsRemaining = 0;
     }
@@ -779,7 +864,7 @@ export class BotController {
 
     // Sniper Laser sight
     if (this.sniperLaserMesh) {
-      if (this.state === 'attack' && hasLineOfSight && !this.isReloading) {
+      if (this.state === 'attack' && targetEntity && !this.isReloading) {
         this.sniperLaserMesh.visible = true;
       } else {
         this.sniperLaserMesh.visible = false;
@@ -787,18 +872,23 @@ export class BotController {
     }
 
     // Behavior Execution
+    const activeTargetPos = targetEntity ? targetEntity.pos : (this.targetPos || playerPos);
+    const activeTargetDist = targetEntity ? targetEntity.dist : distToPlayer;
+    const isTargetPlayer = targetEntity ? targetEntity.type === 'player' : false;
+    const targetBot = (targetEntity && targetEntity.type === 'bot') ? targetEntity.bot : undefined;
+
     switch (this.state) {
       case 'cover':
-        this.updateCoverState(dt, playerPos, onPlayerDamage, distToPlayer, isPlayerSprinting, isPlayerSliding);
+        this.updateCoverState(dt, activeTargetPos, isTargetPlayer ? onPlayerDamage : undefined, targetBot, activeTargetDist, isPlayerSprinting, isPlayerSliding, isNight);
         break;
       case 'flank':
-        this.updateFlankState(dt, playerPos, onPlayerDamage, distToPlayer, hasLineOfSight);
+        this.updateFlankState(dt, activeTargetPos, isTargetPlayer ? onPlayerDamage : undefined, targetBot, activeTargetDist, !!targetEntity);
         break;
       case 'attack':
-        this.updateAttackState(dt, playerPos, onPlayerDamage, distToPlayer, isPlayerSprinting, isPlayerSliding);
+        this.updateAttackState(dt, activeTargetPos, isTargetPlayer ? onPlayerDamage : undefined, targetBot, activeTargetDist, isPlayerSprinting, isPlayerSliding, isNight);
         break;
       case 'chase':
-        this.updateChaseState(dt, playerPos);
+        this.updateChaseState(dt, activeTargetPos);
         break;
       case 'patrol':
       default:
@@ -919,11 +1009,13 @@ export class BotController {
   // --- STATE HANDLERS ---
   private updateCoverState(
     dt: number,
-    playerPos: THREE.Vector3,
-    onPlayerDamage: (dmg: number, botName: string, weapon: WeaponType, botPos: THREE.Vector3) => void,
-    distToPlayer: number,
-    isPlayerSprinting: boolean,
-    isPlayerSliding: boolean
+    targetPos: THREE.Vector3,
+    onPlayerDamage?: (dmg: number, botName: string, weapon: WeaponType, botPos: THREE.Vector3) => void,
+    targetBot?: BotController,
+    distToTarget: number = 20,
+    isPlayerSprinting: boolean = false,
+    isPlayerSliding: boolean = false,
+    isNight: boolean = false
   ) {
     if (!this.currentCover || !this.currentCover.isAvailable) {
       this.state = 'attack';
@@ -931,7 +1023,6 @@ export class BotController {
       return;
     }
 
-    // If bot needs reload, reload safely behind cover
     if (this.magAmmo <= 0 && !this.isReloading) {
       this.startReload();
     }
@@ -952,12 +1043,12 @@ export class BotController {
       this.coverTimer += dt;
       if (this.isPeeking && !this.isReloading) {
         this.peekTimer += dt;
-        const lookTarget = new THREE.Vector3(playerPos.x, this.position.y, playerPos.z);
+        const lookTarget = new THREE.Vector3(targetPos.x, this.position.y, targetPos.z);
         this.group.lookAt(lookTarget);
 
-        const hasLoS = this.checkLineOfSight(playerPos);
+        const hasLoS = this.checkLineOfSight(targetPos);
         if (hasLoS && this.canFire() && this.squad.requestAttackToken()) {
-          this.executeBurstFire(playerPos, onPlayerDamage, distToPlayer, isPlayerSprinting, isPlayerSliding);
+          this.executeBurstFire(targetPos, onPlayerDamage, targetBot, distToTarget, isPlayerSprinting, isPlayerSliding, isNight);
         }
 
         if (this.peekTimer > 1.5 || this.magAmmo <= 0) {
@@ -967,7 +1058,6 @@ export class BotController {
           if (this.magAmmo <= 0) this.startReload();
         }
       } else {
-        // Ducked in cover: wait 1.8s - 2.5s before next peek
         if (this.coverTimer > 2.0 && !this.isReloading) {
           this.isPeeking = true;
           this.peekTimer = 0;
@@ -978,12 +1068,13 @@ export class BotController {
 
   private updateFlankState(
     dt: number,
-    playerPos: THREE.Vector3,
-    onPlayerDamage: (dmg: number, botName: string, weapon: WeaponType, botPos: THREE.Vector3) => void,
-    distToPlayer: number,
-    hasLineOfSight: boolean
+    targetPos: THREE.Vector3,
+    onPlayerDamage?: (dmg: number, botName: string, weapon: WeaponType, botPos: THREE.Vector3) => void,
+    targetBot?: BotController,
+    distToTarget: number = 20,
+    hasTarget: boolean = true
   ) {
-    if (this.flankIndex >= this.flankPath.length || (hasLineOfSight && distToPlayer < 22)) {
+    if (this.flankIndex >= this.flankPath.length || (hasTarget && distToTarget < 22)) {
       this.state = 'attack';
       this.velocity.set(0, 0, 0);
       return;
@@ -1010,25 +1101,26 @@ export class BotController {
 
   private updateAttackState(
     dt: number,
-    playerPos: THREE.Vector3,
-    onPlayerDamage: (dmg: number, botName: string, weapon: WeaponType, botPos: THREE.Vector3) => void,
-    distToPlayer: number,
-    isPlayerSprinting: boolean,
-    isPlayerSliding: boolean
+    targetPos: THREE.Vector3,
+    onPlayerDamage?: (dmg: number, botName: string, weapon: WeaponType, botPos: THREE.Vector3) => void,
+    targetBot?: BotController,
+    distToTarget: number = 20,
+    isPlayerSprinting: boolean = false,
+    isPlayerSliding: boolean = false,
+    isNight: boolean = false
   ) {
-    const hasLoS = this.checkLineOfSight(playerPos);
+    const hasLoS = this.checkLineOfSight(targetPos);
     if (!hasLoS) {
       this.state = 'chase';
-      this.targetPos = new THREE.Vector3(playerPos.x, 0, playerPos.z);
+      this.targetPos = new THREE.Vector3(targetPos.x, 0, targetPos.z);
       this.velocity.set(0, 0, 0);
       this.burstShotsRemaining = 0;
       return;
     }
 
-    // If magazine empty, start reload and seek cover/strafe
     if (this.magAmmo <= 0 && !this.isReloading) {
       this.startReload();
-      const cover = this.findBestCover(playerPos);
+      const cover = this.findBestCover(targetPos);
       if (cover) {
         this.currentCover = cover;
         this.state = 'cover';
@@ -1036,50 +1128,47 @@ export class BotController {
       }
     }
 
-    const lookTarget = new THREE.Vector3(playerPos.x, this.position.y, playerPos.z);
+    const lookTarget = new THREE.Vector3(targetPos.x, this.position.y, targetPos.z);
     this.group.lookAt(lookTarget);
 
-    const dx = playerPos.x - this.position.x;
-    const dz = playerPos.z - this.position.z;
+    const dx = targetPos.x - this.position.x;
+    const dz = targetPos.z - this.position.z;
     const dist2D = Math.max(0.01, Math.sqrt(dx * dx + dz * dz));
-    const toPlayerX = dx / dist2D;
-    const toPlayerZ = dz / dist2D;
+    const toTargetX = dx / dist2D;
+    const toTargetZ = dz / dist2D;
 
-    // Tactical Positioning on the XZ ground plane
     if (this.archetype === 'sniper') {
-      if (distToPlayer < 24) {
-        this.velocity.set(-toPlayerX * this.speed, 0, -toPlayerZ * this.speed);
+      if (distToTarget < 24) {
+        this.velocity.set(-toTargetX * this.speed, 0, -toTargetZ * this.speed);
         this.position.x += this.velocity.x * dt;
         this.position.z += this.velocity.z * dt;
       } else {
         this.velocity.set(0, 0, 0);
       }
-    } else if (this.archetype === 'assault' || this.archetype === 'heavy' || this.archetype === 'flanker') {
-      if (distToPlayer > 20) {
-        this.velocity.set(toPlayerX * this.speed, 0, toPlayerZ * this.speed);
+    } else {
+      if (distToTarget > 20) {
+        this.velocity.set(toTargetX * this.speed, 0, toTargetZ * this.speed);
         this.position.x += this.velocity.x * dt;
         this.position.z += this.velocity.z * dt;
-      } else if (distToPlayer < 6) {
-        this.velocity.set(-toPlayerX * this.speed * 0.85, 0, -toPlayerZ * this.speed * 0.85);
+      } else if (distToTarget < 6) {
+        this.velocity.set(-toTargetX * this.speed * 0.85, 0, -toTargetZ * this.speed * 0.85);
         this.position.x += this.velocity.x * dt;
         this.position.z += this.velocity.z * dt;
       } else {
-        // Lateral combat strafing with periodic direction switch
         if (this.strafeTimer > 1.8) {
           this.strafeTimer = 0;
           this.strafeDir = Math.random() < 0.5 ? -1 : 1;
         }
-        const rightX = -toPlayerZ;
-        const rightZ = toPlayerX;
+        const rightX = -toTargetZ;
+        const rightZ = toTargetX;
         this.velocity.set(rightX * 1.8 * this.strafeDir, 0, rightZ * 1.8 * this.strafeDir);
         this.position.x += this.velocity.x * dt;
         this.position.z += this.velocity.z * dt;
       }
     }
 
-    // Trigger Tactical Burst Fire ONLY if line of sight is clear
     if (this.canFire() && this.squad.requestAttackToken()) {
-      this.executeBurstFire(playerPos, onPlayerDamage, distToPlayer, isPlayerSprinting, isPlayerSliding);
+      this.executeBurstFire(targetPos, onPlayerDamage, targetBot, distToTarget, isPlayerSprinting, isPlayerSliding, isNight);
     }
   }
 
@@ -1094,62 +1183,58 @@ export class BotController {
   }
 
   private executeBurstFire(
-    playerPos: THREE.Vector3,
-    onPlayerDamage: (dmg: number, botName: string, weapon: WeaponType, botPos: THREE.Vector3) => void,
-    distToPlayer: number,
-    isPlayerSprinting: boolean,
-    isPlayerSliding: boolean
+    targetPos: THREE.Vector3,
+    onPlayerDamage?: (dmg: number, botName: string, weapon: WeaponType, botPos: THREE.Vector3) => void,
+    targetBot?: BotController,
+    distToTarget: number = 20,
+    isPlayerSprinting: boolean = false,
+    isPlayerSliding: boolean = false,
+    isNight: boolean = false
   ) {
-    // Before each burst bullet, verify line of sight
-    const hasLoS = this.checkLineOfSight(playerPos);
+    const hasLoS = this.checkLineOfSight(targetPos);
     if (!hasLoS) {
       this.burstShotsRemaining = 0;
       this.state = 'chase';
-      this.targetPos = new THREE.Vector3(playerPos.x, 0, playerPos.z);
+      this.targetPos = new THREE.Vector3(targetPos.x, 0, targetPos.z);
       return;
     }
 
     const wpnCfg = WEAPON_REGISTRY[this.weapon];
 
-    // If starting a new burst, initialize burst count
     if (this.burstShotsRemaining <= 0) {
       if (this.weapon === 'm4') {
-        this.burstShotsRemaining = Math.floor(Math.random() * 2) + 3; // 3-4 round burst
+        this.burstShotsRemaining = Math.floor(Math.random() * 2) + 3;
       } else if (this.weapon === 'mp5') {
-        this.burstShotsRemaining = Math.floor(Math.random() * 3) + 3; // 3-5 round burst
+        this.burstShotsRemaining = Math.floor(Math.random() * 3) + 3;
       } else if (this.weapon === 'deagle') {
-        this.burstShotsRemaining = Math.floor(Math.random() * 2) + 2; // 2-3 shots
+        this.burstShotsRemaining = Math.floor(Math.random() * 2) + 2;
       } else {
-        this.burstShotsRemaining = 1; // Sniper & Shotgun are single shot
+        this.burstShotsRemaining = 1;
       }
     }
 
-    // Fire one bullet of the burst
-    this.shootAtPlayer(playerPos, onPlayerDamage, distToPlayer, isPlayerSprinting, isPlayerSliding);
+    this.shootAtTarget(targetPos, onPlayerDamage, targetBot, distToTarget, isPlayerSprinting, isPlayerSliding, isNight);
     this.magAmmo--;
     this.burstShotsRemaining--;
 
     const cyclicInterval = 60 / wpnCfg.fireRateRpm;
 
     if (this.burstShotsRemaining > 0 && this.magAmmo > 0) {
-      // Next shot in this burst
       this.fireTimer = cyclicInterval;
     } else {
-      // Completed burst! Enter tactical burst pause (recoil reset & assessment)
       let pauseDuration = 0.8;
       if (this.weapon === 'sniper') {
-        pauseDuration = 2.0; // Bolt cycle
+        pauseDuration = 2.0;
       } else if (this.weapon === 'shotgun') {
-        pauseDuration = 1.3; // Pump action
+        pauseDuration = 1.3;
       } else if (this.weapon === 'm4') {
-        pauseDuration = 0.85 + Math.random() * 0.45; // 0.85s - 1.3s pause between bursts
+        pauseDuration = 0.85 + Math.random() * 0.45;
       } else if (this.weapon === 'mp5') {
         pauseDuration = 0.75 + Math.random() * 0.4;
       } else if (this.weapon === 'deagle') {
         pauseDuration = 0.9 + Math.random() * 0.5;
       }
 
-      // Difficulty adjustments to burst pause
       if (this.difficulty === 'recruit') pauseDuration *= 1.45;
       if (this.difficulty === 'hardened') pauseDuration *= 0.85;
       if (this.difficulty === 'veteran') pauseDuration *= 0.7;
@@ -1160,8 +1245,8 @@ export class BotController {
     }
   }
 
-  private updateChaseState(dt: number, playerPos: THREE.Vector3) {
-    if (!this.targetPos) this.targetPos = new THREE.Vector3(playerPos.x, 0, playerPos.z);
+  private updateChaseState(dt: number, targetPos: THREE.Vector3) {
+    if (!this.targetPos) this.targetPos = new THREE.Vector3(targetPos.x, 0, targetPos.z);
     this.targetPos.y = 0;
 
     const dx = this.targetPos.x - this.position.x;
@@ -1206,11 +1291,73 @@ export class BotController {
     }
   }
 
+  // --- REALISTIC PERCEPTION: VISION CONE & HUMAN NIGHT-BLINDNESS LIMITATIONS ---
+  private canSeeTarget(
+    targetPos: THREE.Vector3,
+    weatherPreset: string,
+    playerFlashlightActive: boolean = false,
+    targetIsCrouching: boolean = false,
+    targetIsSprinting: boolean = false
+  ): boolean {
+    const isNight = weatherPreset === 'midnight_fog' || weatherPreset === 'tactical_storm';
+    const dist = this.position.distanceTo(targetPos);
+
+    // 1. Forward Vision Cone Check
+    // Real players CANNOT see behind their heads!
+    const botForward = new THREE.Vector3(0, 0, 1).applyEuler(this.group.rotation);
+    botForward.y = 0;
+    botForward.normalize();
+
+    const dirToTarget = new THREE.Vector3().subVectors(targetPos, this.position);
+    dirToTarget.y = 0;
+    dirToTarget.normalize();
+
+    const angleDot = botForward.dot(dirToTarget);
+
+    // If target is behind the bot (> 100 degrees away from forward):
+    if (angleDot < -0.15) {
+      // Completely blind unless target is sprinting directly against them (< 3m)
+      if (dist < 3.0 && targetIsSprinting) {
+        return true;
+      }
+      return false;
+    }
+
+    // 2. Realistic Night Vision Limitations (Bots have human disadvantages!)
+    let maxSight = this.archetype === 'sniper' ? 65 : 44;
+    if (isNight) {
+      // In the dark: bots CANNOT magically see you through the night!
+      if (playerFlashlightActive) {
+        maxSight = 32; // Flashlight gives away position from afar
+      } else {
+        // Natural human vision in pitch black / night fog: strictly 11 meters!
+        maxSight = this.archetype === 'sniper' ? 15 : 11;
+        if (targetIsCrouching) {
+          // Sneaking in darkness / shadows: 7 meters!
+          maxSight = 7.0;
+        }
+      }
+    } else if (weatherPreset === 'sandstorm') {
+      maxSight = playerFlashlightActive ? 28 : (this.archetype === 'sniper' ? 22 : 15);
+    }
+
+    // Peripheral vision reduction (target is in side vision)
+    if (angleDot < 0.45) {
+      maxSight *= 0.55;
+    }
+
+    if (dist > maxSight) {
+      return false;
+    }
+
+    // 3. Raycast line of sight check
+    return this.checkLineOfSight(targetPos);
+  }
+
   private checkLineOfSight(targetPos: THREE.Vector3): boolean {
     const eyePos = new THREE.Vector3(this.position.x, this.position.y + 1.55, this.position.z);
     
     // Multi-elevation line-of-sight checks with smoke occlusion
-    // Check against player Head, Upper Chest, and Pelvis
     const headTarget = new THREE.Vector3(targetPos.x, targetPos.y + 0.1, targetPos.z);
     const chestTarget = new THREE.Vector3(targetPos.x, targetPos.y - 0.45, targetPos.z);
     const lowerTarget = new THREE.Vector3(targetPos.x, targetPos.y - 1.2, targetPos.z);
@@ -1227,23 +1374,23 @@ export class BotController {
     return false;
   }
 
-  private shootAtPlayer(
-    playerPos: THREE.Vector3,
-    onPlayerDamage: (dmg: number, botName: string, weapon: WeaponType, botPos: THREE.Vector3) => void,
-    dist: number,
+  private shootAtTarget(
+    targetPos: THREE.Vector3,
+    onPlayerDamage?: (dmg: number, botName: string, weapon: WeaponType, botPos: THREE.Vector3) => void,
+    targetBot?: BotController,
+    dist: number = 20,
     isPlayerSprinting: boolean = false,
-    isPlayerSliding: boolean = false
+    isPlayerSliding: boolean = false,
+    isNight: boolean = false
   ) {
     const wpnCfg = WEAPON_REGISTRY[this.weapon];
 
-    // Bullet origin strictly at bot's upper chest / eye level inside collision radius
     const origin = new THREE.Vector3(this.position.x, this.position.y + 1.4, this.position.z);
-    const playerChestTarget = new THREE.Vector3(playerPos.x, playerPos.y - 0.4, playerPos.z);
+    const chestTarget = new THREE.Vector3(targetPos.x, targetPos.y - 0.4, targetPos.z);
 
-    // Initial direct check against walls: if direct line to player is blocked, no damage can ever pass!
-    const directCheck = CollisionSystem.checkLineOfSight(origin, playerChestTarget, this.map.obstacles, this.squad.smokeClouds);
+    const directCheck = CollisionSystem.checkLineOfSight(origin, chestTarget, this.map.obstacles, this.squad.smokeClouds);
     if (!directCheck.isClear && directCheck.hitPoint) {
-      const dir = new THREE.Vector3().subVectors(playerChestTarget, origin).normalize();
+      const dir = new THREE.Vector3().subVectors(chestTarget, origin).normalize();
       this.particles.emitMuzzleFlash(origin, dir);
       this.particles.spawnBulletTracer(origin, directCheck.hitPoint);
       soundManager.playSpatialGunshot(this.weapon, this.position, true);
@@ -1251,9 +1398,8 @@ export class BotController {
       return;
     }
 
-    const aimTarget = playerChestTarget.clone();
+    const aimTarget = chestTarget.clone();
 
-    // Dynamic Accuracy Calculation (Fair & Tactical)
     let effectiveAccuracy = this.accuracy;
     if (dist > 18) {
       effectiveAccuracy *= Math.max(0.35, 1 - (dist - 18) / 50);
@@ -1264,10 +1410,15 @@ export class BotController {
       effectiveAccuracy *= 0.35;
     }
 
+    // Realistic human aiming handicap at night: reduced accuracy & higher spread
+    if (isNight) {
+      effectiveAccuracy *= 0.6;
+    }
+
     const isAccurate = Math.random() < effectiveAccuracy;
     if (!isAccurate) {
-      // Natural bullet spread based on distance
-      const spreadRadius = Math.min(4.5, 1.0 + dist * 0.07);
+      let spreadRadius = Math.min(4.5, 1.0 + dist * 0.07);
+      if (isNight) spreadRadius *= 1.6; // Wider spread in darkness
       aimTarget.x += (Math.random() - 0.5) * spreadRadius;
       aimTarget.y += (Math.random() - 0.5) * (spreadRadius * 0.5);
       aimTarget.z += (Math.random() - 0.5) * spreadRadius;
@@ -1275,7 +1426,6 @@ export class BotController {
 
     const dir = new THREE.Vector3().subVectors(aimTarget, origin).normalize();
 
-    // Check if bullet trajectory hits an obstacle
     const bulletCheck = CollisionSystem.checkLineOfSight(origin, aimTarget, this.map.obstacles, this.squad.smokeClouds);
 
     if (!bulletCheck.isClear && bulletCheck.hitPoint) {
@@ -1298,17 +1448,16 @@ export class BotController {
 
     // Unobstructed shot
     this.lastShotTime = Date.now();
-    this.weaponRecoilKick = 0.45; // Physical muzzle kick
+    this.weaponRecoilKick = 0.45;
     this.particles.emitMuzzleFlash(origin, dir);
     this.particles.spawnBulletTracer(origin, aimTarget);
     soundManager.playSpatialGunshot(this.weapon, this.position, false);
 
-    if (!isAccurate) {
-      // Supersonic bullet flyby / snap-thump doppler effect near player
+    if (!isAccurate && onPlayerDamage) {
       const bulletLine = new THREE.Line3(origin, aimTarget);
       const closestPoint = new THREE.Vector3();
-      bulletLine.closestPointToPoint(playerPos, true, closestPoint);
-      if (closestPoint.distanceTo(playerPos) < 3.8) {
+      bulletLine.closestPointToPoint(targetPos, true, closestPoint);
+      if (closestPoint.distanceTo(targetPos) < 3.8) {
         soundManager.playSupersonicFlyby(closestPoint, dir, 780);
       }
     }
@@ -1320,7 +1469,16 @@ export class BotController {
         effectiveDmg = wpnCfg.damage - falloffRatio * (wpnCfg.damage - wpnCfg.minDamage);
       }
       const finalDmg = Math.max(wpnCfg.minDamage, Math.floor(effectiveDmg * (Math.random() * 0.2 + 0.85)));
-      onPlayerDamage(finalDmg, this.name, this.weapon, this.position);
+
+      if (onPlayerDamage) {
+        onPlayerDamage(finalDmg, this.name, this.weapon, this.position);
+      } else if (targetBot && !targetBot.isDead) {
+        const isKill = targetBot.takeDamage(finalDmg, false, dir);
+        if (isKill) {
+          this.kills++;
+          this.squad.onBotKillBot?.(this.team, this.name, targetBot.name, this.weapon);
+        }
+      }
     }
   }
 

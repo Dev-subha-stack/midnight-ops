@@ -187,7 +187,7 @@ export class TextureGenerator {
   }
 
   // --- WEAPON CAMO TEXTURES ---
-  public static createWeaponCamoTexture(camo: 'standard' | 'damascus' | 'gold' | 'woodland' | 'carbon'): THREE.Texture {
+  public static createWeaponCamoTexture(camo: 'standard' | 'damascus' | 'gold' | 'woodland' | 'carbon' | 'obsidian'): THREE.Texture {
     const key = `camo_${camo}`;
     if (this.cache.has(key)) return this.cache.get(key)!;
 
@@ -197,6 +197,24 @@ export class TextureGenerator {
     const ctx = canvas.getContext('2d')!;
 
     switch (camo) {
+      case 'obsidian': {
+        // Deep obsidian glossy black with subtle crystalline prismatic facet reflections
+        ctx.fillStyle = '#05070a';
+        ctx.fillRect(0, 0, 512, 512);
+        ctx.strokeStyle = '#1e293b';
+        ctx.lineWidth = 1.5;
+        for (let i = 0; i < 40; i++) {
+          const x = (i * 37) % 512;
+          const y = (i * 53) % 512;
+          ctx.beginPath();
+          ctx.moveTo(x, y);
+          ctx.lineTo(x + 40, y + 25);
+          ctx.lineTo(x + 20, y + 60);
+          ctx.closePath();
+          ctx.stroke();
+        }
+        break;
+      }
       case 'damascus': {
         // Iridescent wave Damascus steel pattern with blue, purple and silver lines
         ctx.fillStyle = '#0f172a';
@@ -285,6 +303,171 @@ export class TextureGenerator {
         }
         break;
       }
+    }
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    this.cache.set(key, texture);
+    return texture;
+  }
+
+  // --- AAA HIGH-FIDELITY GUNMETAL RECEIVER TEXTURE ---
+  public static createGunMetalTexture(weaponType: string = 'm4'): THREE.Texture {
+    const key = `gunmetal_receiver_${weaponType}`;
+    if (this.cache.has(key)) return this.cache.get(key)!;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 512;
+    const ctx = canvas.getContext('2d')!;
+
+    // Anodized Parkerized Steel Base
+    const grad = ctx.createLinearGradient(0, 0, 512, 512);
+    grad.addColorStop(0, '#1c1e22');
+    grad.addColorStop(0.5, '#23272d');
+    grad.addColorStop(1, '#181a1d');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 512, 512);
+
+    // Micro-abrasion horizontal brushing
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
+    ctx.lineWidth = 1;
+    for (let y = 0; y < 512; y += 2) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(512, y);
+      ctx.stroke();
+    }
+
+    // Edge bevel highlights & seam lines
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(10, 10, 492, 492);
+
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.6)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(128, 0);
+    ctx.lineTo(128, 512);
+    ctx.moveTo(384, 0);
+    ctx.lineTo(384, 512);
+    ctx.stroke();
+
+    // Laser-engraved markings & Caliber stencils
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.32)';
+    ctx.font = 'bold 15px monospace';
+
+    if (weaponType === 'm4') {
+      ctx.fillText('CAL. 5.56x45mm NATO', 24, 64);
+      ctx.fillText('MOD: M4A1 CARBINE', 24, 88);
+      ctx.fillText('SER: US-894102-K', 24, 112);
+      ctx.fillStyle = '#ef4444';
+      ctx.fillText('AUTO', 420, 220);
+      ctx.fillStyle = '#f59e0b';
+      ctx.fillText('SEMI', 420, 250);
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+      ctx.fillText('SAFE', 420, 280);
+    } else if (weaponType === 'mp5') {
+      ctx.fillText('CAL. 9x19mm PARA', 24, 64);
+      ctx.fillText('HK LACHMANN SUB', 24, 88);
+      ctx.fillText('MADE IN GERMANY', 24, 112);
+    } else if (weaponType === 'sniper') {
+      ctx.fillText('CAL. .50 BMG (12.7x99mm)', 24, 64);
+      ctx.fillText('AX-50 PRECISION CHASSIS', 24, 88);
+      ctx.fillText('MAX RANGE: 2200M', 24, 112);
+    } else if (weaponType === 'shotgun') {
+      ctx.fillText('12 GAUGE 2-3/4" OR 3"', 24, 64);
+      ctx.fillText('MODEL 680 BREACHER', 24, 88);
+      ctx.fillText('TACTICAL PATROL BARREL', 24, 112);
+    } else {
+      ctx.fillText('DESERT EAGLE PISTOL', 24, 64);
+      ctx.fillText('.50 ACTION EXPRESS', 24, 88);
+      ctx.fillText('MAGNUM RESEARCH INC.', 24, 112);
+    }
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    this.cache.set(key, texture);
+    return texture;
+  }
+
+  // --- TACTICAL POLYMER STIPPLING TEXTURE (GRIPS / STOCKS / PMAGS) ---
+  public static createPolymerStippleTexture(): THREE.Texture {
+    const key = 'polymer_stipple';
+    if (this.cache.has(key)) return this.cache.get(key)!;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 256;
+    const ctx = canvas.getContext('2d')!;
+
+    // Matte composite base
+    ctx.fillStyle = '#1b1d22';
+    ctx.fillRect(0, 0, 256, 256);
+
+    // Stippled dimple noise
+    for (let x = 0; x < 256; x += 4) {
+      for (let y = 0; y < 256; y += 4) {
+        const offset = (Math.random() - 0.5) * 2;
+        const brightness = Math.random() * 40;
+        ctx.fillStyle = `rgb(${25 + brightness}, ${27 + brightness}, ${32 + brightness})`;
+        ctx.beginPath();
+        ctx.arc(x + 2 + offset, y + 2 + offset, 1.2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(2, 2);
+    this.cache.set(key, texture);
+    return texture;
+  }
+
+  // --- STAMPED STEEL MAGAZINE TEXTURE ---
+  public static createSteelMagTexture(): THREE.Texture {
+    const key = 'steel_mag';
+    if (this.cache.has(key)) return this.cache.get(key)!;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 512;
+    const ctx = canvas.getContext('2d')!;
+
+    // Stamped gunmetal blue-black
+    ctx.fillStyle = '#16181b';
+    ctx.fillRect(0, 0, 256, 512);
+
+    // Stamped vertical ribs
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+    ctx.fillRect(32, 20, 12, 472);
+    ctx.fillRect(112, 20, 12, 472);
+    ctx.fillRect(212, 20, 12, 472);
+
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+    ctx.fillRect(44, 20, 8, 472);
+    ctx.fillRect(124, 20, 8, 472);
+    ctx.fillRect(224, 20, 8, 472);
+
+    // Round witness inspection holes with brass cartridge glimpses
+    for (let y = 100; y < 450; y += 60) {
+      ctx.fillStyle = '#0a0a0c';
+      ctx.beginPath();
+      ctx.arc(170, y, 9, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Brass bullet reflection inside hole
+      ctx.fillStyle = '#d4af37';
+      ctx.beginPath();
+      ctx.arc(170, y, 6, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+      ctx.font = '10px monospace';
+      ctx.fillText(`${(y - 40) / 10}`, 130, y + 3);
     }
 
     const texture = new THREE.CanvasTexture(canvas);

@@ -1,6 +1,6 @@
 export type WeaponType = 'm4' | 'mp5' | 'sniper' | 'shotgun' | 'deagle';
 
-export type WeaponCamo = 'standard' | 'damascus' | 'gold' | 'woodland' | 'carbon';
+export type WeaponCamo = 'standard' | 'damascus' | 'gold' | 'woodland' | 'carbon' | 'obsidian';
 
 export type OpticType = 'iron_sight' | 'reflex_dot' | 'red_dot_micro' | 'holo_553' | 'acog_4x' | 'sniper_variable' | 'thermal_flir' | 'thermal_ir';
 
@@ -115,7 +115,30 @@ export interface KillFeedItem {
   timestamp: number;
 }
 
-export type GameMode = 'tdm' | 'ffa' | 'survival' | 'gungame' | 'targetrange' | 'training';
+export type GameMode = 'tdm' | 'ffa' | 'battleroyale' | 'survival' | 'gungame' | 'targetrange' | 'training';
+
+export interface BattleRoyaleState {
+  aliveCount: number;
+  totalPlayers: number;
+  circleRadius: number;
+  nextCircleRadius: number;
+  circleCenter: { x: number; z: number };
+  nextCircleCenter: { x: number; z: number };
+  shrinkTimer: number;
+  shrinkDuration: number;
+  phase: number;
+  maxPhases: number;
+  isShrinking: boolean;
+  isOutsideSafeZone: boolean;
+  zoneDamageDps?: number;
+  zoneDamagePerSec: number;
+  airdropActive?: boolean;
+  airdropPos?: { x: number; y: number; z: number } | null;
+  airdropLooted?: boolean;
+  airdropPosition?: { x: number; y: number; z: number; isLooted: boolean } | null;
+  placementRank?: number | null;
+  isVictory?: boolean;
+}
 
 export interface FloatingDamageNumberItem {
   id: string;

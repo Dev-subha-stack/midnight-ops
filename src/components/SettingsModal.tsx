@@ -161,9 +161,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
           {/* Audio */}
           <div className="flex flex-col gap-2.5 bg-slate-900/40 p-4 rounded-xl border border-slate-800/80">
-            <div className="flex items-center gap-2 text-xs font-mono font-bold text-slate-400 uppercase">
-              <Volume2 className="w-3.5 h-3.5 text-cyan-400" />
-              <span>Combat Sound FX Audio</span>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-xs font-mono font-bold text-slate-400 uppercase">
+                <Volume2 className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Combat Sound FX Audio</span>
+              </div>
+              <span className="text-[10px] font-mono font-bold bg-amber-500/10 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded">
+                PUBG DATASET ACTIVE
+              </span>
             </div>
             <div className="flex justify-between text-xs font-medium">
               <span className="text-slate-300">SFX Master Volume</span>
@@ -178,6 +183,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               onChange={e => handleChange('sfxVolume', parseFloat(e.target.value))}
               className="w-full accent-cyan-400 cursor-pointer h-1.5 bg-slate-800 rounded-lg"
             />
+            <div className="text-[11px] text-slate-400 flex items-center justify-between pt-1">
+              <span className="text-slate-400 font-mono text-[10px]">PUBG Weapon Audio (M416, UMP, AWM, Pump, Deagle)</span>
+              <button
+                type="button"
+                onClick={() => {
+                  soundManager.init();
+                  soundManager.playGunshot('m4');
+                }}
+                className="text-[10px] font-mono px-2 py-0.5 bg-cyan-950 border border-cyan-500/40 text-cyan-300 hover:bg-cyan-900 rounded cursor-pointer transition-colors"
+              >
+                TEST FIRE
+              </button>
+            </div>
           </div>
         </div>
 

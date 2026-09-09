@@ -260,11 +260,14 @@ export class FPSController {
   ) {
     this.currentWeapon = type;
     this.currentCamo = camo;
+    if (!this.equippedOptics[type]) {
+      this.equippedOptics[type] = DEFAULT_WEAPON_OPTICS[type] || 'holo_553';
+    }
     if (optic) this.equippedOptics[type] = optic;
     if (reticleColor) this.opticReticleColors[type] = reticleColor;
     if (reticleStyle) this.opticReticleStyles[type] = reticleStyle;
 
-    const currentOptic = this.equippedOptics[type] || 'holo_553';
+    const currentOptic = this.equippedOptics[type] || DEFAULT_WEAPON_OPTICS[type] || 'holo_553';
     const currentColor = this.opticReticleColors[type] || 'red';
     const currentStyle = this.opticReticleStyles[type] || 'dot';
 
@@ -329,12 +332,15 @@ export class FPSController {
           }
         } else if (!this.isAiming && !this.isCrouching) {
           const now = performance.now();
-          if (now - this.lastShiftPressTime < 380 && this.tacSprintStamina > 0.2) {
+          const movingForward = (this.keys['KeyW'] || this.keys['ArrowUp']) && !this.keys['KeyS'] && !this.keys['ArrowDown'];
+          // Double-tap Shift triggers tactical sprint high-ready burst; single tap/hold runs standard sprint
+          if (now - this.lastShiftPressTime < 320 && this.tacSprintStamina > 0.25 && movingForward) {
             this.isTacSprinting = true;
+            this.isSprinting = true;
             soundManager.playTacSprintStart();
-          } else if (!this.isTacSprinting && this.tacSprintStamina > 0.4) {
-            this.isTacSprinting = true;
-            soundManager.playTacSprintStart();
+          } else {
+            this.isTacSprinting = false;
+            this.isSprinting = true;
           }
           this.lastShiftPressTime = now;
         }
@@ -1141,21 +1147,23 @@ export class FPSController {
     this.updateLaserSight();
 
     // Camera FOV & ADS Zoom (with dynamic Optic magnification, Variable Zoom & Tac-Sprint)
-    const currentOptic = this.equippedOptics[this.currentWeapon] || 'holo_553';
+    const currentOptic = this.equippedOptics[this.currentWeapon] || DEFAULT_WEAPON_OPTICS[this.currentWeapon] || 'holo_553';
     const opticCfg = OPTIC_REGISTRY[currentOptic];
     let targetFov = this.settings.fieldOfView || 85;
 
-    const isFullScope = this.isAiming && !this.isTacStance && (opticCfg?.hasFullScopeOverlay || opticCfg?.magnification >= 3.0);
+    const isFullScope = this.isAiming && !this.isTacStance && Boolean(opticCfg?.hasFullScopeOverlay || (opticCfg?.magnification && opticCfg.magnification >= 3.0));
 
     if (this.isAiming) {
       if (this.isTacStance) {
         targetFov = targetFov - 10;
       } else if (opticCfg?.variableZoomSteps && opticCfg.variableZoomSteps.length > 0) {
         const mag = opticCfg.variableZoomSteps[this.opticZoomStepIndex % opticCfg.variableZoomSteps.length];
-        if (mag >= 8) {
-          targetFov = 12; // 10X Extreme Sniper Zoom
+        if (mag >= 10) {
+          targetFov = 11; // 12X Extreme Sniper Zoom
+        } else if (mag >= 7) {
+          targetFov = 18; // 8X Combat Sniper Zoom
         } else if (mag >= 4) {
-          targetFov = 24; // 4.5X Tactical Sniper Zoom
+          targetFov = 32; // 4X Tactical Zoom
         } else {
           targetFov = Math.max(10, Math.round(75 / mag));
         }
@@ -1601,23 +1609,30 @@ export class FPSController {
         targetOffset = { ...offsetCfg.ads };
         // Optic elevation alignment: aligns sight reticle / front post directly with camera optical axis
         if (currentOptic === 'reflex_dot' || currentOptic === 'red_dot_micro') {
-          if (this.currentWeapon === 'm4') targetOffset.y = -0.128;
-          else if (this.currentWeapon === 'mp5') targetOffset.y = -0.108;
-          else if (this.currentWeapon === 'shotgun') targetOffset.y = -0.118;
-          else if (this.currentWeapon === 'deagle') targetOffset.y = -0.133;
-          else if (this.currentWeapon === 'sniper') targetOffset.y = -0.155;
+          if (this.currentWeapon === 'm4') targetOffset.y = -0.143;
+          else if (this.currentWeapon === 'mp5') targetOffset.y = -0.123;
+          else if (this.currentWeapon === 'shotgun') targetOffset.y = -0.123;
+          else if (this.currentWeapon === 'deagle') targetOffset.y = -0.132;
+          else if (this.currentWeapon === 'sniper') targetOffset.y = -0.175;
         } else if (currentOptic === 'holo_553') {
-          if (this.currentWeapon === 'm4') targetOffset.y = -0.132;
-          else if (this.currentWeapon === 'mp5') targetOffset.y = -0.112;
-          else if (this.currentWeapon === 'shotgun') targetOffset.y = -0.122;
-          else if (this.currentWeapon === 'deagle') targetOffset.y = -0.135;
-          else if (this.currentWeapon === 'sniper') targetOffset.y = -0.158;
+          if (this.currentWeapon === 'm4') targetOffset.y = -0.150;
+          else if (this.currentWeapon === 'mp5') targetOffset.y = -0.130;
+          else if (this.currentWeapon === 'shotgun') targetOffset.y = -0.130;
+          else if (this.currentWeapon === 'deagle') targetOffset.y = -0.132;
+          else if (this.currentWeapon === 'sniper') targetOffset.y = -0.175;
         } else if (currentOptic === 'iron_sight') {
-          if (this.currentWeapon === 'm4') targetOffset.y = -0.098;
-          else if (this.currentWeapon === 'mp5') targetOffset.y = -0.088;
-          else if (this.currentWeapon === 'shotgun') targetOffset.y = -0.065;
-          else if (this.currentWeapon === 'deagle') targetOffset.y = -0.085;
-          else if (this.currentWeapon === 'sniper') targetOffset.y = -0.135;
+          if (this.currentWeapon === 'm4') targetOffset.y = -0.121;
+          else if (this.currentWeapon === 'mp5') targetOffset.y = -0.056;
+          else if (this.currentWeapon === 'shotgun') targetOffset.y = -0.054;
+          else if (this.currentWeapon === 'deagle') targetOffset.y = -0.094;
+          else if (this.currentWeapon === 'sniper') targetOffset.y = -0.175;
+        } else if (currentOptic === 'acog_4x') {
+          if (this.currentWeapon === 'm4') targetOffset.y = -0.140;
+          else if (this.currentWeapon === 'mp5') targetOffset.y = -0.120;
+          else if (this.currentWeapon === 'sniper') targetOffset.y = -0.175;
+        } else if (currentOptic === 'thermal_flir' || currentOptic === 'thermal_ir') {
+          if (this.currentWeapon === 'm4') targetOffset.y = -0.143;
+          else if (this.currentWeapon === 'sniper') targetOffset.y = -0.175;
         }
       }
     } else if (this.isDiving) {
@@ -2078,12 +2093,20 @@ export class FPSController {
         // Standard sprint carry
         leftArm.position.set(-0.19, -0.22, -0.08);
         leftArm.rotation.set(-0.25, 0.1, -0.15);
+        rightArm.position.set(0.19, -0.20, 0.18);
         rightArm.rotation.set(0.15, -0.05, 0.1);
       } else if (leftArm && rightArm) {
         leftArm.position.set(-0.17, -0.17, -0.14);
         leftArm.rotation.set(0, 0, 0);
         rightArm.position.set(0.19, -0.19, 0.22);
         rightArm.rotation.set(0, 0, 0);
+      }
+
+      // Ensure viewmodel rig is completely hidden when aiming down high-power optical scopes
+      const isFullScope = this.isAiming && !this.isTacStance && Boolean(opticCfg?.hasFullScopeOverlay || (opticCfg?.magnification && opticCfg.magnification >= 3.0));
+      if (this.viewmodelRig && isFullScope) {
+        this.viewmodelRig.visible = false;
+        if (this.laserBeam) this.laserBeam.visible = false;
       }
     }
   }

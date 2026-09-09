@@ -109,12 +109,44 @@ export class ParticleSystem {
     }
   }
 
-  // --- BULLET TRACER ---
-  public spawnBulletTracer(start: THREE.Vector3, end: THREE.Vector3) {
+  // --- BULLET TRACER (CALIBER & VELOCITY SPECIFIC) ---
+  public spawnBulletTracer(start: THREE.Vector3, end: THREE.Vector3, weaponType: string = 'm4') {
+    let color = 0xfef08a;
+    let speed = 200;
+    let lineWidth = 2;
+
+    switch (weaponType) {
+      case 'sniper':
+        color = 0xfbbf24; // Radiant high-energy .50 BMG gold beam
+        speed = 340;
+        lineWidth = 3;
+        break;
+      case 'm4':
+        color = 0xa3e635; // 5.56 NATO high-visibility luminous green-yellow
+        speed = 260;
+        lineWidth = 2;
+        break;
+      case 'mp5':
+        color = 0xfef08a; // 9mm bright white-yellow streak
+        speed = 180;
+        lineWidth = 2;
+        break;
+      case 'shotgun':
+        color = 0xf87171; // 12GA fiery red/orange buckshot streak
+        speed = 150;
+        lineWidth = 2;
+        break;
+      case 'deagle':
+        color = 0xf97316; // .50 AE intense fiery orange tracer
+        speed = 210;
+        lineWidth = 3;
+        break;
+    }
+
     const geo = new THREE.BufferGeometry().setFromPoints([start, start.clone()]);
     const mat = new THREE.LineBasicMaterial({
-      color: 0xfef08a,
-      linewidth: 2,
+      color,
+      linewidth: lineWidth,
       transparent: true,
       opacity: 0.95,
       blending: THREE.AdditiveBlending,
@@ -126,7 +158,7 @@ export class ParticleSystem {
       start: start.clone(),
       end: end.clone(),
       current: start.clone(),
-      speed: 120, // Fast bullet speed
+      speed,
       progress: 0,
       mesh: line,
     });
@@ -329,19 +361,44 @@ export class ParticleSystem {
     }
   }
 
-  // --- BRASS SHELL EJECTION ---
-  public emitShellCasing(pos: THREE.Vector3, rightDir: THREE.Vector3) {
-    const geo = new THREE.CylinderGeometry(0.009, 0.009, 0.032, 8);
-    geo.rotateZ(Math.PI / 2);
-    const mat = new THREE.MeshStandardMaterial({ color: 0xf59e0b, metalness: 0.9, roughness: 0.2 });
-    const mesh = new THREE.Mesh(geo, mat);
+  // --- AUTHENTIC BRASS & SHOTSHELL CASING EJECTION ---
+  public emitShellCasing(pos: THREE.Vector3, rightDir: THREE.Vector3, weaponType: string = 'm4') {
+    let mesh: THREE.Mesh;
+
+    if (weaponType === 'shotgun') {
+      // 12-Gauge Red Plastic Hull with Brass Head
+      const geo = new THREE.CylinderGeometry(0.012, 0.012, 0.065, 10);
+      geo.rotateZ(Math.PI / 2);
+      const mat = new THREE.MeshStandardMaterial({ color: 0xdc2626, roughness: 0.35, metalness: 0.1 });
+      mesh = new THREE.Mesh(geo, mat);
+    } else if (weaponType === 'sniper') {
+      // Massive .50 BMG Heavy Casing
+      const geo = new THREE.CylinderGeometry(0.015, 0.015, 0.095, 10);
+      geo.rotateZ(Math.PI / 2);
+      const mat = new THREE.MeshStandardMaterial({ color: 0xd4af37, metalness: 0.95, roughness: 0.18 });
+      mesh = new THREE.Mesh(geo, mat);
+    } else if (weaponType === 'mp5') {
+      // Compact 9x19mm Parabellum Brass
+      const geo = new THREE.CylinderGeometry(0.007, 0.007, 0.024, 8);
+      geo.rotateZ(Math.PI / 2);
+      const mat = new THREE.MeshStandardMaterial({ color: 0xf59e0b, metalness: 0.9, roughness: 0.22 });
+      mesh = new THREE.Mesh(geo, mat);
+    } else {
+      // 5.56x45mm NATO Bottleneck Brass or .50 AE
+      const geo = new THREE.CylinderGeometry(0.008, 0.008, 0.038, 8);
+      geo.rotateZ(Math.PI / 2);
+      const mat = new THREE.MeshStandardMaterial({ color: 0xf59e0b, metalness: 0.92, roughness: 0.2 });
+      mesh = new THREE.Mesh(geo, mat);
+    }
+
     mesh.position.copy(pos);
     this.scene.add(mesh);
 
-    const vel = rightDir.clone().multiplyScalar(Math.random() * 2 + 2.5).add(new THREE.Vector3(0, Math.random() * 1.5 + 1.8, 0));
-    const rotVel = new THREE.Vector3(Math.random() * 20 - 10, Math.random() * 20 - 10, Math.random() * 20 - 10);
+    const lateralForce = weaponType === 'sniper' ? 4.2 : weaponType === 'shotgun' ? 3.0 : 2.5;
+    const vel = rightDir.clone().multiplyScalar(Math.random() * 1.5 + lateralForce).add(new THREE.Vector3(0, Math.random() * 1.5 + 2.0, 0));
+    const rotVel = new THREE.Vector3(Math.random() * 24 - 12, Math.random() * 24 - 12, Math.random() * 24 - 12);
 
-    this.shellCasings.push({ mesh, velocity: vel, rotVel, life: 3.0 });
+    this.shellCasings.push({ mesh, velocity: vel, rotVel, life: 3.5 });
   }
 
   // --- FRAME UPDATE ---

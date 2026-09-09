@@ -32,13 +32,18 @@ import {
   Target,
   ZoomIn,
   Timer,
+  AlertTriangle,
+  ShieldAlert,
+  Users,
 } from 'lucide-react';
 import { Minimap } from './Minimap';
 import { Killfeed } from './Killfeed';
+import { BattleRoyaleState } from '../types';
 
 interface HUDProps {
   stats: PlayerStats;
   gameMode?: GameMode;
+  battleRoyaleState?: BattleRoyaleState | null;
   currentWeapon: WeaponType;
   equippedOptic?: OpticType;
   reticleColor?: ReticleColor;
@@ -94,6 +99,7 @@ interface HUDProps {
 export const HUD: React.FC<HUDProps> = ({
   stats,
   gameMode = 'tdm',
+  battleRoyaleState,
   currentWeapon,
   equippedOptic = 'holo_553',
   reticleColor = 'red',
@@ -175,10 +181,11 @@ export const HUD: React.FC<HUDProps> = ({
   // Heading Degree for COD Compass Ribbon
   const headingDeg = Math.round(((-playerYaw * 180) / Math.PI + 360) % 360);
 
-  // Clean compass threat pips
+  // Clean compass threat pips (Only Axis hostiles)
   const compassThreats: { offsetPx: number; id: string }[] = [];
   bots.forEach(bot => {
-    if (bot.state === 'dead' || (!bot.isVisibleToPlayer && !bot.spottedByRadar && !uavActive)) return;
+    if (bot.state === 'dead' || bot.team === 'allies') return;
+    if (!bot.isVisibleToPlayer && !bot.spottedByRadar && !uavActive) return;
     const dx = bot.position.x - playerPos.x;
     const dz = bot.position.z - playerPos.z;
     const botWorldAngle = Math.atan2(dx, dz);
@@ -201,10 +208,25 @@ export const HUD: React.FC<HUDProps> = ({
 
   let targetLockedBot: { bot: EnemyBot; dist: number } | null = null;
 
-  // Clean, unobtrusive enemy markers: only minimal red pip and optional micro-healthbar when damaged
-  const enemyMarkers = bots
-    .filter(bot => bot.state !== 'dead' && (bot.isVisibleToPlayer || bot.spottedByRadar || uavActive))
+  // Real-Player overhead indicators for both Squad Allies and Hostile Enemies
+  const isNight = environment?.weather === 'midnight_fog' || environment?.weather === 'tactical_storm';
+
+  const playerMarkers = bots
+    .filter(bot => {
+      if (bot.state === 'dead') return false;
+      // Friendly allies always visible on HUD within squad range
+      if (bot.team === 'allies') return true;
+
+      // Hostile enemies: realistic visibility
+      // In deep night without laser/flashlight, enemies cannot be spotted magically through the dark
+      if (isNight && !laserActive && !uavActive) {
+        const d = Math.hypot(bot.position.x - playerPos.x, bot.position.z - playerPos.z);
+        return d < 18 && bot.isVisibleToPlayer;
+      }
+      return bot.isVisibleToPlayer || bot.spottedByRadar || uavActive;
+    })
     .map(bot => {
+      const isAlly = bot.team === 'allies';
       const dx = bot.position.x - playerPos.x;
       const dz = bot.position.z - playerPos.z;
       const distXZ = Math.sqrt(dx * dx + dz * dz);
@@ -220,14 +242,14 @@ export const HUD: React.FC<HUDProps> = ({
 
       // Reticle Target Acquisition
       const aimCone = isAiming ? 0.05 : 0.075;
-      if (Math.abs(relYaw) < aimCone && Math.abs(relPitch) < aimCone && distTotal < 65) {
+      if (!isAlly && Math.abs(relYaw) < aimCone && Math.abs(relPitch) < aimCone && distTotal < 65) {
         if (!targetLockedBot || distTotal < targetLockedBot.dist) {
           targetLockedBot = { bot, dist: distTotal };
         }
       }
 
       const inView = Math.abs(relYaw) < fovX * 0.52 && Math.abs(relPitch) < fovY * 0.55 && Math.cos(relYaw) > 0;
-      if (!inView || distTotal > 55) return null;
+      if (!inView || distTotal > (isAlly ? 55 : isNight ? 26 : 60)) return null;
 
       const screenX = (0.5 + Math.tan(relYaw) / (2 * Math.tan(fovX * 0.5))) * 100;
       const screenY = (0.5 - Math.tan(relPitch) / (2 * Math.tan(fovY * 0.5))) * 100;
@@ -235,10 +257,15 @@ export const HUD: React.FC<HUDProps> = ({
       if (screenX < 4 || screenX > 96 || screenY < 4 || screenY > 96) return null;
 
       const hpPct = Math.max(0, Math.min(100, (bot.health / bot.maxHealth) * 100));
+      const armorPct = Math.max(0, Math.min(100, (bot.armor / bot.maxArmor) * 100));
 
       return {
         id: bot.id,
+        name: bot.name,
+        team: bot.team,
+        isAlly,
         hpPct,
+        armorPct,
         dist: Math.round(distTotal),
         screenX,
         screenY,
@@ -246,7 +273,11 @@ export const HUD: React.FC<HUDProps> = ({
     })
     .filter(Boolean) as {
       id: string;
+      name: string;
+      team: 'allies' | 'axis';
+      isAlly: boolean;
       hpPct: number;
+      armorPct: number;
       dist: number;
       screenX: number;
       screenY: number;
@@ -336,7 +367,43 @@ export const HUD: React.FC<HUDProps> = ({
 
       {/* TOP-CENTER: MATCH SCORE STRIP & COD COMPASS TAPE */}
       <div id="hud-top-center" className="absolute top-3 left-0 right-0 flex flex-col items-center pointer-events-none z-30">
-        {isTrainingMode && trainingTelemetry ? (
+        {gameMode === 'battleroyale' && battleRoyaleState ? (
+          /* Battle Royale Live Status Strip */
+          <div className="flex items-center gap-4 bg-black/85 backdrop-blur-md px-5 py-2 rounded-xl border border-amber-500/40 shadow-2xl">
+            {/* Alive Players */}
+            <div className="flex items-center gap-2 pr-3 border-r border-slate-800">
+              <Users className="w-4 h-4 text-amber-400" />
+              <div className="flex flex-col">
+                <span className="text-[9px] font-mono uppercase text-slate-400 font-bold tracking-wider leading-none">ALIVE</span>
+                <span className="text-sm font-black font-mono text-white leading-tight">
+                  {battleRoyaleState.aliveCount} <span className="text-[10px] text-slate-500 font-normal">/ {battleRoyaleState.totalPlayers}</span>
+                </span>
+              </div>
+            </div>
+
+            {/* Zone Phase & Shrink Countdown */}
+            <div className="flex items-center gap-2 pr-3 border-r border-slate-800">
+              <ShieldAlert className={`w-4 h-4 ${battleRoyaleState.isShrinking ? 'text-red-500 animate-pulse' : 'text-sky-400'}`} />
+              <div className="flex flex-col">
+                <span className="text-[9px] font-mono uppercase text-slate-400 font-bold tracking-wider leading-none">
+                  {battleRoyaleState.isShrinking ? 'COLLAPSING' : `PHASE ${battleRoyaleState.phase}/${battleRoyaleState.maxPhases}`}
+                </span>
+                <span className={`text-sm font-black font-mono leading-tight ${battleRoyaleState.isShrinking ? 'text-red-400 animate-pulse' : 'text-sky-300'}`}>
+                  {battleRoyaleState.isShrinking ? 'SAFE ZONE MOVING' : `${Math.ceil(battleRoyaleState.shrinkTimer)}s`}
+                </span>
+              </div>
+            </div>
+
+            {/* Kills */}
+            <div className="flex items-center gap-2">
+              <Target className="w-4 h-4 text-emerald-400" />
+              <div className="flex flex-col">
+                <span className="text-[9px] font-mono uppercase text-slate-400 font-bold tracking-wider leading-none">KILLS</span>
+                <span className="text-sm font-black font-mono text-emerald-400 leading-tight">{stats.kills}</span>
+              </div>
+            </div>
+          </div>
+        ) : isTrainingMode && trainingTelemetry ? (
           /* Training Range Telemetry */
           <div className="flex items-center gap-4 bg-black/75 backdrop-blur-md px-5 py-1.5 rounded-lg border border-cyan-500/40 shadow-lg text-xs font-mono">
             <span className="text-cyan-400 font-bold uppercase flex items-center gap-1.5">
@@ -422,6 +489,7 @@ export const HUD: React.FC<HUDProps> = ({
           playerYaw={playerYaw}
           bots={bots}
           uavActive={uavActive}
+          battleRoyaleState={battleRoyaleState}
         />
 
         <div className="flex items-center gap-2 text-[9px] font-mono text-slate-400 bg-black/70 px-2 py-0.5 rounded border border-slate-800">
@@ -488,8 +556,16 @@ export const HUD: React.FC<HUDProps> = ({
         ))}
       </div>
 
-      {/* IN-WORLD MINIMALIST ENEMY INDICATORS */}
-      {enemyMarkers.map(m => (
+      {/* BATTLE ROYALE TOXIC GAS WARNING BANNER */}
+      {battleRoyaleState?.isOutsideSafeZone && (
+        <div className="absolute top-20 left-1/2 -translate-x-1/2 px-6 py-2 bg-red-950/95 border-2 border-red-500 rounded-lg text-red-100 font-mono font-black text-xs uppercase flex items-center gap-2.5 shadow-[0_0_24px_rgba(239,68,68,0.9)] animate-pulse z-40 pointer-events-none">
+          <AlertTriangle className="w-4 h-4 text-red-400 animate-bounce" />
+          <span>WARNING: OUTSIDE SAFE ZONE // TAKE COVER INSIDE THE CIRCLE</span>
+        </div>
+      )}
+
+      {/* IN-WORLD REAL-PLAYER INDICATORS */}
+      {playerMarkers.map(m => (
         <div
           key={m.id}
           className="absolute -translate-x-1/2 -translate-y-full flex flex-col items-center pointer-events-none transition-all duration-75 z-20"
@@ -498,20 +574,31 @@ export const HUD: React.FC<HUDProps> = ({
             top: `${m.screenY}%`,
           }}
         >
-          <div className="w-2 h-2 bg-red-600 rotate-45 border border-white/80 shadow-[0_0_6px_#ef4444]" />
+          {/* Nametag Header */}
+          <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded backdrop-blur-md border text-[9px] font-mono font-bold tracking-tight shadow-lg ${
+            m.isAlly
+              ? 'bg-sky-950/90 border-sky-400/80 text-sky-200'
+              : 'bg-red-950/90 border-red-500/80 text-red-200'
+          }`}>
+            <span className={`w-1.5 h-1.5 rounded-full ${m.isAlly ? 'bg-sky-400' : 'bg-red-500 animate-pulse'}`} />
+            <span>{m.isAlly ? `[SQUAD] ${m.name}` : `[HOSTILE] ${m.name}`}</span>
+            <span className="text-[7.5px] opacity-75 ml-0.5">{m.dist}m</span>
+          </div>
 
-          {m.hpPct < 100 && (
-            <div className="w-7 h-1 bg-slate-950 rounded-full overflow-hidden border border-slate-700/80 mt-0.5">
-              <div
-                className={`h-full ${m.hpPct > 50 ? 'bg-emerald-400' : 'bg-red-500'}`}
-                style={{ width: `${m.hpPct}%` }}
-              />
-            </div>
-          )}
+          {/* Tactical Health + Armor Bar */}
+          <div className="w-16 h-1.5 bg-slate-950/90 rounded-sm overflow-hidden border border-slate-700/80 mt-0.5 flex flex-col justify-center">
+            <div
+              className={`h-full transition-all ${m.isAlly ? 'bg-sky-400' : m.hpPct > 50 ? 'bg-emerald-400' : 'bg-red-500'}`}
+              style={{ width: `${m.hpPct}%` }}
+            />
+          </div>
 
-          <span className="text-[8px] font-mono text-slate-300 font-bold drop-shadow leading-tight mt-0.5">
-            {m.dist}m
-          </span>
+          {/* Icon pointer */}
+          <div className={`w-2 h-2 rotate-45 border mt-0.5 ${
+            m.isAlly
+              ? 'bg-sky-500 border-white/80 shadow-[0_0_6px_#0284c7]'
+              : 'bg-red-600 border-white/80 shadow-[0_0_6px_#ef4444]'
+          }`} />
         </div>
       ))}
 

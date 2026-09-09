@@ -1,14 +1,15 @@
 import React, { useEffect, useRef } from 'react';
-import { EnemyBot } from '../types';
+import { BattleRoyaleState, EnemyBot } from '../types';
 
 interface MinimapProps {
   playerPos: { x: number; y: number; z: number };
   playerYaw: number;
   bots: EnemyBot[];
   uavActive: boolean;
+  battleRoyaleState?: BattleRoyaleState | null;
 }
 
-export const Minimap: React.FC<MinimapProps> = ({ playerPos, playerYaw, bots, uavActive }) => {
+export const Minimap: React.FC<MinimapProps> = ({ playerPos, playerYaw, bots, uavActive, battleRoyaleState }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const sweepAngleRef = useRef<number>(0);
 
@@ -85,9 +86,73 @@ export const Minimap: React.FC<MinimapProps> = ({ playerPos, playerYaw, bots, ua
     // Scale: 42 meters to radar radius
     const mapScale = radarRadius / 42;
 
-    // Draw Enemy Bot blips
+    // Draw Battle Royale Safe Zone Circles
+    if (battleRoyaleState) {
+      const cos = Math.cos(playerYaw);
+      const sin = Math.sin(playerYaw);
+
+      // Current Safe Zone
+      const cDx = battleRoyaleState.circleCenter.x - playerPos.x;
+      const cDz = battleRoyaleState.circleCenter.z - playerPos.z;
+      const cRx = cDx * cos - cDz * sin;
+      const cRy = cDx * sin + cDz * cos;
+      const circleScreenX = cx + cRx * mapScale;
+      const circleScreenY = cy + cRy * mapScale;
+      const circleScreenR = battleRoyaleState.circleRadius * mapScale;
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(circleScreenX, circleScreenY, circleScreenR, 0, Math.PI * 2);
+      ctx.strokeStyle = battleRoyaleState.isShrinking ? 'rgba(239, 68, 68, 0.9)' : 'rgba(56, 189, 248, 0.85)';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      // Next Safe Zone (Dotted white ring)
+      const nextDx = battleRoyaleState.nextCircleCenter.x - playerPos.x;
+      const nextDz = battleRoyaleState.nextCircleCenter.z - playerPos.z;
+      const nextRx = nextDx * cos - nextDz * sin;
+      const nextRy = nextDx * sin + nextDz * cos;
+      const nextX = cx + nextRx * mapScale;
+      const nextY = cy + nextRy * mapScale;
+      const nextR = battleRoyaleState.nextCircleRadius * mapScale;
+
+      ctx.beginPath();
+      ctx.arc(nextX, nextY, nextR, 0, Math.PI * 2);
+      ctx.setLineDash([3, 3]);
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.restore();
+
+      // Airdrop Crate Blip on Minimap
+      if (battleRoyaleState.airdropPosition && !battleRoyaleState.airdropPosition.isLooted) {
+        const adDx = battleRoyaleState.airdropPosition.x - playerPos.x;
+        const adDz = battleRoyaleState.airdropPosition.z - playerPos.z;
+        const adRx = adDx * cos - adDz * sin;
+        const adRy = adDx * sin + adDz * cos;
+        const adX = cx + adRx * mapScale;
+        const adY = cy + adRy * mapScale;
+        if (Math.hypot(adRx, adRy) <= radarRadius - 4) {
+          ctx.fillStyle = '#22c55e';
+          ctx.beginPath();
+          ctx.arc(adX, adY, 4.5, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 1;
+          ctx.stroke();
+        }
+      }
+    }
+
+    // Draw Bot blips: Allies (Cyan) vs Enemies (Red)
     bots.forEach(bot => {
       if (bot.state === 'dead') return;
+      const isAlly = bot.team === 'allies';
+
+      // Axis enemies only visible if scanned by radar / firing / direct LoS
+      if (!isAlly && !bot.isVisibleToPlayer && !bot.spottedByRadar && !uavActive) {
+        return;
+      }
 
       const dx = bot.position.x - playerPos.x;
       const dz = bot.position.z - playerPos.z;
@@ -104,10 +169,9 @@ export const Minimap: React.FC<MinimapProps> = ({ playerPos, playerYaw, bots, ua
 
       const dist = Math.hypot(rx, ry);
       if (dist <= radarRadius - 4) {
-        // Red threat blip with glowing ring
         ctx.beginPath();
-        ctx.arc(blipX, blipY, uavActive ? 4.5 : 3.5, 0, Math.PI * 2);
-        ctx.fillStyle = '#ef4444';
+        ctx.arc(blipX, blipY, isAlly ? 4.0 : (uavActive ? 4.5 : 3.5), 0, Math.PI * 2);
+        ctx.fillStyle = isAlly ? '#06b6d4' : '#ef4444';
         ctx.fill();
         ctx.strokeStyle = '#ffffff';
         ctx.lineWidth = 1;
@@ -115,21 +179,19 @@ export const Minimap: React.FC<MinimapProps> = ({ playerPos, playerYaw, bots, ua
 
         // Elevation indicator chevrons (COD style above/below indicators)
         if (dy > 1.8) {
-          // Above player (up chevron)
           ctx.beginPath();
           ctx.moveTo(blipX - 3, blipY - 5);
           ctx.lineTo(blipX, blipY - 8);
           ctx.lineTo(blipX + 3, blipY - 5);
-          ctx.strokeStyle = '#fca5a5';
+          ctx.strokeStyle = isAlly ? '#67e8f9' : '#fca5a5';
           ctx.lineWidth = 1.2;
           ctx.stroke();
         } else if (dy < -1.8) {
-          // Below player (down chevron)
           ctx.beginPath();
           ctx.moveTo(blipX - 3, blipY + 5);
           ctx.lineTo(blipX, blipY + 8);
           ctx.lineTo(blipX + 3, blipY + 5);
-          ctx.strokeStyle = '#fca5a5';
+          ctx.strokeStyle = isAlly ? '#67e8f9' : '#fca5a5';
           ctx.lineWidth = 1.2;
           ctx.stroke();
         }
