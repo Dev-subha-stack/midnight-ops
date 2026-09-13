@@ -17,6 +17,7 @@ import {
   WeaponCamo,
   WeaponType,
   WeatherType,
+  GraphicsMode,
   OpticType,
   ReticleColor,
   ReticleStyle,
@@ -53,10 +54,27 @@ import {
 } from 'lucide-react';
 import { soundManager } from './game/audio';
 import { DEFAULT_WEAPON_OPTICS, WEAPON_REGISTRY } from './game/weapons';
+import { isTouchDevice } from './utils/deviceDetection';
+import { MobileControls } from './components/MobileControls';
+import { MultiplayerModal } from './components/MultiplayerModal';
+import { MultiplayerManager } from './game/multiplayer/MultiplayerManager';
 
 export default function App() {
   const canvasContainerRef = useRef<HTMLDivElement | null>(null);
   const engineRef = useRef<GameEngine | null>(null);
+  const multiplayerManagerRef = useRef<MultiplayerManager>(new MultiplayerManager(isTouchDevice() ? 'mobile' : 'pc'));
+
+  // Device & Touch Controls Mode
+  const [isMobileDevice, setIsMobileDevice] = useState<boolean>(false);
+  const [isMultiplayerOpen, setIsMultiplayerOpen] = useState<boolean>(false);
+
+  useEffect(() => {
+    const hasTouch = isTouchDevice();
+    setIsMobileDevice(hasTouch);
+    if (multiplayerManagerRef.current) {
+      multiplayerManagerRef.current.platform = hasTouch ? 'mobile' : 'pc';
+    }
+  }, []);
 
   // Game Life Cycle States
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
@@ -69,7 +87,7 @@ export default function App() {
 
   // Environment & Weather State
   const [environment, setEnvironment] = useState<EnvironmentState>({
-    weather: 'dynamic_cycle',
+    weather: 'clear_day',
     timeOfDay: 'noon',
     timeString: '12:00 HRS',
     weatherName: 'Clear High Noon',
@@ -107,7 +125,7 @@ export default function App() {
   const [ammoReserve, setAmmoReserve] = useState<number>(120);
   const [grenadesCount, setGrenadesCount] = useState<number>(2);
   const [tacticalCount, setTacticalCount] = useState<number>(2);
-  const [tacticalType, setTacticalType] = useState<'smoke' | 'motion_sensor'>('smoke');
+  const [tacticalType, setTacticalType] = useState<import('./types').TacticalType>('smoke');
   const [laserActive, setLaserActive] = useState<boolean>(true);
   const [isAiming, setIsAiming] = useState<boolean>(false);
   const [isReloading, setIsReloading] = useState<boolean>(false);
@@ -183,7 +201,7 @@ export default function App() {
     botCount: 6,
     botDifficulty: 'regular',
     graphicsQuality: 'ultra',
-    weatherPreset: 'dynamic_cycle',
+    weatherPreset: 'clear_day',
   });
 
   // Start / Init Engine
@@ -226,6 +244,15 @@ export default function App() {
 
     const engine = new GameEngine(canvasContainerRef.current, settings, gameMode);
     engineRef.current = engine;
+
+    if (multiplayerManagerRef.current) {
+      engine.multiplayerManager = multiplayerManagerRef.current;
+      multiplayerManagerRef.current.setSceneAndParticles(engine.scene, engine.particles);
+      multiplayerManagerRef.current.platform = isMobileDevice ? 'mobile' : 'pc';
+      if (engine.controller) {
+        engine.controller.multiplayerManager = multiplayerManagerRef.current;
+      }
+    }
 
     engine.onStatsUpdate = newStats => setStats(newStats);
     engine.onKillfeedEvent = item => setKillfeed(prev => [...prev, item]);
@@ -367,6 +394,8 @@ export default function App() {
           });
         }
       }
+      if (e.code === 'KeyH') engine.useInhaler();
+      if (e.code === 'KeyV') engine.useMedkit();
       if (e.code === 'Digit6') engine.activateScorestreak('uav');
       if (e.code === 'Digit7') engine.activateScorestreak('airstrike');
       if (e.code === 'Digit8') engine.activateScorestreak('sentry');
@@ -502,6 +531,22 @@ export default function App() {
     setSettings(prev => ({ ...prev, weatherPreset: weather }));
   };
 
+  const handleSelectGraphicsMode = (mode: GraphicsMode) => {
+    const updated = {
+      ...settings,
+      graphicsMode: mode,
+      graphicsQuality: mode === 'smooth' ? ('medium' as const) : mode === 'standard' ? ('high' as const) : ('ultra' as const),
+    };
+    setSettings(updated);
+    if (engineRef.current) {
+      engineRef.current.updateSettings(updated);
+      setPickupNotice({
+        text: `GRAPHICS CALIBRATION // ${mode.toUpperCase()}${mode === 'extreme' ? ' (RTX RAY-TRACING)' : ''}`,
+        type: 'ammo',
+      });
+    }
+  };
+
   const handleInstantRespawn = () => {
     if (engineRef.current) {
       engineRef.current.respawnPlayer();
@@ -574,6 +619,8 @@ export default function App() {
           onToggleWeather={handleToggleWeather}
           onDeployTactical={handleDeployTactical}
           onToggleTacticalType={handleToggleTacticalType}
+          onUseInhaler={() => engineRef.current?.useInhaler()}
+          onUseMedkit={() => engineRef.current?.useMedkit()}
           onActivateStreak={handleActivateStreak}
           onOpenGunsmith={() => setIsGunsmithOpen(true)}
           onOpenSettings={() => setIsSettingsOpen(true)}
@@ -602,10 +649,53 @@ export default function App() {
           onSelectWeapon={handleSelectWeapon}
           onClose={() => {
             setIsGunsmithOpen(false);
-            if (isPlaying && !isGameOver) {
+            if (isPlaying && !isGameOver && !isMobileDevice) {
               canvasContainerRef.current?.requestPointerLock();
             }
           }}
+        />
+      )}
+
+      {/* MULTIPLAYER / LAN LOBBY MODAL */}
+      {isMultiplayerOpen && (
+        <MultiplayerModal
+          multiplayerManager={multiplayerManagerRef.current}
+          onClose={() => setIsMultiplayerOpen(false)}
+          onStartMatch={(isHost, selectedMode) => {
+            setGameMode(selectedMode);
+            setIsMultiplayerOpen(false);
+            startMission();
+          }}
+        />
+      )}
+
+      {/* MOBILE TOUCH CONTROLS OVERLAY */}
+      {isPlaying && isMobileDevice && !isGameOver && !isPaused && !isGunsmithOpen && !isSettingsOpen && engineRef.current && (
+        <MobileControls
+          controller={engineRef.current.controller}
+          grenadeManager={engineRef.current.grenadeManager}
+          currentWeapon={currentWeapon}
+          ammoInMag={ammoInMag}
+          ammoReserve={ammoReserve}
+          grenadesCount={grenadesCount}
+          tacticalCount={tacticalCount}
+          tacticalType={tacticalType}
+          isAiming={isAiming}
+          isReloading={isReloading}
+          isHoldingBreath={isHoldingBreath}
+          isTacStance={isTacStance}
+          isMounted={isMounted}
+          laserActive={laserActive}
+          onSwitchWeapon={handleSelectWeapon}
+          onOpenGunsmith={() => setIsGunsmithOpen(true)}
+          onOpenSettings={() => setIsSettingsOpen(true)}
+          onOpenScoreboard={() => setIsScoreboardOpen(true)}
+          onPause={() => {
+            setIsPaused(true);
+            engineRef.current?.setPaused(true);
+          }}
+          onUseInhaler={() => engineRef.current?.useInhaler()}
+          onUseMedkit={() => engineRef.current?.useMedkit()}
         />
       )}
 
@@ -615,8 +705,8 @@ export default function App() {
           settings={settings}
           onUpdateSettings={newS => {
             setSettings(newS);
-            if (newS.weatherPreset && engineRef.current) {
-              engineRef.current.setWeatherPreset(newS.weatherPreset);
+            if (engineRef.current) {
+              engineRef.current.updateSettings(newS);
             }
           }}
           onClose={() => {
@@ -633,12 +723,14 @@ export default function App() {
         <PauseMenu
           gameMode={gameMode}
           currentWeather={environment.weather}
+          graphicsMode={settings.graphicsMode || 'standard'}
           onResume={handleResume}
           onOpenGunsmith={() => setIsGunsmithOpen(true)}
           onOpenSettings={() => setIsSettingsOpen(true)}
           onRestart={handleRestart}
           onReturnToHome={handleReturnToHomescreen}
           onSelectWeather={handleSelectWeather}
+          onSelectGraphicsMode={handleSelectGraphicsMode}
           onChangeMode={m => {
             setGameMode(m);
             handleRestart();
@@ -703,6 +795,14 @@ export default function App() {
                 PLAY
               </button>
               <button
+                id="btn-nav-multiplayer"
+                onClick={() => setIsMultiplayerOpen(true)}
+                className="px-4 py-2 rounded-lg bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-500/70 hover:border-emerald-400 text-emerald-300 font-bold tracking-wider uppercase transition-all flex items-center gap-1.5 cursor-pointer shadow-[0_0_12px_rgba(16,185,129,0.2)]"
+              >
+                <Users className="w-3.5 h-3.5 text-emerald-400" />
+                <span>LAN MULTIPLAYER</span>
+              </button>
+              <button
                 id="btn-nav-gunsmith"
                 onClick={() => setIsGunsmithOpen(true)}
                 className="px-4 py-2 rounded-lg bg-slate-900/80 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-slate-300 font-bold tracking-wider uppercase transition-all flex items-center gap-1.5 cursor-pointer"
@@ -717,6 +817,18 @@ export default function App() {
               >
                 <Sliders className="w-3.5 h-3.5 text-cyan-400" />
                 <span>SETTINGS</span>
+              </button>
+              <button
+                id="btn-toggle-device"
+                onClick={() => setIsMobileDevice(prev => !prev)}
+                title="Toggle on-screen mobile touch controls overlay"
+                className={`px-3 py-2 rounded-lg border font-mono text-[11px] font-bold uppercase transition-all flex items-center gap-1.5 cursor-pointer ${
+                  isMobileDevice
+                    ? 'bg-amber-500/20 border-amber-500 text-amber-300 shadow-[0_0_10px_rgba(245,158,11,0.3)]'
+                    : 'bg-slate-900/80 border-slate-800 text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <span>{isMobileDevice ? '📱 MOBILE TOUCH ON' : '💻 PC MODE'}</span>
               </button>
               <button
                 id="btn-test-audio"
@@ -759,7 +871,7 @@ export default function App() {
               <div className="flex flex-col gap-2.5">
                 {[
                   { id: 'tdm', title: 'Team Deathmatch', badge: '5v5 TACTICAL', desc: 'Squad elimination. Allies vs Axis with designated spawn points.', icon: Users },
-                  { id: 'battleroyale', title: 'Battle Royale', badge: 'SURVIVAL CIRCLE', desc: 'PUBG / Free Fire mode. Shrinking safe zone circle, gas damage, and airdrops.', icon: ShieldAlert },
+                  { id: 'battleroyale', title: 'Battle Royale (Bermuda)', badge: 'FREE FIRE RULES', desc: 'New Bermuda Island map. Free Fire rules: EP auto-heal, Inhalers [H], Danger Zones, Glider descent, and Booyah victory.', icon: ShieldAlert },
                   { id: 'ffa', title: 'Free For All', badge: 'SOLO COMBAT', desc: 'Every operative for themselves. Eliminate all hostiles on sight.', icon: Flame },
                   { id: 'gungame', title: 'Gun Game Escalation', badge: 'WEAPON LADDER', desc: 'Advance through weapon tiers with each elimination.', icon: Award },
                   { id: 'training', title: 'Ballistic Range', badge: 'TELEMETRY & DPS', desc: 'Dynamic moving steel targets with real-time ballistic accuracy metrics.', icon: Target },
@@ -796,15 +908,22 @@ export default function App() {
               </div>
 
               {/* High-Impact Deploy Action Button */}
-              <div className="pt-2">
+              <div className="pt-2 flex flex-col sm:flex-row gap-2.5">
                 <button
                   id="btn-start-game"
                   onClick={startMission}
-                  className="w-full py-4 px-6 bg-gradient-to-r from-cyan-500 via-sky-400 to-teal-400 hover:from-cyan-400 hover:to-teal-300 text-slate-950 font-black text-base font-mono uppercase tracking-widest rounded-xl transition-all shadow-[0_0_30px_rgba(6,182,212,0.4)] hover:shadow-[0_0_40px_rgba(6,182,212,0.6)] flex items-center justify-center gap-3 cursor-pointer hover:scale-[1.01] active:scale-[0.99]"
+                  className="flex-1 py-4 px-6 bg-gradient-to-r from-cyan-500 via-sky-400 to-teal-400 hover:from-cyan-400 hover:to-teal-300 text-slate-950 font-black text-base font-mono uppercase tracking-widest rounded-xl transition-all shadow-[0_0_30px_rgba(6,182,212,0.4)] hover:shadow-[0_0_40px_rgba(6,182,212,0.6)] flex items-center justify-center gap-3 cursor-pointer hover:scale-[1.01] active:scale-[0.99]"
                 >
                   <Play className="w-5 h-5 fill-slate-950" />
-                  <span>DEPLOY // QUICK PLAY</span>
-                  <span className="text-xs font-bold text-slate-900 px-2 py-0.5 rounded bg-cyan-300/60 font-mono">[SPACE / ENTER]</span>
+                  <span>DEPLOY // SOLO</span>
+                </button>
+                <button
+                  id="btn-open-multiplayer"
+                  onClick={() => setIsMultiplayerOpen(true)}
+                  className="py-4 px-6 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-base font-mono uppercase tracking-widest rounded-xl transition-all shadow-[0_0_25px_rgba(16,185,129,0.35)] hover:shadow-[0_0_35px_rgba(16,185,129,0.5)] flex items-center justify-center gap-2.5 cursor-pointer hover:scale-[1.01] active:scale-[0.99]"
+                >
+                  <Users className="w-5 h-5" />
+                  <span>HOST / JOIN LAN</span>
                 </button>
               </div>
             </div>
@@ -855,6 +974,43 @@ export default function App() {
                 </div>
               </div>
 
+              {/* Graphics Engine Mode Selector */}
+              <div className="bg-slate-900/70 p-4 rounded-xl border border-slate-800/90 flex flex-col gap-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-mono font-bold uppercase text-cyan-400 flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5" /> GRAPHICS ENGINE MODE
+                  </span>
+                  <span className={`text-[9px] font-mono font-bold px-1.5 py-0.2 rounded border ${
+                    (settings.graphicsMode || 'standard') === 'extreme'
+                      ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40 animate-pulse'
+                      : 'bg-cyan-500/10 text-cyan-400 border-cyan-500/30'
+                  }`}>
+                    {(settings.graphicsMode || 'standard') === 'extreme' ? '⚡ RTX ACTIVE' : (settings.graphicsMode || 'standard').toUpperCase()}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-3 gap-1.5">
+                  {[
+                    { id: 'smooth', label: 'Smooth', sub: 'High FPS' },
+                    { id: 'standard', label: 'Standard', sub: 'Default AAA' },
+                    { id: 'extreme', label: 'Extreme', sub: 'RTX Ray-Trace' },
+                  ].map(g => (
+                    <button
+                      key={g.id}
+                      onClick={() => handleSelectGraphicsMode(g.id as GraphicsMode)}
+                      className={`p-2 rounded-lg border flex flex-col items-center justify-center gap-0.5 transition-all cursor-pointer ${
+                        (settings.graphicsMode || 'standard') === g.id
+                          ? 'bg-cyan-950/80 border-cyan-400 text-cyan-300 shadow-[0_0_10px_rgba(6,182,212,0.3)]'
+                          : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      <span className="text-[10px] font-mono font-bold uppercase">{g.label}</span>
+                      <span className="text-[8px] opacity-75 font-mono">{g.sub}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               {/* Atmosphere & Weather Selector */}
               <div className="bg-slate-900/70 p-4 rounded-xl border border-slate-800/90 flex flex-col gap-2.5">
                 <div className="flex items-center justify-between">
@@ -866,24 +1022,21 @@ export default function App() {
 
                 <div className="grid grid-cols-3 gap-1.5">
                   {[
-                    { id: 'clear_day', label: 'High Noon', icon: Sun },
-                    { id: 'golden_sunset', label: 'Sunset', icon: Sunset },
-                    { id: 'midnight_fog', label: 'Midnight', icon: Moon },
-                    { id: 'tactical_storm', label: 'Storm', icon: CloudLightning },
-                    { id: 'sandstorm', label: 'Sandstorm', icon: Wind },
-                    { id: 'dynamic_cycle', label: 'Dynamic', icon: Sparkles },
+                    { id: 'clear_day', label: 'Day (Noon)', icon: Sun },
+                    { id: 'golden_sunset', label: 'Evening', icon: Sunset },
+                    { id: 'midnight_fog', label: 'Night', icon: Moon },
                   ].map(w => (
                     <button
                       key={w.id}
                       onClick={() => handleSelectWeather(w.id as WeatherType)}
-                      className={`p-2 rounded border flex flex-col items-center gap-1 transition-all cursor-pointer ${
+                      className={`p-2.5 rounded border flex flex-col items-center gap-1.5 transition-all cursor-pointer ${
                         settings.weatherPreset === w.id
                           ? 'bg-cyan-950/80 border-cyan-500 text-cyan-300 shadow-sm'
                           : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:text-slate-200'
                       }`}
                     >
-                      <w.icon className="w-3.5 h-3.5" />
-                      <span className="text-[9px] font-mono font-bold uppercase">{w.label}</span>
+                      <w.icon className="w-4 h-4" />
+                      <span className="text-[10px] font-mono font-bold uppercase">{w.label}</span>
                     </button>
                   ))}
                 </div>

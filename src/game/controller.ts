@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { GameSettings, HitmarkerEvent, OpticType, ReticleColor, ReticleStyle, WeaponCamo, WeaponType } from '../types';
+import { GameMode, GameSettings, HitmarkerEvent, OpticType, ReticleColor, ReticleStyle, TacticalType, WeaponCamo, WeaponType } from '../types';
 import { soundManager } from './audio';
 import { ModelFactory } from './models';
 import { ParticleSystem } from './particles';
@@ -18,6 +18,9 @@ export class FPSController {
   public botManager: BotManager | null = null;
   public grenadeManager: GrenadeManager | null = null;
   public trainingManager: TrainingManager | null = null;
+  public multiplayerManager: any = null;
+  public gameMode: GameMode = 'tdm';
+  public playerShadowMesh: THREE.Group | null = null;
   public settings: GameSettings;
 
   // Player State
@@ -171,6 +174,11 @@ export class FPSController {
   public isLocked: boolean = false;
   public isDead: boolean = false;
 
+  // Mobile / Touch Controls Virtual Input
+  public touchMoveVector: { x: number; y: number } = { x: 0, y: 0 };
+  public touchIsSprinting: boolean = false;
+  public touchIsTacSprinting: boolean = false;
+
   public setDeadState(dead: boolean) {
     this.isDead = dead;
     if (this.viewmodelRig) {
@@ -196,7 +204,7 @@ export class FPSController {
   public onKill: (victim: string, weapon: WeaponType | 'melee' | 'grenade', isHeadshot: boolean) => void = () => {};
   public onAmmoChange: (mag: number, reserve: number) => void = () => {};
   public onGrenadeChange: (count: number) => void = () => {};
-  public onTacticalChange: (count: number, type: 'smoke' | 'motion_sensor') => void = () => {};
+  public onTacticalChange: (count: number, type: TacticalType) => void = () => {};
   public onTriggerWeatherToggle?: () => void;
 
   constructor(
@@ -616,8 +624,13 @@ export class FPSController {
     soundManager.playSlideCancel();
 
     if (jump && this.isGrounded) {
-      this.velocity.y = 6.2;
+      this.velocity.y = 6.4;
+      // High-skill bunny-hop momentum preservation: boost forward trajectory
+      const forwardDir = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw)).normalize();
+      this.velocity.x += forwardDir.x * 3.8;
+      this.velocity.z += forwardDir.z * 3.8;
       this.isGrounded = false;
+      this.cameraRoll += (Math.random() > 0.5 ? 0.04 : -0.04);
       soundManager.playJump();
     }
   }
@@ -770,14 +783,14 @@ export class FPSController {
     let hasHit = false;
     if (this.botManager) {
       for (const bot of this.botManager.bots) {
-        if (bot.isDead) continue;
+        if (bot.isDead || bot.team === 'allies') continue;
         const dist = bot.position.distanceTo(eyePos);
         if (dist < 2.6) {
           const dirToBot = new THREE.Vector3().subVectors(bot.position, eyePos).normalize();
           const angle = forwardDir.angleTo(dirToBot);
           if (angle < Math.PI / 3) {
             hasHit = true;
-            const isKill = bot.takeDamage(125, true, forwardDir);
+            const isKill = bot.takeDamage(125, true, forwardDir, 'allies');
             soundManager.playKnifeSlash(true);
             this.particles.emitBloodSplatter(bot.position.clone().add(new THREE.Vector3(0, 1.2, 0)), forwardDir);
             this.onHitmarker({ type: isKill ? 'kill' : 'body', timestamp: Date.now() });
@@ -868,21 +881,183 @@ export class FPSController {
     soundManager.playInspect();
   }
 
+  // --- MOBILE & TOUCH CONTROLS API ---
+  public handleTouchMove(x: number, y: number, isSprint: boolean = false, isTacSprint: boolean = false) {
+    this.touchMoveVector.x = Math.max(-1, Math.min(1, x));
+    this.touchMoveVector.y = Math.max(-1, Math.min(1, y));
+    this.touchIsSprinting = isSprint;
+    this.touchIsTacSprinting = isTacSprint;
+    if (isTacSprint && this.tacSprintStamina > 0.2) {
+      this.isTacSprinting = true;
+    }
+  }
+
+  public handleTouchLook(dx: number, dy: number, sensitivity: number = 1.0) {
+    if (this.isDead) return;
+    const sens = (this.settings.mouseSensitivity || 1.0) * sensitivity * 0.0038;
+    const invert = this.settings.invertY ? -1 : 1;
+
+    this.yaw -= dx * sens;
+    this.pitch -= dy * sens * invert;
+    this.pitch = Math.max(-Math.PI / 2.05, Math.min(Math.PI / 2.05, this.pitch));
+
+    const inertiaMult = this.isAiming ? 0.0004 : 0.0016;
+    this.swayInertiaX -= dx * inertiaMult;
+    this.swayInertiaY += dy * inertiaMult;
+    this.swayInertiaX = Math.max(-0.06, Math.min(0.06, this.swayInertiaX));
+    this.swayInertiaY = Math.max(-0.06, Math.min(0.06, this.swayInertiaY));
+  }
+
+  public triggerShoot(pressed: boolean) {
+    if (this.isDead) return;
+    this.isShooting = pressed;
+    if (pressed && !this.isReloading && !this.isMeleeing) {
+      if (this.isTacSprinting || this.isSprinting) {
+        this.isTacSprinting = false;
+        this.isSprinting = false;
+        this.touchIsTacSprinting = false;
+        this.touchIsSprinting = false;
+      }
+      this.tryShoot();
+    }
+  }
+
+  public triggerAim(pressed?: boolean) {
+    if (this.isDead) return;
+    if (pressed !== undefined) {
+      this.isAiming = pressed;
+    } else {
+      this.isAiming = !this.isAiming;
+    }
+    if (this.isAiming) {
+      soundManager.playScopeRaise();
+    } else {
+      if (this.isHoldingBreath) {
+        this.isHoldingBreath = false;
+        soundManager.playExhale();
+      }
+      if (this.isMounted) {
+        this.isMounted = false;
+      }
+    }
+  }
+
+  public triggerJump() {
+    if (this.isDead) return;
+    if (this.isSliding || this.isDiving) {
+      this.cancelSlide(true);
+      return;
+    }
+    if (!this.isMantling && this.tryLedgeMantle()) {
+      return;
+    }
+    if (this.isGrounded) {
+      this.velocity.y = 6.4;
+      this.isGrounded = false;
+      soundManager.playJump();
+    }
+  }
+
+  public triggerCrouchOrSlide() {
+    if (this.isDead) return;
+    if (this.isSliding || this.isDiving) {
+      this.cancelSlide(false);
+      return;
+    }
+    if (this.isTacSprinting && this.isGrounded) {
+      this.startDolphinDive();
+    } else if (this.isSprinting && this.isGrounded) {
+      this.startSlide();
+    } else {
+      this.isCrouching = !this.isCrouching;
+      soundManager.playSlideCancel();
+    }
+  }
+
+  public triggerReload() {
+    if (this.isDead || this.isReloading || this.isMeleeing) return;
+    this.reload();
+  }
+
+  public triggerGrenade() {
+    if (this.isDead || this.isMeleeing) return;
+    this.throwGrenade();
+  }
+
+  public triggerTactical() {
+    if (this.isDead || this.isMeleeing) return;
+    this.deployTactical();
+  }
+
+  public triggerSwapTactical() {
+    this.toggleTacticalType();
+    soundManager.playTacticalSwap();
+  }
+
+  public triggerTacStance() {
+    this.isTacStance = !this.isTacStance;
+    soundManager.playTacStanceToggle();
+  }
+
+  public triggerInspect() {
+    if (!this.isReloading && !this.isShooting && !this.isMeleeing) {
+      this.inspectWeapon();
+    }
+  }
+
+  public triggerLaser() {
+    this.toggleTacticalGear();
+  }
+
+  public triggerMount() {
+    if (!this.isMeleeing && !this.isMantling) {
+      this.toggleMount();
+    }
+  }
+
+  public triggerHoldBreath() {
+    if (this.isAiming && this.breathStamina > 0.12 && !this.isHyperventilating) {
+      this.isHoldingBreath = !this.isHoldingBreath;
+      if (this.isHoldingBreath) {
+        soundManager.playInhale();
+      } else {
+        soundManager.playExhale();
+      }
+    }
+  }
+
+  public triggerMelee() {
+    if (!this.isMeleeing && !this.isDead) {
+      this.performMelee();
+    }
+  }
+
   public tryShoot() {
     if (this.isReloading || this.isMeleeing || this.fireTimer > 0) return;
 
     const wpnCfg = WEAPON_REGISTRY[this.currentWeapon];
-    if (this.ammoInMag[this.currentWeapon] <= 0) {
+    const isInfiniteAmmo =
+      this.gameMode === 'tdm' ||
+      this.gameMode === 'ffa' ||
+      this.gameMode === 'gungame' ||
+      this.gameMode === 'training' ||
+      this.gameMode === 'targetrange' ||
+      Boolean(this.settings.infiniteAmmo) ||
+      Boolean(this.trainingManager && this.trainingManager.telemetry.infiniteAmmo);
+
+    if (this.ammoInMag[this.currentWeapon] <= 0 && !isInfiniteAmmo) {
       this.reload();
       return;
     }
 
-    // Deduct ammo
-    this.ammoInMag[this.currentWeapon]--;
-
-    // Keep reserve full in training mode if infinite ammo is active
-    if (this.trainingManager && this.trainingManager.telemetry.infiniteAmmo) {
-      this.ammoReserve[this.currentWeapon] = Math.max(100, this.ammoReserve[this.currentWeapon]);
+    // Deduct ammo or apply infinite bullets
+    if (!isInfiniteAmmo) {
+      this.ammoInMag[this.currentWeapon]--;
+    } else {
+      this.ammoReserve[this.currentWeapon] = 999;
+      if (this.ammoInMag[this.currentWeapon] <= 0) {
+        this.ammoInMag[this.currentWeapon] = wpnCfg.magSize;
+      }
       if (this.grenadesCount < 2) this.grenadesCount = 2;
       this.grenadeManager?.addGrenade(1);
       this.grenadeManager?.addTactical(1);
@@ -956,6 +1131,10 @@ export class FPSController {
       shootDir.addScaledVector(up, spreadY);
       shootDir.normalize();
 
+      if (this.multiplayerManager && this.multiplayerManager.isConnected) {
+        this.multiplayerManager.broadcastShoot(this.camera.position, shootDir, this.currentWeapon);
+      }
+
       let currentPos = this.camera.position.clone();
       let velocity = shootDir.clone().multiplyScalar(muzzleVelocity);
       let totalDistanceTraveled = 0;
@@ -1026,7 +1205,7 @@ export class FPSController {
 
         if (this.botManager) {
           for (const bot of this.botManager.bots) {
-            if (bot.isDead) continue;
+            if (bot.isDead || bot.team === 'allies') continue;
             const botHits = ray.intersectObjects(bot.group.children, true);
             if (botHits.length > 0 && botHits[0].distance < botHitDist) {
               botHitDist = botHits[0].distance;
@@ -1052,7 +1231,7 @@ export class FPSController {
           }
 
           const finalDmg = isHeadshot ? Math.floor(effectiveDmg * wpnCfg.headshotMultiplier) : Math.floor(effectiveDmg);
-          const isKill = hitBot.takeDamage(finalDmg, isHeadshot, segmentDir);
+          const isKill = hitBot.takeDamage(finalDmg, isHeadshot, segmentDir, 'allies');
 
           soundManager.playHitmarker(isHeadshot, isKill);
           this.onHitmarker({
@@ -1093,13 +1272,20 @@ export class FPSController {
       }
 
       // Spawn dynamic Tracer
-      this.particles.spawnBulletTracer(this.camera.position.clone().add(shootDir.clone().multiplyScalar(0.4)), finalHitPoint);
+      this.particles.spawnBulletTracer(
+        this.camera.position.clone().add(shootDir.clone().multiplyScalar(0.4)),
+        finalHitPoint,
+        this.currentWeapon
+      );
     }
   }
 
   // --- FRAME UPDATE ---
   public update(dt: number) {
-    if (!this.isLocked || this.isDead) return;
+    if (!this.isLocked || this.isDead) {
+      if (this.playerShadowMesh) this.playerShadowMesh.visible = false;
+      return;
+    }
 
     // Automatic fire trigger
     const wpnCfg = WEAPON_REGISTRY[this.currentWeapon];
@@ -1360,6 +1546,15 @@ export class FPSController {
     // Viewmodel Positioning, Breathing Sway, Reload & Melee Choreography
     this.updateViewmodel(dt);
 
+    // Synchronize Real-time Player Shadow Proxy
+    if (this.playerShadowMesh) {
+      this.playerShadowMesh.position.set(this.position.x, this.position.y - this.currentEyeHeight, this.position.z);
+      this.playerShadowMesh.rotation.y = this.yaw;
+      const targetScaleY = this.isSliding ? 0.45 : this.isCrouching ? 0.65 : 1.0;
+      this.playerShadowMesh.scale.set(1.0, THREE.MathUtils.lerp(this.playerShadowMesh.scale.y, targetScaleY, dt * 14), 1.0);
+      this.playerShadowMesh.visible = !this.isDead;
+    }
+
     // Update 3D Spatial Web Audio Listener orientation & velocity
     const forwardDir = new THREE.Vector3();
     this.camera.getWorldDirection(forwardDir);
@@ -1427,14 +1622,17 @@ export class FPSController {
     this.isCrouching = this.keys['KeyC'] || this.keys['ControlLeft'];
     
     // Sprint and Tactical Sprint state resolution
-    const movingForward = (this.keys['KeyW'] || this.keys['ArrowUp']) && !this.keys['KeyS'] && !this.keys['ArrowDown'];
-    const holdingShift = this.keys['ShiftLeft'] || this.keys['ShiftRight'];
+    const movingForward =
+      ((this.keys['KeyW'] || this.keys['ArrowUp']) && !this.keys['KeyS'] && !this.keys['ArrowDown']) ||
+      this.touchMoveVector.y > 0.25;
+    const holdingShift = this.keys['ShiftLeft'] || this.keys['ShiftRight'] || this.touchIsSprinting || this.touchIsTacSprinting;
 
     if (holdingShift && movingForward && !this.isCrouching && !this.isAiming) {
-      if (this.isTacSprinting && this.tacSprintStamina > 0.05) {
+      if ((this.isTacSprinting || this.touchIsTacSprinting) && this.tacSprintStamina > 0.05) {
         // Continue Tactical Sprint
         this.tacSprintStamina = Math.max(0, this.tacSprintStamina - dt * 0.28);
         this.isSprinting = true;
+        this.isTacSprinting = true;
       } else {
         // Standard Sprint
         this.isTacSprinting = false;
@@ -1486,6 +1684,11 @@ export class FPSController {
       if (this.keys['KeyS'] || this.keys['ArrowDown']) moveVector.z += 1;
       if (this.keys['KeyA'] || this.keys['ArrowLeft']) moveVector.x -= 1;
       if (this.keys['KeyD'] || this.keys['ArrowRight']) moveVector.x += 1;
+
+      if (this.touchMoveVector.x !== 0 || this.touchMoveVector.y !== 0) {
+        moveVector.x += this.touchMoveVector.x;
+        moveVector.z -= this.touchMoveVector.y;
+      }
     }
 
     if (moveVector.lengthSq() > 0) {
@@ -1519,7 +1722,28 @@ export class FPSController {
       soundManager.playJump();
     }
 
-    if (!this.isGrounded) {
+    // Free Fire Launch Pad Interaction (Bermuda Center-North at [0, -8])
+    if (this.map.mapType === 'bermuda') {
+      const launchDist = Math.hypot(this.position.x, this.position.z - (-8));
+      if (launchDist < 2.4 && this.position.y <= 2.5 && this.velocity.y <= 1.0) {
+        soundManager.playLaunchPad();
+        this.velocity.y = 25.0;
+        const fwd = this.camera.getWorldDirection(new THREE.Vector3()).setY(0).normalize();
+        this.velocity.x = fwd.x * 22.0;
+        this.velocity.z = fwd.z * 22.0;
+        this.isGrounded = false;
+        this.particles.emitSpark(this.position.clone());
+      }
+    }
+
+    // Free Fire Glider / Parachute Descent Physics
+    if (!this.isGrounded && this.position.y > 6.0 && this.velocity.y < -3.0 && (this.keys['KeyW'] || this.keys['Space'])) {
+      // Glider deployed: soft descent velocity and sustained aerodynamic lift
+      this.velocity.y = Math.max(-4.2, this.velocity.y - 4.0 * dt);
+      const glideDir = this.camera.getWorldDirection(new THREE.Vector3()).setY(0).normalize();
+      this.velocity.x = THREE.MathUtils.lerp(this.velocity.x, glideDir.x * 16.0, dt * 2.5);
+      this.velocity.z = THREE.MathUtils.lerp(this.velocity.z, glideDir.z * 16.0, dt * 2.5);
+    } else if (!this.isGrounded) {
       this.velocity.y -= (this.isDiving ? 14.5 : 19.5) * dt;
     }
 
@@ -1548,9 +1772,10 @@ export class FPSController {
     // CRITICAL: Robust Entity-Obstacle Collision Resolution
     CollisionSystem.resolveEntityCollision(this.position, this.velocity, 0.48, this.currentEyeHeight, this.map.obstacles);
 
-    // Arena Perimeter Boundaries
-    this.position.x = Math.max(-43, Math.min(43, this.position.x));
-    this.position.z = Math.max(-43, Math.min(43, this.position.z));
+    // Dynamic Arena / Island Boundaries (Bermuda: 220x220m vs Warehouse: 90x90m)
+    const boundLimit = this.map.mapType === 'bermuda' ? 104 : 43;
+    this.position.x = Math.max(-boundLimit, Math.min(boundLimit, this.position.x));
+    this.position.z = Math.max(-boundLimit, Math.min(boundLimit, this.position.z));
 
     this.camera.position.copy(this.position);
   }
@@ -1607,33 +1832,43 @@ export class FPSController {
         };
       } else {
         targetOffset = { ...offsetCfg.ads };
-        // Optic elevation alignment: aligns sight reticle / front post directly with camera optical axis
+        // Optic elevation and depth alignment: aligns 3D reticle / front post directly with camera optical axis
         if (currentOptic === 'reflex_dot' || currentOptic === 'red_dot_micro') {
-          if (this.currentWeapon === 'm4') targetOffset.y = -0.143;
-          else if (this.currentWeapon === 'mp5') targetOffset.y = -0.123;
-          else if (this.currentWeapon === 'shotgun') targetOffset.y = -0.123;
-          else if (this.currentWeapon === 'deagle') targetOffset.y = -0.132;
-          else if (this.currentWeapon === 'sniper') targetOffset.y = -0.175;
+          if (this.currentWeapon === 'm4') { targetOffset.y = -0.143; targetOffset.z = -0.32; }
+          else if (this.currentWeapon === 'mp5') { targetOffset.y = -0.123; targetOffset.z = -0.30; }
+          else if (this.currentWeapon === 'shotgun') { targetOffset.y = -0.123; targetOffset.z = -0.31; }
+          else if (this.currentWeapon === 'deagle') { targetOffset.y = -0.136; targetOffset.z = -0.28; }
+          else if (this.currentWeapon === 'sniper') { targetOffset.y = -0.143; targetOffset.z = -0.34; }
         } else if (currentOptic === 'holo_553') {
-          if (this.currentWeapon === 'm4') targetOffset.y = -0.150;
-          else if (this.currentWeapon === 'mp5') targetOffset.y = -0.130;
-          else if (this.currentWeapon === 'shotgun') targetOffset.y = -0.130;
-          else if (this.currentWeapon === 'deagle') targetOffset.y = -0.132;
-          else if (this.currentWeapon === 'sniper') targetOffset.y = -0.175;
+          if (this.currentWeapon === 'm4') { targetOffset.y = -0.147; targetOffset.z = -0.32; }
+          else if (this.currentWeapon === 'mp5') { targetOffset.y = -0.127; targetOffset.z = -0.30; }
+          else if (this.currentWeapon === 'shotgun') { targetOffset.y = -0.127; targetOffset.z = -0.31; }
+          else if (this.currentWeapon === 'deagle') { targetOffset.y = -0.140; targetOffset.z = -0.28; }
+          else if (this.currentWeapon === 'sniper') { targetOffset.y = -0.147; targetOffset.z = -0.34; }
         } else if (currentOptic === 'iron_sight') {
-          if (this.currentWeapon === 'm4') targetOffset.y = -0.121;
-          else if (this.currentWeapon === 'mp5') targetOffset.y = -0.056;
-          else if (this.currentWeapon === 'shotgun') targetOffset.y = -0.054;
-          else if (this.currentWeapon === 'deagle') targetOffset.y = -0.094;
-          else if (this.currentWeapon === 'sniper') targetOffset.y = -0.175;
+          if (this.currentWeapon === 'm4') { targetOffset.y = -0.121; targetOffset.z = -0.32; }
+          else if (this.currentWeapon === 'mp5') { targetOffset.y = -0.056; targetOffset.z = -0.30; }
+          else if (this.currentWeapon === 'shotgun') { targetOffset.y = -0.054; targetOffset.z = -0.32; }
+          else if (this.currentWeapon === 'deagle') { targetOffset.y = -0.094; targetOffset.z = -0.28; }
+          else if (this.currentWeapon === 'sniper') { targetOffset.y = -0.121; targetOffset.z = -0.34; }
         } else if (currentOptic === 'acog_4x') {
-          if (this.currentWeapon === 'm4') targetOffset.y = -0.140;
-          else if (this.currentWeapon === 'mp5') targetOffset.y = -0.120;
-          else if (this.currentWeapon === 'sniper') targetOffset.y = -0.175;
+          if (this.currentWeapon === 'm4') { targetOffset.y = -0.140; targetOffset.z = -0.33; }
+          else if (this.currentWeapon === 'mp5') { targetOffset.y = -0.120; targetOffset.z = -0.31; }
+          else if (this.currentWeapon === 'deagle') { targetOffset.y = -0.133; targetOffset.z = -0.29; }
+          else if (this.currentWeapon === 'sniper') { targetOffset.y = -0.140; targetOffset.z = -0.35; }
         } else if (currentOptic === 'thermal_flir' || currentOptic === 'thermal_ir') {
-          if (this.currentWeapon === 'm4') targetOffset.y = -0.143;
-          else if (this.currentWeapon === 'sniper') targetOffset.y = -0.175;
+          if (this.currentWeapon === 'm4') { targetOffset.y = -0.143; targetOffset.z = -0.34; }
+          else if (this.currentWeapon === 'mp5') { targetOffset.y = -0.123; targetOffset.z = -0.32; }
+          else if (this.currentWeapon === 'deagle') { targetOffset.y = -0.136; targetOffset.z = -0.30; }
+          else if (this.currentWeapon === 'sniper') { targetOffset.y = -0.143; targetOffset.z = -0.36; }
+        } else if (currentOptic === 'sniper_variable') {
+          targetOffset.y = -0.175;
+          targetOffset.z = -0.36;
         }
+        targetOffset.x = 0.0;
+        targetOffset.rx = 0.0;
+        targetOffset.ry = 0.0;
+        targetOffset.rz = 0.0;
       }
     } else if (this.isDiving) {
       // Dolphin Dive Weapon Position: pushed forward horizontally flat against chest

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { EnvironmentState, TimeOfDay, WeatherType } from '../types';
+import { EnvironmentState, TimeOfDay, WeatherType, GraphicsMode } from '../types';
 import { soundManager } from './audio';
 import { ParticleSystem } from './particles';
 
@@ -44,176 +44,86 @@ export const WEATHER_PRESETS: Record<WeatherType, WeatherPresetConfig> = {
     ambientColor: 0x94a3b8,
     ambientIntensity: 0.95,
     sunColor: 0xffedd5,
-    sunIntensity: 2.4,
+    sunIntensity: 2.8,
     sunPos: [20, 75, -20],
     fillColor: 0x38bdf8,
-    fillIntensity: 0.8,
+    fillIntensity: 0.85,
     fogColor: 0x334155,
-    fogDensity: 0.008,
+    fogDensity: 0.006,
     skyTopColor: '#0369a1',
     skyMidColor: '#38bdf8',
     skyHorizonColor: '#bae6fd',
     sunFlareColor: 'rgba(255, 255, 240, 0.95)',
-    sunFlareSize: 180,
+    sunFlareSize: 220,
     hasStars: false,
     rainIntensity: 0,
-    dustIntensity: 0.05,
+    dustIntensity: 0.03,
     windSpeedKts: 6,
     windDir: new THREE.Vector3(1, 0, 0.5).normalize(),
     windDirStr: '06 KTS NE',
     visibilityPct: 98,
-    groundRoughness: 0.8,
-    groundMetalness: 0.15,
+    groundRoughness: 0.75,
+    groundMetalness: 0.22,
   },
   golden_sunset: {
     id: 'golden_sunset',
-    name: 'Golden Sunset / Twilight',
+    name: 'Golden Sunset (Evening)',
     timeOfDay: 'sunset',
     timeString: '18:45 HRS',
     temperatureStr: '22°C (71°F)',
     ambientColor: 0x7c2d12,
-    ambientIntensity: 0.85,
+    ambientIntensity: 0.88,
     sunColor: 0xfb923c,
-    sunIntensity: 2.8,
+    sunIntensity: 3.2,
     sunPos: [55, 24, -45],
     fillColor: 0x6366f1,
-    fillIntensity: 0.7,
+    fillIntensity: 0.75,
     fogColor: 0x451a03,
-    fogDensity: 0.014,
+    fogDensity: 0.011,
     skyTopColor: '#0f172a',
     skyMidColor: '#431407',
     skyHorizonColor: '#ea580c',
-    sunFlareColor: 'rgba(251, 146, 60, 0.9)',
-    sunFlareSize: 260,
+    sunFlareColor: 'rgba(251, 146, 60, 0.95)',
+    sunFlareSize: 320,
     hasStars: false,
     rainIntensity: 0,
-    dustIntensity: 0.1,
+    dustIntensity: 0.06,
     windSpeedKts: 11,
     windDir: new THREE.Vector3(-1, 0, 0.8).normalize(),
     windDirStr: '11 KTS WNW',
-    visibilityPct: 86,
-    groundRoughness: 0.75,
-    groundMetalness: 0.2,
-  },
-  tactical_storm: {
-    id: 'tactical_storm',
-    name: 'Tactical Thunderstorm',
-    timeOfDay: 'storm',
-    timeString: '21:15 HRS',
-    temperatureStr: '16°C (61°F)',
-    ambientColor: 0x1e293b,
-    ambientIntensity: 0.65,
-    sunColor: 0x64748b,
-    sunIntensity: 1.1,
-    sunPos: [10, 45, -30],
-    fillColor: 0x0284c7,
-    fillIntensity: 0.6,
-    fogColor: 0x0f172a,
-    fogDensity: 0.026,
-    skyTopColor: '#020617',
-    skyMidColor: '#0f172a',
-    skyHorizonColor: '#1e293b',
-    sunFlareColor: 'rgba(100, 116, 139, 0.2)',
-    sunFlareSize: 60,
-    hasStars: false,
-    rainIntensity: 1.0,
-    dustIntensity: 0,
-    windSpeedKts: 28,
-    windDir: new THREE.Vector3(-1.2, 0, -0.6).normalize(),
-    windDirStr: '28 KTS W (GUSTS 38)',
-    visibilityPct: 52,
-    groundRoughness: 0.2, // Wet asphalt sheen!
-    groundMetalness: 0.55,
+    visibilityPct: 88,
+    groundRoughness: 0.68,
+    groundMetalness: 0.28,
   },
   midnight_fog: {
     id: 'midnight_fog',
-    name: 'Midnight Ops (Night Fog)',
+    name: 'Midnight Ops (Night)',
     timeOfDay: 'night',
     timeString: '01:30 HRS',
     temperatureStr: '13°C (55°F)',
     ambientColor: 0x0f172a,
-    ambientIntensity: 0.45,
+    ambientIntensity: 0.48,
     sunColor: 0x38bdf8, // Moonlight
-    sunIntensity: 1.2,
+    sunIntensity: 1.5,
     sunPos: [-35, 55, 35],
     fillColor: 0x1e1b4b,
-    fillIntensity: 0.5,
+    fillIntensity: 0.55,
     fogColor: 0x020617,
-    fogDensity: 0.022,
+    fogDensity: 0.017,
     skyTopColor: '#000000',
     skyMidColor: '#020617',
     skyHorizonColor: '#0f172a',
-    sunFlareColor: 'rgba(186, 230, 253, 0.7)',
-    sunFlareSize: 100,
+    sunFlareColor: 'rgba(186, 230, 253, 0.8)',
+    sunFlareSize: 140,
     hasStars: true,
     rainIntensity: 0,
-    dustIntensity: 0.04,
+    dustIntensity: 0.02,
     windSpeedKts: 8,
     windDir: new THREE.Vector3(0.5, 0, -1).normalize(),
     windDirStr: '08 KTS SSE',
-    visibilityPct: 65,
-    groundRoughness: 0.65,
-    groundMetalness: 0.3,
-  },
-  sandstorm: {
-    id: 'sandstorm',
-    name: 'Desert Sandstorm',
-    timeOfDay: 'sandstorm',
-    timeString: '15:20 HRS',
-    temperatureStr: '37°C (99°F)',
-    ambientColor: 0x78350f,
-    ambientIntensity: 0.8,
-    sunColor: 0xd97706,
-    sunIntensity: 1.5,
-    sunPos: [40, 50, -40],
-    fillColor: 0x92400e,
-    fillIntensity: 0.9,
-    fogColor: 0x451a03,
-    fogDensity: 0.042,
-    skyTopColor: '#451a03',
-    skyMidColor: '#78350f',
-    skyHorizonColor: '#b45309',
-    sunFlareColor: 'rgba(217, 119, 6, 0.4)',
-    sunFlareSize: 140,
-    hasStars: false,
-    rainIntensity: 0,
-    dustIntensity: 1.0,
-    windSpeedKts: 35,
-    windDir: new THREE.Vector3(1.5, 0, 0.3).normalize(),
-    windDirStr: '35 KTS ENE (HEAVY DUST)',
-    visibilityPct: 38,
-    groundRoughness: 0.95,
-    groundMetalness: 0.05,
-  },
-  dynamic_cycle: {
-    id: 'dynamic_cycle',
-    name: 'Dynamic Time Cycle',
-    timeOfDay: 'noon',
-    timeString: '12:00 HRS',
-    temperatureStr: '26°C (79°F)',
-    ambientColor: 0x94a3b8,
-    ambientIntensity: 0.95,
-    sunColor: 0xffedd5,
-    sunIntensity: 2.4,
-    sunPos: [20, 75, -20],
-    fillColor: 0x38bdf8,
-    fillIntensity: 0.8,
-    fogColor: 0x334155,
-    fogDensity: 0.01,
-    skyTopColor: '#0369a1',
-    skyMidColor: '#38bdf8',
-    skyHorizonColor: '#bae6fd',
-    sunFlareColor: 'rgba(255, 255, 240, 0.95)',
-    sunFlareSize: 180,
-    hasStars: false,
-    rainIntensity: 0,
-    dustIntensity: 0.05,
-    windSpeedKts: 12,
-    windDir: new THREE.Vector3(1, 0, 0.5).normalize(),
-    windDirStr: '12 KTS NE',
-    visibilityPct: 95,
-    groundRoughness: 0.8,
-    groundMetalness: 0.15,
+    visibilityPct: 70,
+    groundRoughness: 0.58,
+    groundMetalness: 0.35,
   },
 };
 
@@ -230,12 +140,17 @@ export class EnvironmentManager {
   private skyCanvas: HTMLCanvasElement;
   private skyTexture: THREE.CanvasTexture;
 
+  // Volumetric Sun Shafts / Godrays (Extreme Graphics)
+  public godraysGroup: THREE.Group;
+  private godrayBeams: THREE.Mesh[] = [];
+
   // Current State
   public currentWeather: WeatherType = 'clear_day';
   public targetWeather: WeatherType = 'clear_day';
+  public graphicsMode: GraphicsMode = 'standard';
   public isDynamicCycle: boolean = false;
-  public cycleTimeSec: number = 0; // Advances in dynamic mode
-  public transitionProgress: number = 1.0; // 0 to 1 lerp
+  public cycleTimeSec: number = 0;
+  public transitionProgress: number = 1.0;
   public transitionDuration: number = 3.5;
 
   // Lightning system
@@ -250,7 +165,7 @@ export class EnvironmentManager {
   private rainGeometry!: THREE.BufferGeometry;
   private rainMaterial!: THREE.PointsMaterial;
   private rainPoints!: THREE.Points;
-  private rainCount: number = 3500;
+  private rainCount: number = 4000;
   private rainPositions!: Float32Array;
   private rainVelocities!: Float32Array;
 
@@ -258,11 +173,11 @@ export class EnvironmentManager {
   private dustGeometry!: THREE.BufferGeometry;
   private dustMaterial!: THREE.PointsMaterial;
   private dustPoints!: THREE.Points;
-  private dustCount: number = 1800;
+  private dustCount: number = 2200;
   private dustPositions!: Float32Array;
   private dustVelocities!: Float32Array;
 
-  // Wetness targets
+  // Wetness & PBR targets
   private mapMaterials: THREE.MeshStandardMaterial[] = [];
 
   // Callback
@@ -282,26 +197,28 @@ export class EnvironmentManager {
     this.ambientLight = new THREE.AmbientLight(0x94a3b8, 0.95);
     this.scene.add(this.ambientLight);
 
-    this.sunLight = new THREE.DirectionalLight(0xffedd5, 2.4);
+    this.sunLight = new THREE.DirectionalLight(0xffedd5, 2.8);
     this.sunLight.position.set(20, 75, -20);
     this.sunLight.castShadow = true;
-    this.sunLight.shadow.mapSize.width = 2048;
-    this.sunLight.shadow.mapSize.height = 2048;
-    this.sunLight.shadow.camera.near = 10;
-    this.sunLight.shadow.camera.far = 170;
-    this.sunLight.shadow.camera.left = -60;
-    this.sunLight.shadow.camera.right = 60;
-    this.sunLight.shadow.camera.top = 60;
-    this.sunLight.shadow.camera.bottom = -60;
-    this.sunLight.shadow.bias = -0.0005;
+    this.sunLight.shadow.mapSize.width = 4096;
+    this.sunLight.shadow.mapSize.height = 4096;
+    this.sunLight.shadow.camera.near = 5;
+    this.sunLight.shadow.camera.far = 220;
+    this.sunLight.shadow.camera.left = -75;
+    this.sunLight.shadow.camera.right = 75;
+    this.sunLight.shadow.camera.top = 75;
+    this.sunLight.shadow.camera.bottom = -75;
+    this.sunLight.shadow.bias = -0.0003;
+    this.sunLight.shadow.normalBias = 0.035;
+    this.sunLight.shadow.radius = 2.4;
     this.scene.add(this.sunLight);
 
-    this.fillLight = new THREE.DirectionalLight(0x38bdf8, 0.8);
+    this.fillLight = new THREE.DirectionalLight(0x38bdf8, 0.85);
     this.fillLight.position.set(-35, 30, 45);
     this.scene.add(this.fillLight);
 
     // 2. Initialize Fog
-    this.scene.fog = new THREE.FogExp2(0x334155, 0.008);
+    this.scene.fog = new THREE.FogExp2(0x334155, 0.006);
 
     // 3. Sky Dome Canvas Texture
     this.skyCanvas = document.createElement('canvas');
@@ -309,7 +226,7 @@ export class EnvironmentManager {
     this.skyCanvas.height = 512;
     this.skyTexture = new THREE.CanvasTexture(this.skyCanvas);
 
-    const skyGeo = new THREE.SphereGeometry(145, 32, 24);
+    const skyGeo = new THREE.SphereGeometry(150, 32, 24);
     const skyMat = new THREE.MeshBasicMaterial({
       map: this.skyTexture,
       side: THREE.BackSide,
@@ -318,17 +235,123 @@ export class EnvironmentManager {
     this.skyDome = new THREE.Mesh(skyGeo, skyMat);
     this.scene.add(this.skyDome);
 
-    // 4. Initialize Volumetric Rain & Dust Particles
+    // 4. Volumetric Godrays Group
+    this.godraysGroup = new THREE.Group();
+    this.initGodrayBeams();
+    this.scene.add(this.godraysGroup);
+
+    // 5. Initialize Volumetric Rain & Dust Particles
     this.initRainParticles();
     this.initDustParticles();
 
-    // 5. Apply Initial Preset
+    // 6. Apply Initial Preset
     this.setWeather(initialPreset, true);
+  }
+
+  // Create procedural volumetric sunbeams
+  private initGodrayBeams() {
+    const beamCount = 6;
+    const beamGeo = new THREE.CylinderGeometry(0.8, 6.5, 70, 16, 1, true);
+
+    // Create soft radial alpha texture
+    const canvas = document.createElement('canvas');
+    canvas.width = 64;
+    canvas.height = 256;
+    const ctx = canvas.getContext('2d')!;
+    const grad = ctx.createLinearGradient(0, 0, 0, 256);
+    grad.addColorStop(0, 'rgba(255, 235, 180, 0.45)');
+    grad.addColorStop(0.3, 'rgba(255, 210, 140, 0.28)');
+    grad.addColorStop(0.8, 'rgba(255, 180, 100, 0.08)');
+    grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 64, 256);
+    const beamTex = new THREE.CanvasTexture(canvas);
+
+    for (let i = 0; i < beamCount; i++) {
+      const beamMat = new THREE.MeshBasicMaterial({
+        map: beamTex,
+        transparent: true,
+        opacity: 0.18,
+        blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        fog: false,
+      });
+
+      const beam = new THREE.Mesh(beamGeo, beamMat);
+      const angle = (i / beamCount) * Math.PI * 2;
+      const radius = 6 + (i % 3) * 4;
+      beam.position.set(Math.cos(angle) * radius, 35, Math.sin(angle) * radius);
+      beam.rotation.x = Math.PI * 0.15;
+      beam.rotation.z = Math.sin(angle) * 0.2;
+      this.godraysGroup.add(beam);
+      this.godrayBeams.push(beam);
+    }
   }
 
   // Register map materials to receive wetness/reflection changes
   public registerMapMaterial(mat: THREE.MeshStandardMaterial) {
-    this.mapMaterials.push(mat);
+    if (!this.mapMaterials.includes(mat)) {
+      this.mapMaterials.push(mat);
+      this.applyMaterialQuality(mat);
+    }
+  }
+
+  public setGraphicsMode(mode: GraphicsMode) {
+    this.graphicsMode = mode;
+    const isExtreme = mode === 'extreme';
+    const isSmooth = mode === 'smooth';
+
+    // 1. Shadows & Lights
+    if (isSmooth) {
+      this.sunLight.castShadow = false;
+      this.godraysGroup.visible = false;
+      this.rainCount = 1000;
+      this.dustCount = 600;
+    } else if (isExtreme) {
+      this.sunLight.castShadow = true;
+      this.sunLight.shadow.mapSize.set(4096, 4096);
+      this.sunLight.shadow.radius = 2.8;
+      this.sunLight.shadow.bias = -0.0003;
+      this.sunLight.shadow.normalBias = 0.04;
+      this.godraysGroup.visible = true;
+      this.rainCount = 4500;
+      this.dustCount = 2500;
+    } else {
+      // Standard
+      this.sunLight.castShadow = true;
+      this.sunLight.shadow.mapSize.set(2048, 2048);
+      this.sunLight.shadow.radius = 1.6;
+      this.sunLight.shadow.bias = -0.0004;
+      this.sunLight.shadow.normalBias = 0.03;
+      this.godraysGroup.visible = true;
+      this.rainCount = 3000;
+      this.dustCount = 1500;
+    }
+
+    if (this.sunLight.shadow.map) {
+      this.sunLight.shadow.map.dispose();
+      this.sunLight.shadow.map = null as any;
+    }
+
+    // 2. Material PBR tuning
+    this.mapMaterials.forEach(m => this.applyMaterialQuality(m));
+  }
+
+  private applyMaterialQuality(mat: THREE.MeshStandardMaterial) {
+    const isExtreme = this.graphicsMode === 'extreme';
+    const isSmooth = this.graphicsMode === 'smooth';
+
+    if (isExtreme) {
+      mat.roughness = Math.max(0.25, mat.roughness * 0.85);
+      mat.metalness = Math.min(0.9, (mat.metalness || 0.1) * 1.35 + 0.1);
+      mat.envMapIntensity = 1.4;
+    } else if (isSmooth) {
+      mat.envMapIntensity = 0.5;
+    } else {
+      mat.envMapIntensity = 1.0;
+    }
+    mat.needsUpdate = true;
   }
 
   private initRainParticles() {
@@ -341,30 +364,29 @@ export class EnvironmentManager {
       this.rainPositions[idx + 1] = Math.random() * 40;
       this.rainPositions[idx + 2] = (Math.random() - 0.5) * 80;
 
-      this.rainVelocities[idx] = -4 + Math.random() * 2; // Wind drift X
-      this.rainVelocities[idx + 1] = -42 - Math.random() * 12; // Falling speed
-      this.rainVelocities[idx + 2] = -2 + Math.random() * 2; // Wind drift Z
+      this.rainVelocities[idx] = -4 + Math.random() * 2;
+      this.rainVelocities[idx + 1] = -42 - Math.random() * 12;
+      this.rainVelocities[idx + 2] = -2 + Math.random() * 2;
     }
 
     this.rainGeometry = new THREE.BufferGeometry();
     this.rainGeometry.setAttribute('position', new THREE.BufferAttribute(this.rainPositions, 3));
 
-    // Vertical elongated streak canvas texture for rain
     const canvas = document.createElement('canvas');
     canvas.width = 16;
     canvas.height = 64;
     const ctx = canvas.getContext('2d')!;
     const grad = ctx.createLinearGradient(8, 0, 8, 64);
     grad.addColorStop(0, 'rgba(255, 255, 255, 0)');
-    grad.addColorStop(0.5, 'rgba(186, 230, 253, 0.7)');
-    grad.addColorStop(1, 'rgba(255, 255, 255, 0.95)');
+    grad.addColorStop(0.5, 'rgba(186, 230, 253, 0.75)');
+    grad.addColorStop(1, 'rgba(255, 255, 255, 0.98)');
     ctx.fillStyle = grad;
     ctx.fillRect(6, 0, 4, 64);
     const rainTex = new THREE.CanvasTexture(canvas);
 
     this.rainMaterial = new THREE.PointsMaterial({
       color: 0x93c5fd,
-      size: 0.45,
+      size: 0.48,
       map: rainTex,
       transparent: true,
       opacity: 0,
@@ -399,8 +421,8 @@ export class EnvironmentManager {
     canvas.height = 32;
     const ctx = canvas.getContext('2d')!;
     const grad = ctx.createRadialGradient(16, 16, 2, 16, 16, 15);
-    grad.addColorStop(0, 'rgba(217, 119, 6, 0.9)');
-    grad.addColorStop(0.5, 'rgba(180, 83, 9, 0.4)');
+    grad.addColorStop(0, 'rgba(245, 158, 11, 0.95)');
+    grad.addColorStop(0.5, 'rgba(217, 119, 6, 0.5)');
     grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, 32, 32);
@@ -408,11 +430,11 @@ export class EnvironmentManager {
 
     this.dustMaterial = new THREE.PointsMaterial({
       color: 0xf59e0b,
-      size: 0.35,
+      size: 0.38,
       map: dustTex,
       transparent: true,
       opacity: 0,
-      blending: THREE.NormalBlending,
+      blending: THREE.AdditiveBlending,
       depthWrite: false,
     });
 
@@ -422,26 +444,19 @@ export class EnvironmentManager {
 
   // --- SET WEATHER / TRANSITIONS ---
   public setWeather(preset: WeatherType, immediate: boolean = false) {
-    if (preset === 'dynamic_cycle') {
-      this.isDynamicCycle = true;
-      this.currentWeather = 'dynamic_cycle';
-      this.targetWeather = 'clear_day';
-      this.cycleTimeSec = 0;
-    } else {
-      this.isDynamicCycle = false;
-      this.targetWeather = preset;
-    }
+    const validPreset: WeatherType = WEATHER_PRESETS[preset] ? preset : 'clear_day';
+    this.targetWeather = validPreset;
 
     if (immediate) {
-      this.currentWeather = preset === 'dynamic_cycle' ? 'clear_day' : preset;
+      this.currentWeather = validPreset;
       this.transitionProgress = 1.0;
-      this.applyPreset(WEATHER_PRESETS[this.currentWeather]);
+      this.applyPreset(WEATHER_PRESETS[this.currentWeather] || WEATHER_PRESETS['clear_day']);
     } else {
       this.transitionProgress = 0.0;
       soundManager.playWeatherShiftNotice();
     }
 
-    const currentCfg = WEATHER_PRESETS[this.currentWeather];
+    const currentCfg = WEATHER_PRESETS[this.currentWeather] || WEATHER_PRESETS['clear_day'];
     soundManager.setWeatherAudio(this.currentWeather, currentCfg.rainIntensity > 0 ? currentCfg.rainIntensity : currentCfg.dustIntensity);
     this.emitState();
   }
@@ -450,10 +465,7 @@ export class EnvironmentManager {
     const sequence: WeatherType[] = [
       'clear_day',
       'golden_sunset',
-      'tactical_storm',
       'midnight_fog',
-      'sandstorm',
-      'dynamic_cycle',
     ];
     const nextIdx = (sequence.indexOf(this.currentWeather) + 1) % sequence.length;
     const nextPreset = sequence[nextIdx];
@@ -462,6 +474,10 @@ export class EnvironmentManager {
   }
 
   private applyPreset(cfg: WeatherPresetConfig) {
+    if (!cfg) {
+      cfg = WEATHER_PRESETS['clear_day'];
+    }
+
     this.ambientLight.color.setHex(cfg.ambientColor);
     this.ambientLight.intensity = cfg.ambientIntensity;
 
@@ -472,19 +488,27 @@ export class EnvironmentManager {
     this.fillLight.color.setHex(cfg.fillColor);
     this.fillLight.intensity = cfg.fillIntensity;
 
+    // Reposition godrays to align with sun
+    this.godraysGroup.position.set(cfg.sunPos[0] * 0.4, 0, cfg.sunPos[2] * 0.4);
+    const sunDir = new THREE.Vector3(...cfg.sunPos).normalize();
+    this.godrayBeams.forEach(b => {
+      (b.material as THREE.MeshBasicMaterial).opacity = cfg.timeOfDay === 'night' ? 0.06 : this.graphicsMode === 'extreme' ? 0.26 : 0.14;
+      b.lookAt(this.godraysGroup.position.clone().add(sunDir));
+    });
+
     if (this.scene.fog && this.scene.fog instanceof THREE.FogExp2) {
       this.scene.fog.color.setHex(cfg.fogColor);
       this.scene.fog.density = cfg.fogDensity;
     }
 
     this.rainMaterial.opacity = cfg.rainIntensity * 0.85;
-    this.dustMaterial.opacity = cfg.dustIntensity * 0.75;
+    this.dustMaterial.opacity = cfg.dustIntensity * (this.graphicsMode === 'extreme' ? 0.9 : 0.7);
 
     // Apply ground wetness & reflection sheen
     this.mapMaterials.forEach(mat => {
       mat.roughness = cfg.groundRoughness;
       mat.metalness = cfg.groundMetalness;
-      mat.needsUpdate = true;
+      this.applyMaterialQuality(mat);
     });
 
     this.drawSky(cfg);
@@ -506,11 +530,11 @@ export class EnvironmentManager {
     // Stars at night
     if (cfg.hasStars) {
       ctx.fillStyle = '#ffffff';
-      for (let i = 0; i < 180; i++) {
+      for (let i = 0; i < 220; i++) {
         const sx = Math.sin(i * 99) * 512 + 512;
         const sy = (Math.cos(i * 33) * 0.5 + 0.5) * 320;
-        const radius = (i % 3 === 0 ? 1.5 : 0.8);
-        ctx.globalAlpha = 0.4 + (i % 5) * 0.12;
+        const radius = (i % 3 === 0 ? 1.6 : 0.9);
+        ctx.globalAlpha = 0.4 + (i % 5) * 0.14;
         ctx.beginPath();
         ctx.arc(sx, sy, radius, 0, Math.PI * 2);
         ctx.fill();
@@ -523,13 +547,13 @@ export class EnvironmentManager {
     const flareY = cfg.timeOfDay === 'sunset' ? 380 : cfg.timeOfDay === 'night' ? 140 : 260;
     const sunGrad = ctx.createRadialGradient(flareX, flareY, 5, flareX, flareY, cfg.sunFlareSize);
     sunGrad.addColorStop(0, cfg.sunFlareColor);
-    sunGrad.addColorStop(0.35, cfg.sunFlareColor.replace('0.9', '0.4').replace('0.95', '0.4'));
+    sunGrad.addColorStop(0.35, cfg.sunFlareColor.replace('0.9', '0.45').replace('0.95', '0.45'));
     sunGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
     ctx.fillStyle = sunGrad;
     ctx.fillRect(0, 0, w, h);
 
     // Mountain silhouettes on horizon
-    ctx.fillStyle = cfg.timeOfDay === 'night' ? '#010409' : cfg.timeOfDay === 'sandstorm' ? '#3d1602' : '#090d16';
+    ctx.fillStyle = cfg.timeOfDay === 'night' ? '#010409' : '#090d16';
     ctx.beginPath();
     ctx.moveTo(0, h);
     for (let x = 0; x <= w; x += 32) {
@@ -548,15 +572,12 @@ export class EnvironmentManager {
     // 1. Dynamic Time Progression
     if (this.isDynamicCycle) {
       this.cycleTimeSec += dt;
-      // Cycle through Dawn -> Day -> Sunset -> Storm -> Night every 45 seconds
       const cycleStages: WeatherType[] = [
         'clear_day',
         'golden_sunset',
-        'tactical_storm',
         'midnight_fog',
-        'sandstorm',
       ];
-      const stageIdx = Math.floor((this.cycleTimeSec / 35) % cycleStages.length);
+      const stageIdx = Math.floor((this.cycleTimeSec / 45) % cycleStages.length);
       const stage = cycleStages[stageIdx];
       if (stage !== this.targetWeather) {
         this.targetWeather = stage;
@@ -569,8 +590,8 @@ export class EnvironmentManager {
     // 2. Smooth Weather Transitions
     if (this.transitionProgress < 1.0) {
       this.transitionProgress = Math.min(1.0, this.transitionProgress + dt / this.transitionDuration);
-      const fromCfg = WEATHER_PRESETS[this.currentWeather];
-      const toCfg = WEATHER_PRESETS[this.targetWeather];
+      const fromCfg = WEATHER_PRESETS[this.currentWeather] || WEATHER_PRESETS['clear_day'];
+      const toCfg = WEATHER_PRESETS[this.targetWeather] || WEATHER_PRESETS['clear_day'];
 
       const p = this.transitionProgress;
       // Lerp ambient light
@@ -606,7 +627,7 @@ export class EnvironmentManager {
 
       if (this.transitionProgress >= 1.0) {
         this.currentWeather = this.targetWeather;
-        this.applyPreset(WEATHER_PRESETS[this.currentWeather]);
+        this.applyPreset(WEATHER_PRESETS[this.currentWeather] || WEATHER_PRESETS['clear_day']);
         soundManager.setWeatherAudio(
           this.currentWeather,
           toCfg.rainIntensity > 0 ? toCfg.rainIntensity : toCfg.dustIntensity
@@ -615,8 +636,13 @@ export class EnvironmentManager {
       }
     }
 
+    // Gentle pulse and subtle rotation on godrays
+    if (this.godraysGroup.visible) {
+      this.godraysGroup.rotation.y += dt * 0.02;
+    }
+
     // 3. Lightning Flash in Tactical Storm
-    const activeCfg = WEATHER_PRESETS[this.targetWeather];
+    const activeCfg = WEATHER_PRESETS[this.targetWeather] || WEATHER_PRESETS['clear_day'];
     if (activeCfg.rainIntensity > 0.5) {
       this.lightningTimer += dt;
       if (this.lightningTimer >= this.nextLightningDelay && !this.isLightningFlashing) {
@@ -627,7 +653,6 @@ export class EnvironmentManager {
         this.lightningFlashDuration -= dt;
         if (this.lightningFlashDuration <= 0) {
           this.isLightningFlashing = false;
-          // Restore normal ambient & sun intensity
           this.ambientLight.intensity = this.lightningBaseAmbient;
           this.sunLight.intensity = this.lightningBaseSun;
           if (this.scene.fog && this.scene.fog instanceof THREE.FogExp2) {
@@ -635,7 +660,6 @@ export class EnvironmentManager {
           }
           this.emitState();
         } else {
-          // Rapid multi-strobe lightning flicker
           const flicker = Math.sin(this.lightningFlashDuration * 60) > 0 ? 1 : 0.4;
           this.ambientLight.intensity = this.lightningBaseAmbient + 2.8 * flicker;
           this.sunLight.intensity = this.lightningBaseSun + 4.2 * flicker;
@@ -643,21 +667,18 @@ export class EnvironmentManager {
       }
     }
 
-    // 4. Update Volumetric Rain Particle positions (Camera-anchored volume)
+    // 4. Update Volumetric Rain Particle positions
     if (this.rainMaterial.opacity > 0.05) {
       const posAttr = this.rainGeometry.attributes.position as THREE.BufferAttribute;
       const positions = posAttr.array as Float32Array;
 
       for (let i = 0; i < this.rainCount; i++) {
         const idx = i * 3;
-        // Apply velocity & wind
         positions[idx] += (this.rainVelocities[idx] + activeCfg.windDir.x * 6) * dt;
         positions[idx + 1] += this.rainVelocities[idx + 1] * dt;
         positions[idx + 2] += (this.rainVelocities[idx + 2] + activeCfg.windDir.z * 6) * dt;
 
-        // Wrap around player position
         if (positions[idx + 1] <= 0.1) {
-          // Spawn tiny ground splash ring occasionally
           if (i % 25 === 0) {
             this.particles.emitSupplyPickup(
               new THREE.Vector3(positions[idx], 0.1, positions[idx + 2]),
@@ -669,7 +690,6 @@ export class EnvironmentManager {
           positions[idx + 2] = playerPos.z + (Math.random() - 0.5) * 60;
         }
 
-        // Horizontal boundary wrap around player
         if (Math.abs(positions[idx] - playerPos.x) > 40) {
           positions[idx] = playerPos.x + (Math.random() - 0.5) * 40;
         }
@@ -691,7 +711,6 @@ export class EnvironmentManager {
         positions[idx + 1] += this.dustVelocities[idx + 1] * dt;
         positions[idx + 2] += (this.dustVelocities[idx + 2] + activeCfg.windDir.z * 8) * dt;
 
-        // Boundary wraps
         if (Math.abs(positions[idx] - playerPos.x) > 45) {
           positions[idx] = playerPos.x - 40;
           positions[idx + 1] = Math.random() * 20;
@@ -710,15 +729,14 @@ export class EnvironmentManager {
     this.lightningTimer = 0;
     this.nextLightningDelay = 4.0 + Math.random() * 9.0;
     this.isLightningFlashing = true;
-    this.lightningFlashDuration = 0.22; // 220ms multi-strobe flash
+    this.lightningFlashDuration = 0.22;
     this.lightningBaseAmbient = this.ambientLight.intensity;
     this.lightningBaseSun = this.sunLight.intensity;
 
     if (this.scene.fog && this.scene.fog instanceof THREE.FogExp2) {
-      this.scene.fog.color.setHex(0xcffafe); // Lightning blue-white fog flash
+      this.scene.fog.color.setHex(0xcffafe);
     }
 
-    // Delayed thunder crack based on random simulated distance (0.2s - 1.2s delay)
     const distRatio = Math.random();
     setTimeout(() => {
       soundManager.playThunder(distRatio);
@@ -760,6 +778,7 @@ export class EnvironmentManager {
     this.scene.remove(this.sunLight);
     this.scene.remove(this.fillLight);
     this.scene.remove(this.skyDome);
+    this.scene.remove(this.godraysGroup);
     this.scene.remove(this.rainPoints);
     this.scene.remove(this.dustPoints);
     this.rainGeometry.dispose();

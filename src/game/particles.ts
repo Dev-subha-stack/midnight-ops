@@ -28,6 +28,12 @@ export class ParticleSystem {
   private tracers: BulletTracer[] = [];
   private shellCasings: { mesh: THREE.Mesh; velocity: THREE.Vector3; rotVel: THREE.Vector3; life: number }[] = [];
 
+  // Dynamic Real-time Flash & Explosion Lights
+  public muzzleFlashLight: THREE.PointLight;
+  public explosionLight: THREE.PointLight;
+  private muzzleFlashTimer: number = 0;
+  private explosionLightTimer: number = 0;
+
   private pointsGeo: THREE.BufferGeometry;
   private pointsMat: THREE.PointsMaterial;
   private pointsMesh: THREE.Points;
@@ -38,6 +44,14 @@ export class ParticleSystem {
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
+
+    // Real-time dynamic point light for weapons fire
+    this.muzzleFlashLight = new THREE.PointLight(0xffa500, 0, 18, 2.0);
+    this.scene.add(this.muzzleFlashLight);
+
+    // Real-time dynamic point light for grenade blasts
+    this.explosionLight = new THREE.PointLight(0xffedd5, 0, 45, 1.8);
+    this.scene.add(this.explosionLight);
 
     this.posArray = new Float32Array(this.maxParticles * 3);
     this.colorArray = new Float32Array(this.maxParticles * 3);
@@ -74,6 +88,11 @@ export class ParticleSystem {
 
   // --- MUZZLE FLASH FX ---
   public emitMuzzleFlash(pos: THREE.Vector3, dir: THREE.Vector3) {
+    // Light up environment around player weapon
+    this.muzzleFlashLight.position.copy(pos);
+    this.muzzleFlashLight.intensity = 4.2;
+    this.muzzleFlashTimer = 0.065;
+
     // Muzzle sparks
     for (let i = 0; i < 8; i++) {
       const spread = new THREE.Vector3(
@@ -109,46 +128,47 @@ export class ParticleSystem {
     }
   }
 
-  // --- BULLET TRACER (CALIBER & VELOCITY SPECIFIC) ---
+  // --- BULLET TRACER & BALLISTIC TRAJECTORY EFFECTS ---
   public spawnBulletTracer(start: THREE.Vector3, end: THREE.Vector3, weaponType: string = 'm4') {
     let color = 0xfef08a;
-    let speed = 200;
-    let lineWidth = 2;
+    let speed = 240;
+    let tracerLength = 0.28;
 
     switch (weaponType) {
       case 'sniper':
         color = 0xfbbf24; // Radiant high-energy .50 BMG gold beam
-        speed = 340;
-        lineWidth = 3;
+        speed = 380;
+        tracerLength = 0.45;
         break;
       case 'm4':
-        color = 0xa3e635; // 5.56 NATO high-visibility luminous green-yellow
-        speed = 260;
-        lineWidth = 2;
+        color = 0x84cc16; // 5.56 NATO luminous green-gold beam
+        speed = 280;
+        tracerLength = 0.32;
         break;
       case 'mp5':
-        color = 0xfef08a; // 9mm bright white-yellow streak
-        speed = 180;
-        lineWidth = 2;
+        color = 0xfde047; // 9mm bright luminous tracer
+        speed = 210;
+        tracerLength = 0.25;
         break;
       case 'shotgun':
-        color = 0xf87171; // 12GA fiery red/orange buckshot streak
-        speed = 150;
-        lineWidth = 2;
+        color = 0xf87171; // 12GA red-hot buckshot tracer
+        speed = 180;
+        tracerLength = 0.22;
         break;
       case 'deagle':
-        color = 0xf97316; // .50 AE intense fiery orange tracer
-        speed = 210;
-        lineWidth = 3;
+        color = 0xf97316; // .50 AE intense orange hypersonic tracer
+        speed = 250;
+        tracerLength = 0.35;
         break;
     }
 
+    // Dynamic 2-point Line for the high-speed glowing core
     const geo = new THREE.BufferGeometry().setFromPoints([start, start.clone()]);
     const mat = new THREE.LineBasicMaterial({
       color,
-      linewidth: lineWidth,
+      linewidth: 3,
       transparent: true,
-      opacity: 0.95,
+      opacity: 1.0,
       blending: THREE.AdditiveBlending,
     });
     const line = new THREE.Line(geo, mat);
@@ -162,6 +182,24 @@ export class ParticleSystem {
       progress: 0,
       mesh: line,
     });
+
+    // Spawn initial supersonic vapor puff along line of sight
+    const dir = end.clone().sub(start).normalize();
+    const dist = start.distanceTo(end);
+    const stepCount = Math.min(6, Math.floor(dist / 8));
+    for (let s = 1; s <= stepCount; s++) {
+      const pPos = start.clone().addScaledVector(dir, s * 7);
+      this.particles.push({
+        position: pPos,
+        velocity: new THREE.Vector3((Math.random() - 0.5) * 0.4, (Math.random() - 0.5) * 0.4, (Math.random() - 0.5) * 0.4),
+        color: new THREE.Color(0.85, 0.9, 0.95),
+        size: 0.15,
+        alpha: 0.4,
+        maxLife: 0.2,
+        life: 0.2,
+        gravity: 0,
+      });
+    }
   }
 
   // --- WALL / OBJECT IMPACT IMPACT PARTICLES (SPARKS & DUST) ---
@@ -200,6 +238,10 @@ export class ParticleSystem {
     }
   }
 
+  public emitSpark(pos: THREE.Vector3, normal?: THREE.Vector3) {
+    this.emitImpactSparks(pos, normal || new THREE.Vector3(0, 1, 0));
+  }
+
   // --- BLOOD SPLATTER PARTICLES ---
   public emitBloodSplatter(pos: THREE.Vector3, dir: THREE.Vector3, isHeadshot: boolean = false) {
     const count = isHeadshot ? 28 : 14;
@@ -225,6 +267,12 @@ export class ParticleSystem {
 
   // --- EXPLOSION FIREBALL & SMOKE ---
   public emitExplosion(pos: THREE.Vector3, scale: number = 1.0) {
+    // Dynamic blast flash
+    this.explosionLight.position.copy(pos);
+    this.explosionLight.position.y += 0.8;
+    this.explosionLight.intensity = 8.5 * scale;
+    this.explosionLightTimer = 0.35;
+
     // Fiery blast core
     for (let i = 0; i < Math.floor(60 * scale); i++) {
       const vel = new THREE.Vector3(
@@ -290,6 +338,27 @@ export class ParticleSystem {
         maxLife: 3.5 + Math.random() * 1.5,
         life: 3.5 + Math.random() * 1.5,
         gravity: -0.05,
+      });
+    }
+  }
+
+  // --- GLOO WALL DEPLOYMENT CRYO SPARKS ---
+  public emitGlooWallSparks(pos: THREE.Vector3) {
+    for (let i = 0; i < 28; i++) {
+      const vel = new THREE.Vector3(
+        (Math.random() - 0.5) * 6,
+        Math.random() * 4 + 1.5,
+        (Math.random() - 0.5) * 6
+      );
+      this.particles.push({
+        position: pos.clone().add(new THREE.Vector3((Math.random() - 0.5) * 1.5, (Math.random() - 0.5) * 0.8, (Math.random() - 0.5) * 1.5)),
+        velocity: vel,
+        color: new THREE.Color(0.25, 0.85, 1.0),
+        size: 0.28,
+        alpha: 0.95,
+        maxLife: 0.65,
+        life: 0.65,
+        gravity: 4.0,
       });
     }
   }
@@ -403,6 +472,25 @@ export class ParticleSystem {
 
   // --- FRAME UPDATE ---
   public update(dt: number) {
+    // 0. Update Dynamic Lights
+    if (this.muzzleFlashTimer > 0) {
+      this.muzzleFlashTimer -= dt;
+      if (this.muzzleFlashTimer <= 0) {
+        this.muzzleFlashLight.intensity = 0;
+      } else {
+        this.muzzleFlashLight.intensity = (this.muzzleFlashTimer / 0.065) * 4.2;
+      }
+    }
+
+    if (this.explosionLightTimer > 0) {
+      this.explosionLightTimer -= dt;
+      if (this.explosionLightTimer <= 0) {
+        this.explosionLight.intensity = 0;
+      } else {
+        this.explosionLight.intensity = (this.explosionLightTimer / 0.35) * 8.5;
+      }
+    }
+
     // 1. Update Particles
     for (let i = this.particles.length - 1; i >= 0; i--) {
       const p = this.particles[i];

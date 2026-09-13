@@ -1,11 +1,12 @@
 import * as THREE from 'three';
-import { AIAlertLevel, AIArchetype, EnemyBot, GameMode, WeaponType } from '../types';
+import { AIAlertLevel, AIArchetype, EnemyBot, GameMode, SquadRadioItem, SquadRole, WeaponType } from '../types';
 import { ModelFactory } from './models';
 import { TacticalCoverPoint, TacticalMap } from './map';
 import { ParticleSystem } from './particles';
 import { soundManager } from './audio';
 import { WEAPON_REGISTRY } from './weapons';
 import { CollisionSystem } from './collision';
+import { GrenadeManager } from './grenades';
 
 export class BotManager {
   public scene: THREE.Scene;
@@ -14,11 +15,35 @@ export class BotManager {
   public bots: BotController[] = [];
   public smokeClouds: { position: THREE.Vector3; radius: number; duration: number }[] = [];
   public onBotKillBot?: (killerTeam: 'allies' | 'axis', killerName: string, victimName: string, weapon: WeaponType) => void;
+  public onSquadRadio?: (item: SquadRadioItem) => void;
+  public grenadeManager?: GrenadeManager;
 
-  // Squad Shared Intelligence
+  // Battle Royale & Tactical Context
+  public battleRoyaleContext?: {
+    circleCenter: { x: number; z: number };
+    circleRadius: number;
+    dangerZone: { center: { x: number; z: number }; radius: number; isWarning: boolean } | null;
+    isOutsideSafeZone: boolean;
+  };
+
+  // Squad Shared Intelligence & Gaze Tracking
   public squadAlertLevel: AIAlertLevel = 'unalerted';
   public lastKnownPlayerPos: THREE.Vector3 | null = null;
+  public lastKnownPlayerVel: THREE.Vector3 = new THREE.Vector3();
   public timeSincePlayerSpotted: number = 999;
+  public playerVelocity: THREE.Vector3 = new THREE.Vector3();
+  public playerForward: THREE.Vector3 = new THREE.Vector3(0, 0, -1);
+
+  // Player Camping Detection (flushes with frags if player turtles behind cover)
+  public playerCampTimer: number = 0;
+  public lastPlayerSamplePos: THREE.Vector3 = new THREE.Vector3();
+
+  // Squad Radio Chatter Throttle & Role Evaluator
+  public radioChatterCooldown: number = 0;
+  public roleEvaluationTimer: number = 0;
+  public boundingLeapfrogTimer: number = 0;
+  public lastBoundingAdvancerId: string | null = null;
+  public lastBoundingCovererId: string | null = null;
   private attackTokens: number = 2; // Maximum concurrent shooters to prevent overwhelming the player
 
   constructor(scene: THREE.Scene, map: TacticalMap, particles: ParticleSystem) {
@@ -29,6 +54,95 @@ export class BotManager {
 
   public setSmokeClouds(clouds: { position: THREE.Vector3; radius: number; duration: number }[]) {
     this.smokeClouds = clouds;
+  }
+
+  // --- AAA SQUAD RADIO BROADCASTING ---
+  public broadcastRadio(
+    speaker: BotController,
+    message: string,
+    actionType: SquadRadioItem['actionType'],
+    overrideThrottle: boolean = false
+  ) {
+    if (!overrideThrottle && this.radioChatterCooldown > 0) return;
+    this.radioChatterCooldown = 2.4;
+
+    soundManager.playRadioTacticalBark(actionType, speaker.position);
+    speaker.voiceCallout = message;
+    setTimeout(() => {
+      if (speaker.voiceCallout === message) speaker.voiceCallout = '';
+    }, 3500);
+
+    const radioItem: SquadRadioItem = {
+      id: `radio_${Date.now()}_${Math.random()}`,
+      speaker: speaker.name.replace(/_/g, ' '),
+      team: speaker.team,
+      role: speaker.squadRole,
+      message,
+      actionType,
+      timestamp: Date.now(),
+    };
+    this.onSquadRadio?.(radioItem);
+  }
+
+  // --- AAA DYNAMIC SQUAD ROLE ALLOCATION ---
+  public evaluateSquadRoles(team: 'allies' | 'axis') {
+    const aliveBots = this.bots.filter(b => !b.isDead && b.team === team);
+    if (aliveBots.length === 0) return;
+
+    let hasSuppressor = false;
+    let hasFlanker = false;
+    let hasOverwatch = false;
+
+    aliveBots.forEach(bot => {
+      if (bot.archetype === 'sniper' && !hasOverwatch) {
+        bot.squadRole = 'overwatch';
+        hasOverwatch = true;
+      } else if (!hasSuppressor && (bot.archetype === 'heavy' || bot.archetype === 'assault')) {
+        bot.squadRole = 'suppressor';
+        hasSuppressor = true;
+      } else if (!hasFlanker && (bot.archetype === 'flanker' || bot.archetype === 'assault')) {
+        bot.squadRole = 'flanker';
+        hasFlanker = true;
+      } else {
+        bot.squadRole = 'pointman';
+      }
+    });
+  }
+
+  // --- NEAR-MISS BULLET SUPPRESSION ---
+  public notifyNearMiss(bulletPos: THREE.Vector3, dir: THREE.Vector3) {
+    this.bots.forEach(bot => {
+      if (bot.isDead) return;
+      const d = bot.position.distanceTo(bulletPos);
+      if (d < 3.2) {
+        bot.applySuppression(1.0);
+      }
+    });
+  }
+
+  // --- SQUAD CASUALTY NOTIFICATION ---
+  public onBotKilled(victim: BotController, killerName?: string) {
+    const friendlyTeammates = this.bots.filter(b => !b.isDead && b.team === victim.team && b !== victim);
+    if (friendlyTeammates.length > 0) {
+      const nearestFriendly = friendlyTeammates.reduce((closest, b) => {
+        return b.position.distanceTo(victim.position) < closest.position.distanceTo(victim.position) ? b : closest;
+      }, friendlyTeammates[0]);
+
+      if (nearestFriendly.position.distanceTo(victim.position) < 32) {
+        const casualtyLines = [
+          `Man down! ${victim.name.replace(/_/g, ' ')} is hit!`,
+          `Casualty reported! Stay in cover and return fire!`,
+          `We lost a shooter, check your sectors!`,
+        ];
+        const line = casualtyLines[Math.floor(Math.random() * casualtyLines.length)];
+        this.broadcastRadio(nearestFriendly, line, 'casualty', true);
+
+        // Alert to victim's position
+        nearestFriendly.alertToPosition(victim.position);
+      }
+    }
+    // Re-evaluate team roles after casualty
+    this.evaluateSquadRoles(victim.team);
   }
 
   public spawnBots(
@@ -120,7 +234,7 @@ export class BotManager {
         const spawnPt = this.map.spawnPoints[i % this.map.spawnPoints.length];
         const bot = new BotController(
           `bot_${i}`,
-          rosterItem.name + (i >= freeRoster.length ? `_${i}` : ''),
+          rosterItem.name,
           'axis',
           rosterItem.archetype,
           rosterItem.weapon,
@@ -134,6 +248,9 @@ export class BotManager {
         this.bots.push(bot);
       }
     }
+
+    this.evaluateSquadRoles('allies');
+    this.evaluateSquadRoles('axis');
   }
 
   // --- SOUND STIMULI NOTIFICATION ---
@@ -147,18 +264,37 @@ export class BotManager {
     });
   }
 
-  // --- SQUAD INTEL SHARING ---
+  // --- SQUAD INTEL SHARING & SQUAD TACTICS COORDINATION ---
   public reportPlayerSpotted(playerPos: THREE.Vector3, spotter: BotController) {
+    const isFirstContact = this.timeSincePlayerSpotted > 6.0;
     this.lastKnownPlayerPos = playerPos.clone();
     this.timeSincePlayerSpotted = 0;
     this.squadAlertLevel = 'combat';
 
-    // Alert nearby squad members who are unalerted
+    // Broadcast authentic tactical radio voice bark on contact
+    if (isFirstContact) {
+      const contactBarks = [
+        'Contact front! Hostile engaged!',
+        'Visual on target! Open fire!',
+        'Hostile in sector! Engage, engage!',
+        'Multiple contacts, watch your sectors!',
+      ];
+      const bark = contactBarks[Math.floor(Math.random() * contactBarks.length)];
+      this.broadcastRadio(spotter, bark, 'contact');
+    }
+
+    // Coordinate squad tactics: Suppressors pin down, Flankers maneuver
     this.bots.forEach(b => {
-      if (b !== spotter && !b.isDead && b.alertLevel !== 'combat') {
+      if (b !== spotter && !b.isDead && b.team === spotter.team) {
         const dist = b.position.distanceTo(spotter.position);
-        if (dist < 32) {
+        if (dist < 40) {
           b.alertToPosition(playerPos);
+
+          // If assigned flanker and not currently in cover/flank, trigger flank
+          if (b.squadRole === 'flanker' && b.state !== 'flank' && b.state !== 'cover') {
+            b.startFlankManeuver();
+            this.broadcastRadio(b, 'Flanking around their blind spot, cover me!', 'flank');
+          }
         }
       }
     });
@@ -192,8 +328,65 @@ export class BotManager {
   ) {
     this.uavActive = uavActive;
     this.timeSincePlayerSpotted += dt;
-    if (this.timeSincePlayerSpotted > 8.0 && this.squadAlertLevel === 'combat') {
+    if (this.radioChatterCooldown > 0) this.radioChatterCooldown -= dt;
+
+    if (this.timeSincePlayerSpotted > 9.0 && this.squadAlertLevel === 'combat') {
       this.squadAlertLevel = 'investigating';
+    }
+
+    // 1. Predictive Player Trajectory & Velocity calculation
+    const pMoveDelta = new THREE.Vector3().subVectors(playerPos, this.lastPlayerSamplePos);
+    pMoveDelta.y = 0;
+    if (dt > 0.0001) {
+      this.playerVelocity.lerp(pMoveDelta.clone().divideScalar(dt), Math.min(1.0, 10.0 * dt));
+    }
+    this.lastPlayerSamplePos.copy(playerPos);
+
+    // 2. Periodic Squad Role Re-balancing
+    this.roleEvaluationTimer += dt;
+    if (this.roleEvaluationTimer > 2.2) {
+      this.roleEvaluationTimer = 0;
+      this.evaluateSquadRoles('allies');
+      this.evaluateSquadRoles('axis');
+    }
+
+    // 3. Camper Detection & Flushing (Tactical Grenade Lobbing)
+    if (playerHealth > 0 && this.squadAlertLevel === 'combat') {
+      if (this.playerVelocity.lengthSq() < 0.6) {
+        this.playerCampTimer += dt;
+      } else {
+        this.playerCampTimer = Math.max(0, this.playerCampTimer - dt * 1.5);
+      }
+
+      if (this.playerCampTimer > 3.2 && this.grenadeManager) {
+        const potentialThrowers = this.bots.filter(
+          b => !b.isDead && b.team === 'axis' && b.position.distanceTo(playerPos) < 22 && b.position.distanceTo(playerPos) > 7
+        );
+        if (potentialThrowers.length > 0) {
+          const thrower = potentialThrowers[0];
+          const throwDir = new THREE.Vector3().subVectors(playerPos, thrower.position).normalize();
+          this.grenadeManager.throwBotGrenade(thrower.position.clone().add(new THREE.Vector3(0, 1.5, 0)), throwDir);
+          this.broadcastRadio(thrower, 'Hostile dug in! Frag out!', 'grenade', true);
+          this.playerCampTimer = -6.0; // Cooldown before next flush attempt
+        }
+      }
+    }
+
+    // 4. Bounding Overwatch (Leapfrog) Coordination between squad pairs
+    this.boundingLeapfrogTimer += dt;
+    if (this.boundingLeapfrogTimer > 3.8 && this.squadAlertLevel === 'combat') {
+      this.boundingLeapfrogTimer = 0;
+      ['allies', 'axis'].forEach(teamStr => {
+        const team = teamStr as 'allies' | 'axis';
+        const teamBots = this.bots.filter(b => !b.isDead && b.team === team);
+        const suppressor = teamBots.find(b => b.squadRole === 'suppressor' || b.squadRole === 'overwatch');
+        const advancer = teamBots.find(b => (b.squadRole === 'pointman' || b.squadRole === 'flanker') && b !== suppressor);
+
+        if (suppressor && advancer && advancer.state === 'cover') {
+          this.broadcastRadio(suppressor, 'Laying down covering fire! Advance to next point!', 'push');
+          advancer.triggerLeapfrogBound(playerPos);
+        }
+      });
     }
 
     // Refresh attack tokens per frame (allow 1 to 2 concurrent attackers depending on difficulty)
@@ -280,6 +473,22 @@ export class BotController {
   public targetPos: THREE.Vector3 | null = null;
   public state: 'patrol' | 'chase' | 'attack' | 'cover' | 'flank' | 'dead' = 'patrol';
   public alertLevel: AIAlertLevel = 'unalerted';
+
+  // --- AAA TACTICAL INTELLIGENCE FIELDS ---
+  public squadRole: SquadRole = 'suppressor';
+  public tacticalAction: string = 'Patrolling Sector';
+  public isSuppressed: boolean = false;
+  public suppressionTimer: number = 0;
+  public isFlanking: boolean = false;
+  public isPeekingCover: boolean = false;
+  public isCrouchedInCover: boolean = false;
+  public voiceCallout: string = '';
+  public coverLeanSide: 'left' | 'right' | 'none' = 'none';
+  public isBlindFiring: boolean = false;
+  public isCoverCompromised: boolean = false;
+  public grenadeCooldown: number = 0;
+  public flankPhase: 'outer_route' | 'blindspot_close' | 'breach_ambush' = 'outer_route';
+  public isBoundingForward: boolean = false;
 
   // --- TACTICAL BURST & RELOAD MECHANICS ---
   public magAmmo: number = 30;
@@ -432,14 +641,61 @@ export class BotController {
     this.state = 'chase';
   }
 
+  // --- NEAR-MISS SUPPRESSION APPLICATION ---
+  public applySuppression(intensity: number = 1.0) {
+    this.isSuppressed = true;
+    this.suppressionTimer = 1.4 * intensity;
+    this.aimDisruptionTimer = Math.max(this.aimDisruptionTimer, 0.75 * intensity);
+    this.flinchArmDisrupt = Math.min(1.0, this.flinchArmDisrupt + 0.45 * intensity);
+    this.flinchLegBuckle = Math.min(0.65, this.flinchLegBuckle + 0.3 * intensity);
+
+    if (this.state !== 'cover' && this.state !== 'dead') {
+      const cover = this.findBestCover(this.squad.lastKnownPlayerPos || this.position);
+      if (cover) {
+        if (this.currentCover) this.currentCover.isAvailable = true;
+        this.currentCover = cover;
+        this.currentCover.isAvailable = false;
+        this.state = 'cover';
+        this.targetPos = cover.position.clone();
+        this.tacticalAction = 'Seeking Cover Under Suppression';
+      }
+    }
+  }
+
+  // --- BOUNDING OVERWATCH (LEAPFROG ADVANCE) ---
+  public triggerLeapfrogBound(threatPos: THREE.Vector3) {
+    if (this.isDead || this.state === 'dead') return;
+    const currentDist = this.position.distanceTo(threatPos);
+
+    const forwardCovers = this.map.coverPoints.filter(cp => {
+      if (!cp.isAvailable || cp === this.currentCover) return false;
+      const cpDistToThreat = cp.position.distanceTo(threatPos);
+      const cpDistToBot = this.position.distanceTo(cp.position);
+      return cpDistToThreat < currentDist - 2.5 && cpDistToBot < 18;
+    });
+
+    if (forwardCovers.length > 0) {
+      forwardCovers.sort((a, b) => this.position.distanceTo(a.position) - this.position.distanceTo(b.position));
+      const nextCover = forwardCovers[0];
+      if (this.currentCover) this.currentCover.isAvailable = true;
+      this.currentCover = nextCover;
+      this.currentCover.isAvailable = false;
+      this.isBoundingForward = true;
+      this.targetPos = nextCover.position.clone();
+      this.state = 'cover';
+      this.tacticalAction = 'Bounding Forward Under Covering Fire';
+    }
+  }
+
   public alertToPosition(pos: THREE.Vector3) {
     this.alertLevel = 'combat';
     if (this.state !== 'cover' && this.state !== 'attack') {
-      this.state = this.archetype === 'flanker' ? 'flank' : 'chase';
+      this.state = (this.squadRole === 'flanker' || this.archetype === 'flanker') ? 'flank' : 'chase';
       if (this.state === 'flank') {
         this.startFlankManeuver();
       } else {
         this.targetPos = pos.clone();
+        this.tacticalAction = 'Intercepting Target Position';
       }
     }
   }
@@ -450,20 +706,33 @@ export class BotController {
       this.targetPos = this.map.navNodes[idx].clone();
       this.targetPos.x += (Math.random() - 0.5) * 4;
       this.targetPos.z += (Math.random() - 0.5) * 4;
+      this.tacticalAction = 'Patrolling Sector';
     }
   }
 
+  // --- AAA GAZE-AWARE INTELLIGENT FLANKING ---
   public startFlankManeuver() {
-    const isLeft = Math.random() < 0.5;
-    const baseRoute = isLeft ? this.map.flankWaypointsLeft : this.map.flankWaypointsRight;
-    this.flankPath = baseRoute.map(p => p.clone().add(new THREE.Vector3((Math.random() - 0.5) * 3, 0, (Math.random() - 0.5) * 3)));
-    this.flankIndex = 0;
     this.state = 'flank';
+    this.isFlanking = true;
+    this.flankPhase = 'outer_route';
+    this.tacticalAction = 'Maneuvering Around Blindspot';
+
+    const pFwd = this.squad.playerForward;
+    const pPos = this.squad.lastKnownPlayerPos || new THREE.Vector3();
+    const toBot = new THREE.Vector3().subVectors(this.position, pPos).normalize();
+    const rightCross = new THREE.Vector3().crossVectors(pFwd, new THREE.Vector3(0, 1, 0)).normalize();
+
+    // Prefer flanking along player's blind side (opposite of forward view cone)
+    const isLeft = rightCross.dot(toBot) < 0;
+    const baseRoute = isLeft ? this.map.flankWaypointsLeft : this.map.flankWaypointsRight;
+    this.flankPath = baseRoute.map(p => p.clone().add(new THREE.Vector3((Math.random() - 0.5) * 2.5, 0, (Math.random() - 0.5) * 2.5)));
+    this.flankIndex = 0;
     if (this.flankPath.length > 0) {
       this.targetPos = this.flankPath[0];
     }
   }
 
+  // --- AAA PHYSICAL OCCLUSION COVER EVALUATION ---
   public findBestCover(playerPos: THREE.Vector3): TacticalCoverPoint | null {
     let bestCover: TacticalCoverPoint | null = null;
     let bestScore = -999;
@@ -471,12 +740,26 @@ export class BotController {
     this.map.coverPoints.forEach(cp => {
       if (!cp.isAvailable) return;
       const distToCover = this.position.distanceTo(cp.position);
-      if (distToCover > 28) return;
+      if (distToCover > 30) return;
 
       const dirToPlayer = new THREE.Vector3().subVectors(playerPos, cp.position).normalize();
       const dot = cp.facingDir.dot(dirToPlayer);
 
-      const score = dot * 10 - distToCover * 0.5;
+      // FacingDir must generally orient toward the threat (meaning obstacle is between them)
+      if (dot < 0.15) return;
+
+      // Physically check if crouching behind this cover blocks line-of-sight to the threat!
+      const losCrouch = CollisionSystem.checkLineOfSight(cp.crouchPos, playerPos, this.map.obstacles);
+      const isPhysicallyBlocked = !losCrouch.isClear;
+
+      let score = dot * 12 - distToCover * 0.45;
+      if (isPhysicallyBlocked) score += 22; // Massive reward for genuine bullet occlusion!
+
+      const distCoverToPlayer = cp.position.distanceTo(playerPos);
+      if (distCoverToPlayer < 6.0 && this.weapon !== 'shotgun') {
+        score -= 16; // Too close is lethal
+      }
+
       if (score > bestScore) {
         bestScore = score;
         bestCover = cp;
@@ -499,8 +782,12 @@ export class BotController {
     }, this.reloadTotalTime * 500);
   }
 
-  public takeDamage(damage: number, isHeadshot: boolean = false, hitDir?: THREE.Vector3): boolean {
+  public takeDamage(damage: number, isHeadshot: boolean = false, hitDir?: THREE.Vector3, attackerTeam?: 'allies' | 'axis'): boolean {
     if (this.isDead) return false;
+    // Friendly Fire Protection: Teammates cannot damage each other!
+    if (attackerTeam && attackerTeam === this.team) {
+      return false;
+    }
     this.lastDamagedTime = Date.now();
 
     // Armor absorption
@@ -554,13 +841,27 @@ export class BotController {
     if (this.leftArmMesh) this.leftArmMesh.rotation.x -= 0.6 * dmgScale;
     if (this.rightArmMesh) this.rightArmMesh.rotation.x -= 0.7 * dmgScale;
 
+    // Vocal radio alert when pinned down by heavy fire
+    if (this.health < 48 && this.health > 0) {
+      this.squad.broadcastRadio(this, 'Taking heavy fire! Pinned down!', 'pinned');
+    }
+
+    // Defensive tactical smoke reaction when caught in open terrain under lethal fire
+    if (this.health < 48 && this.squad.grenadeManager && Math.random() < 0.4) {
+      this.squad.grenadeManager.throwSmokeGrenade(this.position, impactDir.clone().negate());
+      this.squad.broadcastRadio(this, 'Popping smoke! Moving to cover!', 'pinned');
+    }
+
     // Tactical self-preservation: Fall back to cover when low health (< 55 HP)
     if (this.state !== 'cover' && this.health < 55) {
       const cover = this.findBestCover(this.position.clone().add(hitDir?.clone().negate() || new THREE.Vector3()));
       if (cover) {
+        if (this.currentCover) this.currentCover.isAvailable = true;
         this.currentCover = cover;
+        this.currentCover.isAvailable = false;
         this.state = 'cover';
         this.targetPos = cover.position.clone();
+        this.tacticalAction = 'Falling Back to Cover';
       } else {
         this.state = 'attack';
       }
@@ -584,9 +885,16 @@ export class BotController {
     this.health = 0;
     this.state = 'dead';
     this.alertLevel = 'unalerted';
+    this.tacticalAction = 'K.I.A.';
     this.deaths++;
     this.respawnTimer = 4.5;
     this.isReloading = false;
+    if (this.currentCover) {
+      this.currentCover.isAvailable = true;
+      this.currentCover = null;
+    }
+
+    this.squad.onBotKilled(this);
 
     if (this.sniperLaserMesh) {
       this.sniperLaserMesh.visible = false;
@@ -805,6 +1113,29 @@ export class BotController {
       }
     }
 
+    // Decay suppression & tactical equipment cooldowns
+    if (this.suppressionTimer > 0) {
+      this.suppressionTimer -= dt;
+      if (this.suppressionTimer <= 0) this.isSuppressed = false;
+    }
+    if (this.grenadeCooldown > 0) this.grenadeCooldown -= dt;
+
+    // Environmental Threat Reaction: Airstrike Danger Zone Evacuation
+    if (this.squad.battleRoyaleContext?.dangerZone) {
+      const dz = this.squad.battleRoyaleContext.dangerZone;
+      const dzCenter = new THREE.Vector3(dz.center.x, 0, dz.center.z);
+      const distToDzCenter = this.position.distanceTo(dzCenter);
+      if (distToDzCenter < dz.radius) {
+        const escapeDir = new THREE.Vector3().subVectors(this.position, dzCenter).normalize();
+        this.velocity.set(escapeDir.x * this.speed * 1.35, 0, escapeDir.z * this.speed * 1.35);
+        this.position.x += this.velocity.x * dt;
+        this.position.z += this.velocity.z * dt;
+        this.group.lookAt(this.position.clone().add(escapeDir));
+        this.tacticalAction = 'Evacuating Airstrike Danger Zone';
+        return;
+      }
+    }
+
     const isNight = weatherPreset === 'midnight_fog' || weatherPreset === 'tactical_storm';
 
     // 1. Target Acquisition: Find nearest valid visible hostile target
@@ -896,15 +1227,16 @@ export class BotController {
         break;
     }
 
-    // Resolve Obstacle Collision
-    CollisionSystem.resolveEntityCollision(this.position, this.velocity, 0.45, 1.8, this.map.obstacles);
+    // Resolve Obstacle Collision (feet at y=0, eyeHeight=0 so full 1.85m bot cylinder is collision-checked)
+    CollisionSystem.resolveEntityCollision(this.position, this.velocity, 0.45, 0.0, this.map.obstacles);
 
-    // Keep bot inside map arena perimeter [-43, 43]
-    this.position.x = Math.max(-43, Math.min(43, this.position.x));
-    this.position.z = Math.max(-43, Math.min(43, this.position.z));
+    // Keep bot inside map arena perimeter (Warehouse = [-43, 43], Bermuda = [-105, 105])
+    const maxBound = this.map.mapType === 'bermuda' ? 105 : 43;
+    this.position.x = Math.max(-maxBound, Math.min(maxBound, this.position.x));
+    this.position.z = Math.max(-maxBound, Math.min(maxBound, this.position.z));
 
     // STRICT Ground altitude clamping (catwalk platform elevation vs floor)
-    const onCatwalk = Math.abs(this.position.x) <= 7.5 && Math.abs(this.position.z) <= 6.5 && this.position.y > 2.0;
+    const onCatwalk = this.map.mapType !== 'bermuda' && Math.abs(this.position.x) <= 7.5 && Math.abs(this.position.z) <= 6.5 && this.position.y > 2.0;
     this.position.y = onCatwalk ? 3.8 : 0.0;
     this.velocity.y = 0;
 
@@ -938,21 +1270,26 @@ export class BotController {
       // Forward tilt during sprint/run, subtle breathing sway when standing
       const forwardLean = isMoving ? Math.min(0.22, moveSpeed * 0.04) : 0;
       const breathingSway = Math.sin(this.animTimer * 1.5) * 0.015;
+      const leanZ = this.coverLeanSide === 'left' ? -0.35 : this.coverLeanSide === 'right' ? 0.35 : 0;
       this.torsoMesh.rotation.x = forwardLean + breathingSway + this.flinchPitch * 0.7;
-      this.torsoMesh.rotation.z = (isMoving ? Math.sin(this.animTimer * 0.5) * 0.03 : 0) + this.flinchRoll * 0.7;
+      this.torsoMesh.rotation.z = (isMoving ? Math.sin(this.animTimer * 0.5) * 0.03 : 0) + this.flinchRoll * 0.7 + leanZ;
       this.torsoMesh.rotation.y = this.flinchYaw * 0.7;
     }
 
     // 2. Head Look & Flinch
     if (this.headMesh) {
+      const headLeanZ = this.coverLeanSide === 'left' ? -0.22 : this.coverLeanSide === 'right' ? 0.22 : 0;
       this.headMesh.rotation.x = this.headFlinchPitch;
       this.headMesh.rotation.y = this.headFlinchYaw;
-      this.headMesh.rotation.z = this.flinchRoll * 0.4;
+      this.headMesh.rotation.z = this.flinchRoll * 0.4 + headLeanZ;
     }
 
     // 3. Fluid Leg Locomotion with Natural Stride & Knee Lift + Flinch Stagger
     if (this.leftLegMesh && this.rightLegMesh) {
-      if (isMoving) {
+      if (this.isCrouchedInCover) {
+        this.leftLegMesh.rotation.x = -0.65;
+        this.rightLegMesh.rotation.x = -0.65;
+      } else if (isMoving) {
         const strideAngle = Math.sin(this.animTimer) * Math.min(0.7, 0.35 + moveSpeed * 0.08);
         this.leftLegMesh.rotation.x = strideAngle + this.flinchLegBuckle * 0.6;
         this.rightLegMesh.rotation.x = -strideAngle - this.flinchLegBuckle * 0.4;
@@ -966,7 +1303,11 @@ export class BotController {
 
     // 4. Arms & Weapon Posing (Aim Ready vs Stride Swing vs Reload Gesture + Flinch Disrupt)
     if (this.leftArmMesh && this.rightArmMesh) {
-      if (this.isReloading) {
+      if (this.isBlindFiring) {
+        // High blind-firing arm gesture over cover
+        this.rightArmMesh.rotation.x = 1.35;
+        this.leftArmMesh.rotation.x = 1.15;
+      } else if (this.isReloading) {
         // Tactical Reloading Gesture: Lower weapon, left arm dips to chest pouch and slaps back
         const reloadProgress = 1 - (this.reloadTimer / Math.max(0.1, this.reloadTotalTime));
         const magPull = Math.sin(reloadProgress * Math.PI);
@@ -998,10 +1339,11 @@ export class BotController {
       this.botWeaponMesh.rotation.x = this.weaponRecoilKick * 0.35;
     }
 
-    // Apply world position clamped firmly to ground
+    // Apply world position clamped firmly to ground, factoring crouch elevation
+    const crouchDrop = this.isCrouchedInCover ? 0.45 : 0;
     this.group.position.set(
       this.position.x + this.flinchDisplacement.x,
-      this.position.y,
+      this.position.y - crouchDrop,
       this.position.z + this.flinchDisplacement.z
     );
   }
@@ -1017,9 +1359,8 @@ export class BotController {
     isPlayerSliding: boolean = false,
     isNight: boolean = false
   ) {
-    if (!this.currentCover || !this.currentCover.isAvailable) {
+    if (!this.currentCover) {
       this.state = 'attack';
-      this.currentCover = null;
       return;
     }
 
@@ -1032,33 +1373,127 @@ export class BotController {
     const distToCover = Math.sqrt(dx * dx + dz * dz);
 
     if (distToCover > 1.2) {
+      // Moving to cover
+      this.tacticalAction = this.isBoundingForward ? 'Bounding to Forward Cover' : 'Moving to Cover';
+      this.isCrouchedInCover = false;
+      this.isPeekingCover = false;
+      this.coverLeanSide = 'none';
+
       const dirX = dx / distToCover;
       const dirZ = dz / distToCover;
-      this.velocity.set(dirX * this.speed * 1.2, 0, dirZ * this.speed * 1.2);
+      this.velocity.set(dirX * this.speed * 1.25, 0, dirZ * this.speed * 1.25);
       this.position.x += this.velocity.x * dt;
       this.position.z += this.velocity.z * dt;
       this.group.lookAt(new THREE.Vector3(this.currentCover.position.x, this.position.y, this.currentCover.position.z));
     } else {
+      // Firmly at cover point!
       this.velocity.set(0, 0, 0);
+      this.isBoundingForward = false;
       this.coverTimer += dt;
-      if (this.isPeeking && !this.isReloading) {
+
+      // 1. Check if cover is compromised (enemy flanked past angle or has clear LOS to crouch position)
+      const toThreat = new THREE.Vector3().subVectors(targetPos, this.position).normalize();
+      const facingThreatDot = this.currentCover.facingDir.dot(toThreat);
+      const crouchLos = CollisionSystem.checkLineOfSight(this.currentCover.crouchPos, targetPos, this.map.obstacles);
+
+      if (facingThreatDot < 0.05 || (crouchLos.isClear && distToTarget < 18)) {
+        // Cover is compromised!
+        this.isCoverCompromised = true;
+        this.squad.broadcastRadio(this, 'Cover compromised! Repositioning!', 'pinned');
+        this.currentCover.isAvailable = true;
+        this.currentCover = null;
+
+        // Emergency reaction: Deploy tactical smoke or sprint to next cover
+        if (this.squad.grenadeManager && Math.random() < 0.35) {
+          this.squad.grenadeManager.throwSmokeGrenade(this.position, toThreat.clone().negate());
+        }
+
+        const newCover = this.findBestCover(targetPos);
+        if (newCover) {
+          this.currentCover = newCover;
+          this.currentCover.isAvailable = false;
+          this.targetPos = newCover.position.clone();
+        } else {
+          this.state = 'attack';
+        }
+        return;
+      }
+
+      // 2. Stance & Peeking Behavior
+      const isHighCover = this.currentCover.type === 'high';
+      const isSuppressorRole = this.squadRole === 'suppressor';
+
+      if (this.isReloading) {
+        // In cover and reloading - keep head down completely!
+        this.isCrouchedInCover = true;
+        this.isPeekingCover = false;
+        this.coverLeanSide = 'none';
+        this.isBlindFiring = false;
+        this.tacticalAction = 'Reloading Behind Cover';
+        this.group.lookAt(new THREE.Vector3(this.position.x + this.currentCover.facingDir.x, this.position.y, this.position.z + this.currentCover.facingDir.z));
+        return;
+      }
+
+      // Blind-fire suppression: If low health or pinned down by player fire
+      if ((this.health < 40 || this.isSuppressed) && isSuppressorRole && this.magAmmo > 0) {
+        this.isCrouchedInCover = true;
+        this.isPeekingCover = false;
+        this.coverLeanSide = 'none';
+        this.isBlindFiring = true;
+        this.tacticalAction = 'Blind-Firing over Cover';
+
+        const lookTarget = new THREE.Vector3(targetPos.x, this.position.y, targetPos.z);
+        this.group.lookAt(lookTarget);
+
+        if (this.canFire() && this.squad.requestAttackToken()) {
+          this.executeBurstFire(targetPos, onPlayerDamage, targetBot, distToTarget, isPlayerSprinting, isPlayerSliding, isNight);
+        }
+        return;
+      }
+
+      this.isBlindFiring = false;
+
+      if (this.isPeeking) {
         this.peekTimer += dt;
         const lookTarget = new THREE.Vector3(targetPos.x, this.position.y, targetPos.z);
         this.group.lookAt(lookTarget);
+
+        if (isHighCover) {
+          // Corner-slicing lean peek
+          const rightDir = new THREE.Vector3(-toThreat.z, 0, toThreat.x);
+          const leanLeft = rightDir.dot(this.currentCover.facingDir) < 0;
+          this.coverLeanSide = leanLeft ? 'left' : 'right';
+          this.isPeekingCover = true;
+          this.isCrouchedInCover = false;
+          this.tacticalAction = 'Corner Slicing & Peeking';
+        } else {
+          // Low cover pop-up
+          this.coverLeanSide = 'none';
+          this.isPeekingCover = true;
+          this.isCrouchedInCover = false;
+          this.tacticalAction = 'Firing from Low Cover';
+        }
 
         const hasLoS = this.checkLineOfSight(targetPos);
         if (hasLoS && this.canFire() && this.squad.requestAttackToken()) {
           this.executeBurstFire(targetPos, onPlayerDamage, targetBot, distToTarget, isPlayerSprinting, isPlayerSliding, isNight);
         }
 
-        if (this.peekTimer > 1.5 || this.magAmmo <= 0) {
+        if (this.peekTimer > 1.6 || this.magAmmo <= 0) {
           this.isPeeking = false;
           this.peekTimer = 0;
           this.coverTimer = 0;
+          this.coverLeanSide = 'none';
           if (this.magAmmo <= 0) this.startReload();
         }
       } else {
-        if (this.coverTimer > 2.0 && !this.isReloading) {
+        // Ducked down in cover
+        this.isCrouchedInCover = true;
+        this.isPeekingCover = false;
+        this.coverLeanSide = 'none';
+        this.tacticalAction = 'Holding Cover & Scanning';
+
+        if (this.coverTimer > (this.archetype === 'sniper' ? 1.4 : 1.8) && !this.isReloading) {
           this.isPeeking = true;
           this.peekTimer = 0;
         }
@@ -1074,7 +1509,27 @@ export class BotController {
     distToTarget: number = 20,
     hasTarget: boolean = true
   ) {
-    if (this.flankIndex >= this.flankPath.length || (hasTarget && distToTarget < 22)) {
+    this.isFlanking = true;
+    this.isCrouchedInCover = false;
+    this.isPeekingCover = false;
+    this.coverLeanSide = 'none';
+
+    // Calculate angle relative to target's forward view
+    const pFwd = this.squad.playerForward;
+    const toBot = new THREE.Vector3().subVectors(this.position, targetPos).normalize();
+    const dotView = pFwd.dot(toBot); // > 0 means bot is in front of player, < 0 means behind player!
+
+    if (distToTarget < 16 && dotView < 0.25) {
+      // Reached player's flank/rear blind spot! Ambush!
+      this.flankPhase = 'breach_ambush';
+      this.tacticalAction = 'Ambushing Flank Angle';
+      this.squad.broadcastRadio(this, 'In position! Striking hostile flank!', 'flank');
+      this.state = 'attack';
+      this.velocity.set(0, 0, 0);
+      return;
+    }
+
+    if (this.flankIndex >= this.flankPath.length) {
       this.state = 'attack';
       this.velocity.set(0, 0, 0);
       return;
@@ -1091,11 +1546,12 @@ export class BotController {
     } else {
       const dirX = dx / Math.max(0.01, distToWp);
       const dirZ = dz / Math.max(0.01, distToWp);
-      this.velocity.set(dirX * this.speed * 1.15, 0, dirZ * this.speed * 1.15);
+      this.velocity.set(dirX * this.speed * 1.25, 0, dirZ * this.speed * 1.25);
       this.position.x += this.velocity.x * dt;
       this.position.z += this.velocity.z * dt;
       const lookTarget = new THREE.Vector3(currentWaypoint.x, this.position.y, currentWaypoint.z);
       this.group.lookAt(lookTarget);
+      this.tacticalAction = `Flanking Maneuver (Node ${this.flankIndex + 1}/${this.flankPath.length})`;
     }
   }
 
@@ -1109,6 +1565,11 @@ export class BotController {
     isPlayerSliding: boolean = false,
     isNight: boolean = false
   ) {
+    this.tacticalAction = 'Engaging Target';
+    this.isCrouchedInCover = false;
+    this.isPeekingCover = false;
+    this.coverLeanSide = 'none';
+
     const hasLoS = this.checkLineOfSight(targetPos);
     if (!hasLoS) {
       this.state = 'chase';
@@ -1122,7 +1583,9 @@ export class BotController {
       this.startReload();
       const cover = this.findBestCover(targetPos);
       if (cover) {
+        if (this.currentCover) this.currentCover.isAvailable = true;
         this.currentCover = cover;
+        this.currentCover.isAvailable = false;
         this.state = 'cover';
         return;
       }
@@ -1155,6 +1618,7 @@ export class BotController {
         this.position.x += this.velocity.x * dt;
         this.position.z += this.velocity.z * dt;
       } else {
+        this.strafeTimer += dt;
         if (this.strafeTimer > 1.8) {
           this.strafeTimer = 0;
           this.strafeDir = Math.random() < 0.5 ? -1 : 1;
@@ -1498,13 +1962,20 @@ export class BotController {
       rotation: { x: this.group.rotation.x, y: this.group.rotation.y, z: this.group.rotation.z },
       state: this.state,
       alertLevel: this.alertLevel,
-      isAiming: this.state === 'attack' || this.isPeeking,
+      isAiming: this.state === 'attack' || this.isPeeking || this.isPeekingCover,
       isReloading: this.isReloading,
       isVisibleToPlayer: this.isVisibleToPlayer,
       spottedByRadar: this.lastUavActive || isRecentlyActive,
       kills: this.kills,
       deaths: this.deaths,
       accuracy: this.accuracy,
+      squadRole: this.squadRole,
+      tacticalAction: this.tacticalAction,
+      isSuppressed: this.isSuppressed,
+      isFlanking: this.isFlanking,
+      isPeekingCover: this.isPeekingCover || this.isPeeking,
+      isCrouchedInCover: this.isCrouchedInCover,
+      voiceCallout: this.voiceCallout,
     };
   }
 

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { BattleRoyaleState, EnvironmentState, FloatingDamageNumberItem, GameMode, GameSettings, HitmarkerEvent, KillFeedItem, PlayerEliminatedInfo, PlayerStats, TrainingTelemetryData, WeaponCamo, WeaponType, WeatherType } from '../types';
+import { BattleRoyaleState, EnvironmentState, FloatingDamageNumberItem, GameMode, GameSettings, HitmarkerEvent, KillFeedItem, MapType, PlayerEliminatedInfo, PlayerStats, TacticalType, TrainingTelemetryData, WeaponCamo, WeaponType, WeatherType } from '../types';
 import { TacticalMap } from './map';
 import { ParticleSystem } from './particles';
 import { BotManager } from './ai';
@@ -11,6 +11,7 @@ import { EnvironmentManager } from './environment';
 import { TrainingManager } from './training';
 import { soundManager } from './audio';
 import { WEAPON_REGISTRY } from './weapons';
+import { MultiplayerManager } from './multiplayer/MultiplayerManager';
 
 export class GameEngine {
   public container: HTMLElement;
@@ -27,6 +28,7 @@ export class GameEngine {
   public pickupManager: PickupManager;
   public grenadeManager: GrenadeManager;
   public trainingManager: TrainingManager | null = null;
+  public multiplayerManager: MultiplayerManager | null = null;
 
   public settings: GameSettings;
   public gameMode: GameMode = 'tdm';
@@ -47,6 +49,8 @@ export class GameEngine {
   private safeZoneRingMesh: THREE.Mesh | null = null;
   private airdropGroup: THREE.Group | null = null;
   private shrinkPhaseTimeRemaining: number = 0;
+  private dangerZoneMesh: THREE.Mesh | null = null;
+  private dangerZoneTimer: number = 30.0;
 
   // Player Stats
   public stats: PlayerStats = {
@@ -79,7 +83,7 @@ export class GameEngine {
   public onDamageTaken: (angle: number) => void = () => {};
   public onPickupNotice: (text: string, type: 'ammo' | 'armor' | 'stimpack' | 'tactical') => void = () => {};
   public onEnvironmentUpdate: (state: EnvironmentState) => void = () => {};
-  public onTacticalUpdate: (count: number, type: 'smoke' | 'motion_sensor') => void = () => {};
+  public onTacticalUpdate: (count: number, type: TacticalType) => void = () => {};
   public onMotionDetectNotice: (botIds: string[]) => void = () => {};
   public onTrainingTelemetry: (data: TrainingTelemetryData) => void = () => {};
   public onFloatingNumbersUpdate: (items: FloatingDamageNumberItem[]) => void = () => {};
@@ -118,23 +122,30 @@ export class GameEngine {
     container.appendChild(this.renderer.domElement);
 
     // 2. Sub-systems
-    this.map = new TacticalMap(this.scene);
+    const effectiveMapType: MapType = this.gameMode === 'battleroyale' ? (settings.mapType || 'bermuda') : (settings.mapType || 'warehouse');
+    this.map = new TacticalMap(this.scene, undefined, effectiveMapType);
     this.particles = new ParticleSystem(this.scene);
     this.environment = new EnvironmentManager(
       this.scene,
       this.camera,
       this.particles,
-      settings.weatherPreset || 'dynamic_cycle'
+      settings.weatherPreset || 'clear_day'
     );
     if (this.map.groundMaterial) {
       this.environment.registerMapMaterial(this.map.groundMaterial);
     }
+    this.environment.setGraphicsMode(settings.graphicsMode || 'standard');
 
     this.streakManager = new ScorestreakManager(this.scene, this.particles);
     this.pickupManager = new PickupManager(this.scene, this.particles);
+    if (effectiveMapType === 'bermuda') {
+      this.pickupManager.spawnBermudaPickups();
+    }
+
     this.grenadeManager = new GrenadeManager(this.scene, this.particles, this.map.obstacles);
 
     this.controller = new FPSController(this.camera, container, this.map, this.particles, this.settings);
+    this.controller.gameMode = this.gameMode;
     this.botManager = new BotManager(this.scene, this.map, this.particles);
     this.controller.botManager = this.botManager;
     this.controller.grenadeManager = this.grenadeManager;
@@ -164,25 +175,47 @@ export class GameEngine {
 
     // 4. Initialize Battle Royale Safe Zone if BR Mode
     if (this.gameMode === 'battleroyale') {
+      const isBermuda = this.map.mapType === 'bermuda';
+      const initialRadius = isBermuda ? 108 : 46;
+
       this.battleRoyaleState = {
         phase: 1,
-        maxPhases: 4,
+        maxPhases: 5,
         aliveCount: 50,
         totalPlayers: 50,
         circleCenter: { x: 0, z: 0 },
-        circleRadius: 46,
-        nextCircleCenter: { x: (Math.random() - 0.5) * 12, z: (Math.random() - 0.5) * 12 },
-        nextCircleRadius: 28,
-        shrinkTimer: 35,
+        circleRadius: initialRadius,
+        nextCircleCenter: { x: (Math.random() - 0.5) * (isBermuda ? 28 : 12), z: (Math.random() - 0.5) * (isBermuda ? 28 : 12) },
+        nextCircleRadius: isBermuda ? 72 : 28,
+        shrinkTimer: 45,
         isShrinking: false,
-        shrinkDuration: 25,
-        zoneDamagePerSec: 5,
+        shrinkDuration: 30,
+        zoneDamagePerSec: 4,
         isOutsideSafeZone: false,
         airdropPosition: null,
+        ep: 150,
+        maxEp: 200,
+        vestLevel: 1,
+        helmetLevel: 1,
+        medkitCount: 2,
+        inhalerCount: 2,
+        isGliding: isBermuda,
+        glideAltitude: isBermuda ? 65 : 1.7,
+        dangerZone: null,
       };
 
+      if (isBermuda) {
+        // High altitude initial drop over Bermuda Island
+        const dropX = (Math.random() - 0.5) * 40;
+        const dropZ = (Math.random() - 0.5) * 40;
+        this.controller.position.set(dropX, 65, dropZ);
+        this.controller.isGrounded = false;
+        this.controller.velocity.set(0, -5, 0);
+        soundManager.playVoiceCallout('Dropping into Bermuda. Deploy glider to scout landing zone.');
+      }
+
       // 3D Safe Zone Boundary Cylinder
-      const safeZoneGeo = new THREE.CylinderGeometry(1, 1, 28, 64, 1, true);
+      const safeZoneGeo = new THREE.CylinderGeometry(1, 1, 36, 64, 1, true);
       const safeZoneMat = new THREE.MeshBasicMaterial({
         color: 0x0284c7,
         transparent: true,
@@ -191,8 +224,8 @@ export class GameEngine {
         depthWrite: false,
       });
       this.safeZoneMesh = new THREE.Mesh(safeZoneGeo, safeZoneMat);
-      this.safeZoneMesh.scale.set(46, 1, 46);
-      this.safeZoneMesh.position.set(0, 14, 0);
+      this.safeZoneMesh.scale.set(initialRadius, 1, initialRadius);
+      this.safeZoneMesh.position.set(0, 18, 0);
       this.scene.add(this.safeZoneMesh);
 
       // Safe Zone Perimeter Ground Ring
@@ -205,7 +238,7 @@ export class GameEngine {
       });
       this.safeZoneRingMesh = new THREE.Mesh(ringGeo, ringMat);
       this.safeZoneRingMesh.rotateX(-Math.PI / 2);
-      this.safeZoneRingMesh.scale.set(46, 46, 1);
+      this.safeZoneRingMesh.scale.set(initialRadius, initialRadius, 1);
       this.safeZoneRingMesh.position.set(0, 0.08, 0);
       this.scene.add(this.safeZoneRingMesh);
     }
@@ -291,13 +324,29 @@ export class GameEngine {
         this.onPickupNotice('+60 AMMO, +1 FRAG, +1 TACTICAL', 'ammo');
       } else if (type === 'armor') {
         this.stats.armor = Math.min(this.stats.maxArmor, this.stats.armor + (value || 50));
+        if (this.battleRoyaleState && this.battleRoyaleState.vestLevel < 3) {
+          this.battleRoyaleState.vestLevel = Math.min(3, this.battleRoyaleState.vestLevel + 1) as 1 | 2 | 3;
+          this.onBattleRoyaleUpdate?.({ ...this.battleRoyaleState });
+        }
         this.onStatsUpdate({ ...this.stats });
-        this.onPickupNotice('+50 BODY ARMOR', 'armor');
+        this.onPickupNotice('+50 BODY ARMOR (VEST UPGRADED)', 'armor');
+      } else if (type === 'inhaler') {
+        if (this.battleRoyaleState) {
+          this.battleRoyaleState.inhalerCount++;
+          this.battleRoyaleState.ep = Math.min(this.battleRoyaleState.maxEp, this.battleRoyaleState.ep + 50);
+          this.onBattleRoyaleUpdate?.({ ...this.battleRoyaleState });
+        }
+        soundManager.playInhaler();
+        this.onPickupNotice('+1 INHALER (+50 EP)', 'stimpack');
       } else if (type === 'stimpack') {
         this.stats.health = this.stats.maxHealth;
         this.timeSinceLastDamage = 999;
+        if (this.battleRoyaleState) {
+          this.battleRoyaleState.medkitCount++;
+          this.onBattleRoyaleUpdate?.({ ...this.battleRoyaleState });
+        }
         this.onStatsUpdate({ ...this.stats });
-        this.onPickupNotice('TACTICAL STIMPACK INJECTED (FULL HEALTH)', 'stimpack');
+        this.onPickupNotice('MEDKIT / STIMPACK (+1 MEDKIT, FULL HP)', 'stimpack');
       }
     };
 
@@ -439,6 +488,12 @@ export class GameEngine {
 
     this.timeSinceLastDamage = 0;
 
+    // Free Fire Vest & Helmet Damage Reduction
+    if (this.gameMode === 'battleroyale' && this.battleRoyaleState) {
+      const vestReduction = this.battleRoyaleState.vestLevel === 3 ? 0.40 : this.battleRoyaleState.vestLevel === 2 ? 0.55 : 0.75;
+      damage *= vestReduction;
+    }
+
     // Armor absorption
     if (this.stats.armor > 0) {
       const armorDmg = Math.min(this.stats.armor, damage * 0.7);
@@ -455,8 +510,17 @@ export class GameEngine {
     if (botPos) {
       const dx = botPos.x - this.controller.position.x;
       const dz = botPos.z - this.controller.position.z;
-      const worldAngle = Math.atan2(dx, dz);
-      angle = (worldAngle - this.controller.yaw + Math.PI * 2) % (Math.PI * 2);
+      // Project into local camera space where player forward is (-sin(yaw), -cos(yaw)) and right is (cos(yaw), -sin(yaw))
+      const fwdX = -Math.sin(this.controller.yaw);
+      const fwdZ = -Math.cos(this.controller.yaw);
+      const rightX = Math.cos(this.controller.yaw);
+      const rightZ = -Math.sin(this.controller.yaw);
+
+      const localForward = dx * fwdX + dz * fwdZ;
+      const localRight = dx * rightX + dz * rightZ;
+
+      // 0 rad = directly in front (12 o'clock), PI/2 = right (3 o'clock), PI = behind (6 o'clock), -PI/2 = left (9 o'clock)
+      angle = Math.atan2(localRight, localForward);
     }
     this.onDamageTaken(angle);
 
@@ -554,10 +618,37 @@ export class GameEngine {
     this.controller.equipWeapon(this.controller.currentWeapon, camo);
   }
 
+  public useInhaler(): boolean {
+    if (!this.battleRoyaleState || this.battleRoyaleState.inhalerCount <= 0) return false;
+    this.battleRoyaleState.inhalerCount--;
+    this.battleRoyaleState.ep = Math.min(this.battleRoyaleState.maxEp, this.battleRoyaleState.ep + 50);
+    this.stats.health = Math.min(this.stats.maxHealth, this.stats.health + 30);
+    soundManager.playInhaler();
+    this.onStatsUpdate({ ...this.stats });
+    this.onBattleRoyaleUpdate?.({ ...this.battleRoyaleState });
+    this.onPickupNotice('INHALER USED: +50 EP // +30 HP', 'stimpack');
+    return true;
+  }
+
+  public useMedkit(): boolean {
+    if (!this.battleRoyaleState || this.battleRoyaleState.medkitCount <= 0) return false;
+    this.battleRoyaleState.medkitCount--;
+    this.stats.health = Math.min(this.stats.maxHealth, this.stats.health + 75);
+    soundManager.playMedkit();
+    this.onStatsUpdate({ ...this.stats });
+    this.onBattleRoyaleUpdate?.({ ...this.battleRoyaleState });
+    this.onPickupNotice('MEDKIT APPLIED: +75 HP', 'stimpack');
+    return true;
+  }
+
   public endMatch(victory: boolean) {
     this.isMatchOver = true;
     this.winner = victory ? 'allies' : 'axis';
-    soundManager.playVoiceCallout(victory ? 'Mission accomplished, outstanding work!' : 'Defeat. Regroup and prepare for next op.');
+    if (this.gameMode === 'battleroyale' && victory) {
+      soundManager.playBooyah();
+    } else {
+      soundManager.playVoiceCallout(victory ? 'Mission accomplished, outstanding work!' : 'Defeat. Regroup and prepare for next op.');
+    }
     this.onMatchEnd(victory, this.stats);
   }
 
@@ -643,6 +734,20 @@ export class GameEngine {
 
     // Sub-system frame updates
     this.controller.update(dt);
+
+    // Sync Tactical Mobility & Scope Telemetry to React UI State
+    this.stats.tacSprintStamina = this.controller.tacSprintStamina;
+    this.stats.isTacSprinting = this.controller.isTacSprinting;
+    this.stats.isTacStance = this.controller.isTacStance;
+    this.stats.isMantling = this.controller.isMantling;
+    this.stats.breathStamina = this.controller.breathStamina;
+    this.stats.isHoldingBreath = this.controller.isHoldingBreath;
+    this.stats.isBreathExhausted = this.controller.isHyperventilating;
+    this.stats.targetRangeMeters = this.controller.targetRangeMeters;
+    this.stats.elevationHoldoverMil = this.controller.elevationHoldoverMil;
+    this.stats.scopeShadowOffsetX = this.controller.scopeShadowOffsetX;
+    this.stats.scopeShadowOffsetY = this.controller.scopeShadowOffsetY;
+
     this.particles.update(dt);
     this.environment.update(dt, this.controller.position);
     this.map.destruction.update(dt);
@@ -706,36 +811,42 @@ export class GameEngine {
         br.shrinkTimer -= dt;
         if (br.shrinkTimer <= 0) {
           br.isShrinking = true;
+          br.shrinkStartRadius = br.circleRadius;
+          br.shrinkStartCenter = { ...br.circleCenter };
           this.shrinkPhaseTimeRemaining = br.shrinkDuration;
           soundManager.playVoiceCallout('Warning: Safe zone is collapsing! Move to the safe area.');
         }
       } else {
         this.shrinkPhaseTimeRemaining -= dt;
-        const progress = Math.min(1, 1 - this.shrinkPhaseTimeRemaining / br.shrinkDuration);
+        const progress = Math.min(1, Math.max(0, 1 - this.shrinkPhaseTimeRemaining / br.shrinkDuration));
         
-        // Linear interpolation of circle radius and center towards target
-        const startRad = br.phase === 1 ? 46 : (br.phase === 2 ? 34 : 22);
+        // Continuous, smooth linear interpolation of circle radius and center towards target
+        const startRad = br.shrinkStartRadius !== undefined ? br.shrinkStartRadius : br.circleRadius;
+        const startCenter = br.shrinkStartCenter !== undefined ? br.shrinkStartCenter : br.circleCenter;
         br.circleRadius = THREE.MathUtils.lerp(startRad, br.nextCircleRadius, progress);
-        br.circleCenter.x = THREE.MathUtils.lerp(br.circleCenter.x, br.nextCircleCenter.x, 0.05);
-        br.circleCenter.z = THREE.MathUtils.lerp(br.circleCenter.z, br.nextCircleCenter.z, 0.05);
+        br.circleCenter.x = THREE.MathUtils.lerp(startCenter.x, br.nextCircleCenter.x, progress);
+        br.circleCenter.z = THREE.MathUtils.lerp(startCenter.z, br.nextCircleCenter.z, progress);
 
         if (this.shrinkPhaseTimeRemaining <= 0) {
           br.isShrinking = false;
+          br.circleRadius = br.nextCircleRadius;
+          br.circleCenter = { ...br.nextCircleCenter };
           br.phase++;
           br.shrinkTimer = 35;
           br.zoneDamagePerSec += 3; // Later zones deal heavier damage
 
-          // Set up next circle phase
-          const newTargetRad = Math.max(6, br.nextCircleRadius * 0.6);
+          // Set up next circle phase with progressive scaling
+          const newTargetRad = Math.max(8, br.circleRadius * 0.62);
           const angle = Math.random() * Math.PI * 2;
-          const offsetDist = Math.random() * (br.circleRadius - newTargetRad) * 0.5;
+          const maxOffset = Math.max(0, (br.circleRadius - newTargetRad) * 0.65);
+          const offsetDist = Math.random() * maxOffset;
           br.nextCircleRadius = newTargetRad;
           br.nextCircleCenter = {
             x: br.circleCenter.x + Math.cos(angle) * offsetDist,
             z: br.circleCenter.z + Math.sin(angle) * offsetDist,
           };
 
-          // Spawn Airdrop Care Package in current safe zone!
+          // Spawn Airdrop Care Package in new safe zone!
           this.spawnAirdropCrate(br.circleCenter.x + (Math.random() - 0.5) * 10, br.circleCenter.z + (Math.random() - 0.5) * 10);
           soundManager.playVoiceCallout('Care package incoming at designated coordinates.');
         }
@@ -780,7 +891,110 @@ export class GameEngine {
         }
       }
 
+      // Free Fire EP to HP Conversion (Consumes 1 EP every ~0.35s to heal HP)
+      if (br.ep > 0 && this.stats.health < this.stats.maxHealth) {
+        const epConvert = Math.min(br.ep, 3.5 * dt);
+        br.ep = Math.max(0, br.ep - epConvert);
+        this.stats.health = Math.min(this.stats.maxHealth, this.stats.health + epConvert);
+        this.onStatsUpdate({ ...this.stats });
+      }
+
+      // Free Fire Glider & Altitude Telemetry
+      br.isGliding = !this.controller.isGrounded && this.controller.position.y > 5.5;
+      br.glideAltitude = Math.round(this.controller.position.y);
+
+      // Free Fire Red Danger Zone Cycle (Every 50s)
+      if (!br.dangerZone) {
+        this.dangerZoneTimer -= dt;
+        if (this.dangerZoneTimer <= 0) {
+          const dzAngle = Math.random() * Math.PI * 2;
+          const dzDist = Math.random() * Math.max(1, br.circleRadius - 20);
+          const dzX = br.circleCenter.x + Math.cos(dzAngle) * dzDist;
+          const dzZ = br.circleCenter.z + Math.sin(dzAngle) * dzDist;
+          br.dangerZone = {
+            center: { x: dzX, z: dzZ },
+            radius: 22,
+            duration: 18.0,
+            isWarning: true,
+          };
+          this.dangerZoneTimer = 55.0;
+          soundManager.playVoiceCallout('Warning: Danger zone declared in the sector!');
+          soundManager.playDangerAirstrike();
+
+          if (!this.dangerZoneMesh) {
+            const dzGeo = new THREE.CylinderGeometry(22, 22, 24, 32, 1, true);
+            const dzMat = new THREE.MeshBasicMaterial({
+              color: 0xef4444,
+              transparent: true,
+              opacity: 0.28,
+              side: THREE.DoubleSide,
+              depthWrite: false,
+            });
+            this.dangerZoneMesh = new THREE.Mesh(dzGeo, dzMat);
+            this.scene.add(this.dangerZoneMesh);
+          }
+          this.dangerZoneMesh.position.set(dzX, 12, dzZ);
+          this.dangerZoneMesh.visible = true;
+        }
+      } else {
+        br.dangerZone.duration -= dt;
+        if (br.dangerZone.duration <= 8.0 && br.dangerZone.isWarning) {
+          br.dangerZone.isWarning = false;
+          soundManager.playDangerAirstrike();
+        }
+
+        if (this.dangerZoneMesh) {
+          const pulse = 0.2 + 0.15 * Math.sin(Date.now() * 0.012);
+          (this.dangerZoneMesh.material as THREE.MeshBasicMaterial).opacity = pulse;
+        }
+
+        // Active bombardment damage
+        if (!br.dangerZone.isWarning && br.dangerZone.duration > 0) {
+          const distToDz = Math.hypot(this.controller.position.x - br.dangerZone.center.x, this.controller.position.z - br.dangerZone.center.z);
+          if (distToDz <= br.dangerZone.radius) {
+            this.takePlayerDamage(40 * dt, 'DANGER ZONE AIRSTRIKE', 'm4');
+            this.particles.emitSpark(this.controller.position.clone());
+          }
+        }
+
+        if (br.dangerZone.duration <= 0) {
+          br.dangerZone = null;
+          if (this.dangerZoneMesh) {
+            this.dangerZoneMesh.visible = false;
+          }
+        }
+      }
+
       this.onBattleRoyaleUpdate?.({ ...br });
+    }
+
+    // Multiplayer Networking Synchronization (WebRTC P2P)
+    if (this.multiplayerManager && this.multiplayerManager.isConnected) {
+      this.multiplayerManager.update(dt);
+      this.multiplayerManager.broadcastLocalState({
+        position: { x: this.controller.position.x, y: this.controller.position.y, z: this.controller.position.z },
+        velocity: { x: this.controller.velocity.x, y: this.controller.velocity.y, z: this.controller.velocity.z },
+        yaw: this.controller.yaw,
+        pitch: this.controller.pitch,
+        weapon: this.controller.currentWeapon,
+        camo: this.controller.currentCamo,
+        health: this.stats.health,
+        maxHealth: this.stats.maxHealth,
+        armor: this.stats.armor,
+        maxArmor: this.stats.maxArmor,
+        kills: this.stats.kills,
+        deaths: this.stats.deaths,
+        isShooting: this.controller.isShooting,
+        isAiming: this.controller.isAiming,
+        isSprinting: this.controller.isSprinting,
+        isTacSprinting: this.controller.isTacSprinting,
+        isSliding: this.controller.isSliding,
+        isDiving: this.controller.isDiving,
+        isTacStance: this.controller.isTacStance,
+        isMantling: this.controller.isMantling,
+        isReloading: this.controller.isReloading,
+        isDead: this.isPlayerDead,
+      });
     }
 
     this.onScoreUpdate(this.alliesScore, this.axisScore, Math.max(0, Math.floor(this.matchTimeRemaining)));
@@ -837,6 +1051,44 @@ export class GameEngine {
 
   public setWeatherPreset(preset: WeatherType) {
     this.environment.setWeather(preset);
+  }
+
+  public updateSettings(newSettings: Partial<GameSettings>) {
+    this.settings = { ...this.settings, ...newSettings };
+    if (this.controller) {
+      this.controller.settings = this.settings;
+    }
+    if (newSettings.fieldOfView && this.camera) {
+      this.camera.fov = newSettings.fieldOfView;
+      this.camera.updateProjectionMatrix();
+    }
+    if (newSettings.graphicsMode || newSettings.graphicsQuality) {
+      const mode = newSettings.graphicsMode || (newSettings.graphicsQuality === 'ultra' ? 'extreme' : newSettings.graphicsQuality === 'medium' ? 'smooth' : 'standard');
+      this.environment.setGraphicsMode(mode);
+
+      if (mode === 'smooth') {
+        this.renderer.setPixelRatio(1);
+        this.renderer.shadowMap.enabled = false;
+        this.renderer.toneMapping = THREE.LinearToneMapping;
+        this.renderer.toneMappingExposure = 1.0;
+      } else if (mode === 'extreme') {
+        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        this.renderer.shadowMap.enabled = true;
+        this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        this.renderer.toneMappingExposure = 1.25;
+      } else {
+        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+        this.renderer.shadowMap.enabled = true;
+        this.renderer.shadowMap.type = THREE.PCFShadowMap;
+        this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        this.renderer.toneMappingExposure = 1.1;
+      }
+      this.renderer.shadowMap.needsUpdate = true;
+    }
+    if (newSettings.weatherPreset) {
+      this.setWeatherPreset(newSettings.weatherPreset);
+    }
   }
 
   public toggleWeatherPreset(): WeatherType {

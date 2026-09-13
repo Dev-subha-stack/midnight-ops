@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { TextureGenerator } from './textures';
 import { DestructionManager } from './destruction';
 import { ParticleSystem } from './particles';
+import { MapType } from '../types';
+import { BermudaMapBuilder } from './bermuda_builder';
 
 export interface MapObstacle {
   id?: string;
@@ -29,6 +31,7 @@ export interface TacticalCoverPoint {
   facingDir: THREE.Vector3;
   obstacleId: string;
   isAvailable: boolean;
+  type?: 'high' | 'low';
 }
 
 export class TacticalMap {
@@ -45,9 +48,12 @@ export class TacticalMap {
 
   public groundMaterial?: THREE.MeshStandardMaterial;
 
-  constructor(scene: THREE.Scene, particles?: ParticleSystem) {
+  public mapType: MapType;
+
+  constructor(scene: THREE.Scene, particles?: ParticleSystem, mapType: MapType = 'warehouse') {
     this.scene = scene;
     this.particles = particles || new ParticleSystem(scene);
+    this.mapType = mapType;
     this.destruction = new DestructionManager(scene, this.particles);
 
     // Sync destruction updates with map obstacles & cover points
@@ -70,7 +76,22 @@ export class TacticalMap {
       }
     };
 
-    this.buildMap();
+    if (this.mapType === 'bermuda') {
+      this.groundMaterial = BermudaMapBuilder.build(
+        this.scene,
+        this.obstacles,
+        this.spawnPoints,
+        this.navNodes,
+        this.flankWaypointsLeft,
+        this.flankWaypointsRight,
+        this.coverPoints,
+        this.explosiveBarrels,
+        this.particles,
+        this.destruction
+      );
+    } else {
+      this.buildMap();
+    }
   }
 
   private buildMap() {
@@ -419,54 +440,27 @@ export class TacticalMap {
 
   // --- MILITARY SANDBAG EMPLACEMENTS ---
   private buildSandbagEmplacements() {
-    const sandbagMat = new THREE.MeshStandardMaterial({
-      color: 0x85754e,
-      roughness: 0.95,
-      metalness: 0.05,
-    });
-    const sandbagTrimMat = new THREE.MeshStandardMaterial({
-      color: 0x5c4f34,
-      roughness: 0.9,
-    });
-
     const sandbagSpots = [
-      { id: 'sb_nw', pos: new THREE.Vector3(-8, 0.45, -7), rot: 0.35 },
-      { id: 'sb_ne', pos: new THREE.Vector3(8, 0.45, -7), rot: -0.35 },
-      { id: 'sb_sw', pos: new THREE.Vector3(-8, 0.45, 7), rot: -0.35 },
-      { id: 'sb_se', pos: new THREE.Vector3(8, 0.45, 7), rot: 0.35 },
-      { id: 'sb_w_flank', pos: new THREE.Vector3(-22, 0.45, 0), rot: Math.PI / 2 },
-      { id: 'sb_e_flank', pos: new THREE.Vector3(22, 0.45, 0), rot: Math.PI / 2 },
+      { id: 'sb_nw', pos: new THREE.Vector3(-8, 0, -7), rot: 0.35 },
+      { id: 'sb_ne', pos: new THREE.Vector3(8, 0, -7), rot: -0.35 },
+      { id: 'sb_sw', pos: new THREE.Vector3(-8, 0, 7), rot: -0.35 },
+      { id: 'sb_se', pos: new THREE.Vector3(8, 0, 7), rot: 0.35 },
+      { id: 'sb_w_flank', pos: new THREE.Vector3(-22, 0, 0), rot: Math.PI / 2 },
+      { id: 'sb_e_flank', pos: new THREE.Vector3(22, 0, 0), rot: Math.PI / 2 },
     ];
 
     sandbagSpots.forEach(spot => {
-      const group = new THREE.Group();
-      group.position.copy(spot.pos);
-      group.rotation.y = spot.rot;
-
-      // 3 Layers of stacked staggered sandbags
-      const bagGeo = new THREE.BoxGeometry(0.9, 0.28, 0.48);
-      for (let layer = 0; layer < 3; layer++) {
-        const count = layer === 2 ? 3 : 4;
-        const startX = layer === 2 ? -0.9 : -1.35;
-        for (let i = 0; i < count; i++) {
-          const bag = new THREE.Mesh(bagGeo, (layer + i) % 2 === 0 ? sandbagMat : sandbagTrimMat);
-          bag.position.set(startX + i * 0.9, layer * 0.28, (Math.random() - 0.5) * 0.04);
-          bag.rotation.y = (Math.random() - 0.5) * 0.08;
-          bag.castShadow = true;
-          bag.receiveShadow = true;
-          group.add(bag);
-        }
-      }
-
-      this.scene.add(group);
-      const box = new THREE.Box3().setFromObject(group);
+      const prop = this.destruction.createSandbagBarrier(spot.id, spot.pos, spot.rot);
       this.obstacles.push({
         id: spot.id,
-        mesh: group,
-        box,
+        mesh: prop.mesh,
+        box: prop.box,
         pos: spot.pos.clone(),
         size: new THREE.Vector3(3.6, 0.9, 0.6),
         rot: spot.rot,
+        isDestructible: true,
+        health: prop.health,
+        maxHealth: prop.maxHealth,
       });
 
       // Register tactical cover point
@@ -480,6 +474,26 @@ export class TacticalMap {
         facingDir: new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), spot.rot),
         obstacleId: spot.id,
         isAvailable: true,
+      });
+    });
+
+    // Add Cinderblock Barricades at central bottleneck
+    const cinderSpots = [
+      { id: 'cinder_1', pos: new THREE.Vector3(-4, 0.75, 0), rot: 0 },
+      { id: 'cinder_2', pos: new THREE.Vector3(4, 0.75, 0), rot: 0 },
+    ];
+    cinderSpots.forEach(c => {
+      const prop = this.destruction.createCinderblockWall(c.id, c.pos, [3.2, 1.5, 0.5], c.rot);
+      this.obstacles.push({
+        id: c.id,
+        mesh: prop.mesh,
+        box: prop.box,
+        pos: c.pos.clone(),
+        size: new THREE.Vector3(3.2, 1.5, 0.5),
+        rot: c.rot,
+        isDestructible: true,
+        health: prop.health,
+        maxHealth: prop.maxHealth,
       });
     });
   }
@@ -549,87 +563,75 @@ export class TacticalMap {
     });
   }
 
-  // --- MUNITIONS PALLETS & TACTICAL CRATE STACKS ---
+  // --- MUNITIONS PALLETS, AMMO CRATES & PROPANE TANKS ---
   private buildMunitionsAndPallets() {
-    const palletWoodMat = new THREE.MeshStandardMaterial({
-      color: 0x785533,
-      roughness: 0.85,
-    });
-    const metalCaseMat = new THREE.MeshStandardMaterial({
-      color: 0x2e4034, // Tactical military olive
-      roughness: 0.5,
-      metalness: 0.5,
-    });
-    const blueDrumMat = new THREE.MeshStandardMaterial({
-      color: 0x1d4ed8,
-      roughness: 0.4,
-      metalness: 0.6,
-    });
-
+    // 1. Destructible Wooden Pallet stacks
     const palletSpots = [
-      { id: 'pal_1', pos: new THREE.Vector3(-10, 0.1, 22), rot: 0.4 },
-      { id: 'pal_2', pos: new THREE.Vector3(12, 0.1, -22), rot: -0.5 },
-      { id: 'pal_3', pos: new THREE.Vector3(-22, 0.1, -12), rot: 0.1 },
-      { id: 'pal_4', pos: new THREE.Vector3(22, 0.1, 12), rot: 0.7 },
+      { id: 'pal_1', pos: new THREE.Vector3(-10, 0, 22), rot: 0.4 },
+      { id: 'pal_2', pos: new THREE.Vector3(12, 0, -22), rot: -0.5 },
+      { id: 'pal_3', pos: new THREE.Vector3(-22, 0, -12), rot: 0.1 },
+      { id: 'pal_4', pos: new THREE.Vector3(22, 0, 12), rot: 0.7 },
     ];
-
-    palletSpots.forEach((spot, idx) => {
-      const group = new THREE.Group();
-      group.position.copy(spot.pos);
-      group.rotation.y = spot.rot;
-
-      // Wooden Euro-Pallet Base
-      const palletBase = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.18, 2.2), palletWoodMat);
-      palletBase.position.y = 0.09;
-      palletBase.castShadow = true;
-      palletBase.receiveShadow = true;
-      group.add(palletBase);
-
-      if (idx % 2 === 0) {
-        // Stack of military green munitions cases
-        const caseGeo = new THREE.BoxGeometry(0.85, 0.45, 0.85);
-        const c1 = new THREE.Mesh(caseGeo, metalCaseMat);
-        c1.position.set(-0.45, 0.42, -0.45);
-        const c2 = new THREE.Mesh(caseGeo, metalCaseMat);
-        c2.position.set(0.45, 0.42, -0.45);
-        const c3 = new THREE.Mesh(caseGeo, metalCaseMat);
-        c3.position.set(-0.45, 0.42, 0.45);
-        const c4 = new THREE.Mesh(caseGeo, metalCaseMat);
-        c4.position.set(0.45, 0.42, 0.45);
-        const cTop = new THREE.Mesh(caseGeo, metalCaseMat);
-        cTop.position.set(0, 0.85, 0);
-        cTop.rotation.y = 0.3;
-        c1.castShadow = true;
-        c2.castShadow = true;
-        c3.castShadow = true;
-        c4.castShadow = true;
-        cTop.castShadow = true;
-        group.add(c1, c2, c3, c4, cTop);
-      } else {
-        // Cluster of industrial coolant drums on pallet
-        const drumGeo = new THREE.CylinderGeometry(0.4, 0.4, 1.2, 14);
-        const d1 = new THREE.Mesh(drumGeo, blueDrumMat);
-        d1.position.set(-0.45, 0.78, -0.45);
-        const d2 = new THREE.Mesh(drumGeo, blueDrumMat);
-        d2.position.set(0.45, 0.78, -0.45);
-        const d3 = new THREE.Mesh(drumGeo, blueDrumMat);
-        d3.position.set(0, 0.78, 0.45);
-        d1.castShadow = true;
-        d2.castShadow = true;
-        d3.castShadow = true;
-        group.add(d1, d2, d3);
-      }
-
-      this.scene.add(group);
-      const box = new THREE.Box3().setFromObject(group);
+    palletSpots.forEach(spot => {
+      const prop = this.destruction.createWoodenPallet(spot.id, spot.pos, spot.rot);
       this.obstacles.push({
         id: spot.id,
-        mesh: group,
-        box,
+        mesh: prop.mesh,
+        box: prop.box,
         pos: spot.pos.clone(),
-        size: new THREE.Vector3(2.0, 1.5, 2.2),
+        size: new THREE.Vector3(1.6, 0.7, 1.4),
         rot: spot.rot,
+        isDestructible: true,
+        health: prop.health,
+        maxHealth: prop.maxHealth,
       });
+    });
+
+    // 2. Destructible Military Ammo Crates
+    const ammoSpots = [
+      { id: 'ammo_1', pos: new THREE.Vector3(-11.5, 0, 21.2), rot: -0.2 },
+      { id: 'ammo_2', pos: new THREE.Vector3(13.5, 0, -21), rot: 0.3 },
+      { id: 'ammo_3', pos: new THREE.Vector3(0, 0, 8), rot: 0 },
+      { id: 'ammo_4', pos: new THREE.Vector3(0, 0, -8), rot: Math.PI },
+    ];
+    ammoSpots.forEach(spot => {
+      const prop = this.destruction.createAmmoCrate(spot.id, spot.pos, spot.rot);
+      this.obstacles.push({
+        id: spot.id,
+        mesh: prop.mesh,
+        box: prop.box,
+        pos: spot.pos.clone(),
+        size: new THREE.Vector3(1.4, 0.8, 0.9),
+        rot: spot.rot,
+        isDestructible: true,
+        health: prop.health,
+        maxHealth: prop.maxHealth,
+      });
+    });
+
+    // 3. Destructible High-Pressure Propane Tanks
+    const propaneSpots = [
+      { id: 'propane_1', pos: new THREE.Vector3(-25, 0, 18), rot: 0 },
+      { id: 'propane_2', pos: new THREE.Vector3(25, 0, -18), rot: 0.8 },
+      { id: 'propane_3', pos: new THREE.Vector3(-6, 3.8, -6), rot: -0.4 },
+      { id: 'propane_4', pos: new THREE.Vector3(6, 3.8, 6), rot: 0.4 },
+    ];
+    propaneSpots.forEach(spot => {
+      const prop = this.destruction.createPropaneTank(spot.id, spot.pos, spot.rot);
+      const obs: MapObstacle = {
+        id: spot.id,
+        mesh: prop.mesh,
+        box: prop.box,
+        pos: spot.pos.clone(),
+        size: new THREE.Vector3(0.8, 1.4, 0.8),
+        rot: spot.rot,
+        isExplosive: true,
+        isDestructible: true,
+        health: prop.health,
+        maxHealth: prop.maxHealth,
+      };
+      this.obstacles.push(obs);
+      this.explosiveBarrels.push(obs);
     });
   }
 

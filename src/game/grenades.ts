@@ -51,8 +51,8 @@ export class GrenadeManager {
   private grenadeCount: number = 2; // Frag grenades
   private maxGrenades: number = 4;
   private tacticalType: TacticalType = 'smoke';
-  private tacticalCount: number = 2;
-  private maxTactical: number = 3;
+  private tacticalCount: number = 3;
+  private maxTactical: number = 5;
   private throwCooldown: number = 0;
 
   // Active Projectiles & World Entities
@@ -176,6 +176,90 @@ export class GrenadeManager {
     } else {
       return this.deployMotionSensor(origin, direction, playerVelocity);
     }
+  }
+
+  // --- BOT TACTICAL DEPLOYMENT (DOES NOT DEPLETE PLAYER INVENTORY) ---
+  public throwBotGrenade(origin: THREE.Vector3, direction: THREE.Vector3, throwForce: number = 16.0): boolean {
+    soundManager.playGrenadePin();
+
+    const group = new THREE.Group();
+    group.position.copy(origin);
+
+    const bodyGeo = new THREE.SphereGeometry(0.09, 12, 12);
+    const bodyMat = new THREE.MeshStandardMaterial({ color: 0x3f4f2c, roughness: 0.7, metalness: 0.3 });
+    const body = new THREE.Mesh(bodyGeo, bodyMat);
+    body.castShadow = true;
+    group.add(body);
+
+    const fuzeGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.08, 8);
+    const fuzeMat = new THREE.MeshStandardMaterial({ color: 0x64748b, metalness: 0.8, roughness: 0.2 });
+    const fuze = new THREE.Mesh(fuzeGeo, fuzeMat);
+    fuze.position.y = 0.08;
+    group.add(fuze);
+
+    const bandGeo = new THREE.TorusGeometry(0.092, 0.008, 6, 16);
+    bandGeo.rotateX(Math.PI / 2);
+    const band = new THREE.Mesh(bandGeo, new THREE.MeshBasicMaterial({ color: 0xef4444 }));
+    group.add(band);
+
+    this.scene.add(group);
+
+    const vel = direction.clone().multiplyScalar(throwForce).add(new THREE.Vector3(0, 3.8, 0));
+    const rotVel = new THREE.Vector3(
+      (Math.random() - 0.5) * 12,
+      (Math.random() - 0.5) * 12,
+      (Math.random() - 0.5) * 12
+    );
+
+    this.projectiles.push({
+      id: `bot_frag_${Date.now()}_${Math.random()}`,
+      type: 'frag',
+      mesh: group,
+      position: origin.clone(),
+      velocity: vel,
+      rotVelocity: rotVel,
+      fuseTime: 2.6,
+      maxFuse: 2.6,
+      isCooked: false,
+    });
+
+    return true;
+  }
+
+  public throwBotSmoke(origin: THREE.Vector3, direction: THREE.Vector3): boolean {
+    soundManager.playGrenadePin();
+
+    const group = new THREE.Group();
+    group.position.copy(origin);
+
+    const canGeo = new THREE.CylinderGeometry(0.06, 0.06, 0.16, 12);
+    const canMat = new THREE.MeshStandardMaterial({ color: 0x475569, roughness: 0.6, metalness: 0.4 });
+    const can = new THREE.Mesh(canGeo, canMat);
+    can.castShadow = true;
+    group.add(can);
+
+    this.scene.add(group);
+
+    const vel = direction.clone().multiplyScalar(15.0).add(new THREE.Vector3(0, 3.2, 0));
+    const rotVel = new THREE.Vector3(
+      (Math.random() - 0.5) * 10,
+      (Math.random() - 0.5) * 10,
+      (Math.random() - 0.5) * 10
+    );
+
+    this.projectiles.push({
+      id: `bot_smoke_${Date.now()}_${Math.random()}`,
+      type: 'smoke',
+      mesh: group,
+      position: origin.clone(),
+      velocity: vel,
+      rotVelocity: rotVel,
+      fuseTime: 1.5,
+      maxFuse: 1.5,
+      isCooked: false,
+    });
+
+    return true;
   }
 
   // --- TACTICAL 1: M18 SMOKE CANISTER ---

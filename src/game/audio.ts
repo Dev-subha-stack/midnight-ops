@@ -29,6 +29,11 @@ export class SoundEngine {
   // Cached Impulse Buffers for Reverb & Noise
   private noiseBuffers: Map<string, AudioBuffer> = new Map();
 
+  // --- MaterialFoundry/SoundFxLibrary Weapon Reloads & Free Fire Audio Assets ---
+  private reloadBuffers: Map<string, AudioBuffer> = new Map();
+  private freefireBuffers: Map<string, AudioBuffer> = new Map();
+  private reloadLoadingStarted: boolean = false;
+
   // --- PUBG Gun Sound Dataset (https://github.com/junwoopark92/PUBG-Gun-Sound-Dataset.git) ---
   private pubgGunBuffers: Map<string, AudioBuffer[]> = new Map();
   private pubgPreloadedRaw: Map<string, ArrayBuffer> = new Map();
@@ -37,7 +42,7 @@ export class SoundEngine {
   private activePlayerGunshots: { source: AudioBufferSourceNode; gain: GainNode }[] = [];
 
   constructor() {
-    // Early network prefetch of PUBG audio assets so they are ready before first fire
+    // Early network prefetch of PUBG and MaterialFoundry audio assets so they are ready before first fire
     this.prefetchPubgAssets();
   }
 
@@ -50,6 +55,14 @@ export class SoundEngine {
       '/sounds/weapons/sniper_dist.mp3', '/sounds/weapons/sniper_far.mp3',
       '/sounds/weapons/shotgun_0.mp3', '/sounds/weapons/shotgun_1.mp3', '/sounds/weapons/shotgun_2.mp3', '/sounds/weapons/shotgun_3.mp3',
       '/sounds/weapons/deagle_0.mp3', '/sounds/weapons/deagle_1.mp3', '/sounds/weapons/deagle_2.mp3', '/sounds/weapons/deagle_3.mp3',
+      // MaterialFoundry / Free Fire
+      '/audio/reloads/mag_out.mp3',
+      '/audio/reloads/mag_in.mp3',
+      '/audio/reloads/slide_rack.mp3',
+      '/audio/reloads/bolt_cycle.mp3',
+      '/audio/reloads/shell_insert.mp3',
+      '/audio/freefire/gloowall_hit.mp3',
+      '/audio/freefire/danger_airstrike.mp3',
     ];
     for (const p of allPaths) {
       fetch(p)
@@ -93,6 +106,57 @@ export class SoundEngine {
 
     // Load authentic PUBG weapon sound dataset from https://github.com/junwoopark92/PUBG-Gun-Sound-Dataset.git
     this.loadPubgSoundDataset();
+    // Load MaterialFoundry/SoundFxLibrary reload sounds and Free Fire audio
+    this.loadReloadAndFreeFireAssets();
+  }
+
+  public async loadReloadAndFreeFireAssets(): Promise<void> {
+    if (this.reloadLoadingStarted || !this.ctx) return;
+    this.reloadLoadingStarted = true;
+
+    const reloadFiles: [string, string][] = [
+      ['mag_out', '/audio/reloads/mag_out.mp3'],
+      ['mag_in', '/audio/reloads/mag_in.mp3'],
+      ['slide_rack', '/audio/reloads/slide_rack.mp3'],
+      ['bolt_cycle', '/audio/reloads/bolt_cycle.mp3'],
+      ['shell_insert', '/audio/reloads/shell_insert.mp3'],
+    ];
+
+    const freefireFiles: [string, string][] = [
+      ['gloowall_hit', '/audio/freefire/gloowall_hit.mp3'],
+      ['danger_airstrike', '/audio/freefire/danger_airstrike.mp3'],
+    ];
+
+    const fetchAndDecode = async (path: string): Promise<AudioBuffer | null> => {
+      try {
+        const raw = this.pubgPreloadedRaw.get(path);
+        let arrayBuf: ArrayBuffer;
+        if (raw) {
+          arrayBuf = raw.slice(0);
+        } else {
+          const res = await fetch(path);
+          if (!res.ok) return null;
+          arrayBuf = await res.arrayBuffer();
+        }
+        if (!this.ctx) return null;
+        return await this.ctx.decodeAudioData(arrayBuf);
+      } catch (e) {
+        console.warn(`[Audio] Failed loading ${path}:`, e);
+        return null;
+      }
+    };
+
+    for (const [key, path] of reloadFiles) {
+      fetchAndDecode(path).then(buf => {
+        if (buf) this.reloadBuffers.set(key, buf);
+      });
+    }
+
+    for (const [key, path] of freefireFiles) {
+      fetchAndDecode(path).then(buf => {
+        if (buf) this.freefireBuffers.set(key, buf);
+      });
+    }
   }
 
   public async loadPubgSoundDataset(): Promise<void> {
@@ -775,65 +839,148 @@ export class SoundEngine {
     this.createMechanicalClick(t, 0.05, 4200, 0.6);
   }
 
-  // --- 6. WEAPON RELOADS (AUTHENTIC MECHANICAL CHOREOGRAPHY) ---
+  private playSampleBuffer(buf: AudioBuffer, volume: number = 1.0, playbackRate: number = 1.0) {
+    if (!this.ctx || !this.sfxGain) return;
+    try {
+      const src = this.ctx.createBufferSource();
+      src.buffer = buf;
+      src.playbackRate.setValueAtTime(playbackRate, this.ctx.currentTime);
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(volume, this.ctx.currentTime);
+      src.connect(gain);
+      gain.connect(this.sfxGain);
+      src.start();
+    } catch {
+      // safe fallback
+    }
+  }
+
+  // --- PROCEDURAL TACTICAL RELOAD SYNTHESIS SUITE ---
+  private createProceduralMagFriction(t: number, duration: number, startFreq: number, endFreq: number, vol: number) {
+    if (!this.ctx || !this.sfxGain) return;
+    const bufferSize = Math.floor(this.ctx.sampleRate * duration);
+    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const output = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      const p = i / bufferSize;
+      output[i] = (Math.random() * 2 - 1) * Math.sin(p * Math.PI) * 0.45;
+    }
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = buffer;
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(startFreq, t);
+    filter.frequency.exponentialRampToValueAtTime(endFreq, t + duration);
+    filter.Q.setValueAtTime(4.0, t);
+
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(vol, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + duration);
+
+    noise.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.sfxGain);
+    noise.start(t);
+    noise.stop(t + duration);
+  }
+
+  private createProceduralMetalSnap(t: number, freq: number, decay: number, vol: number) {
+    if (!this.ctx || !this.sfxGain) return;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(freq, t);
+    osc.frequency.exponentialRampToValueAtTime(freq * 0.28, t + decay);
+    gain.gain.setValueAtTime(vol, t);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + decay);
+    osc.connect(gain);
+    gain.connect(this.sfxGain);
+    osc.start(t);
+    osc.stop(t + decay);
+  }
+
+  private createProceduralChamberThump(t: number, startFreq: number, endFreq: number, decay: number, vol: number) {
+    if (!this.ctx || !this.sfxGain) return;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(startFreq, t);
+    osc.frequency.exponentialRampToValueAtTime(endFreq, t + decay);
+    gain.gain.setValueAtTime(vol, t);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + decay);
+    osc.connect(gain);
+    gain.connect(this.sfxGain);
+    osc.start(t);
+    osc.stop(t + decay);
+  }
+
+  // --- 6. WEAPON RELOADS (AUTHENTIC 100% PROCEDURAL MECHANICAL CHOREOGRAPHY) ---
   public playReload(type: string, stage: 'mag_out' | 'mag_in' | 'cock' | 'hk_slap' | 'slide_rack' | 'shell_insert' | 'bolt_cycle') {
     if (!this.ctx || !this.sfxGain) return;
     const t = this.ctx.currentTime;
 
     switch (stage) {
       case 'mag_out': {
-        // Magazine latch release click + polymer guide rail friction slide out
-        this.createMechanicalClick(t, 0.04, 2900, 0.7);
-        this.createGunshotNoiseTransient(t + 0.02, 0.11, 1700, 380, 0.4);
-        this.createMechanicalClick(t + 0.07, 0.05, 1200, 0.45);
+        // 1. Magazine release lever detent disengagement click
+        this.createProceduralMetalSnap(t, 3600, 0.028, 0.7);
+        // 2. Magazine body friction sliding out of the lower receiver magwell
+        this.createProceduralMagFriction(t + 0.015, 0.08, 2400, 1100, 0.45);
+        // 3. Guide lip release tick
+        this.createProceduralMetalSnap(t + 0.045, 1900, 0.03, 0.35);
         break;
       }
       case 'mag_in': {
-        // Guide rail entry + heavy positive lock bottom slap
-        this.createMechanicalClick(t, 0.03, 1900, 0.5);
-        this.createMechanicalClick(t + 0.035, 0.05, 3400, 0.8);
-        this.createGunshotSubBass(t + 0.04, 220, 80, 0.09, 0.6);
-        this.createGunshotNoiseTransient(t + 0.04, 0.08, 2400, 500, 0.45);
+        // 1. Guide lip contact against receiver mouth + insertion friction
+        this.createProceduralMetalSnap(t, 2600, 0.025, 0.55);
+        this.createProceduralMagFriction(t + 0.01, 0.05, 1400, 2900, 0.4);
+        // 2. High-precision positive magazine retention catch locking snap
+        this.createProceduralMetalSnap(t + 0.042, 4400, 0.035, 0.85);
+        // 3. Solid receiver chamber lower-body resonant thump
+        this.createProceduralChamberThump(t + 0.044, 280, 65, 0.08, 0.6);
         break;
       }
       case 'hk_slap': {
-        // The legendary MP5 HK Slap: palm strike onto locked cocking handle
-        this.createGunshotSubBass(t, 190, 65, 0.09, 0.65);
-        this.createMechanicalClick(t, 0.04, 2800, 0.85);
-        this.createMechanicalClick(t + 0.025, 0.06, 4600, 0.9);
-        this.createGunshotNoiseTransient(t + 0.03, 0.1, 3200, 600, 0.65);
-        this.createAcousticReverb(t + 0.03, 0.18, 0.35);
+        // MP5 HK Slap: Palm strike onto charging handle + detent spring release into battery
+        this.createProceduralChamberThump(t, 220, 90, 0.04, 0.6);
+        this.createProceduralMagFriction(t, 0.03, 3200, 1200, 0.5);
+        this.createProceduralMetalSnap(t + 0.018, 4800, 0.025, 0.8);
+        this.createProceduralMetalSnap(t + 0.045, 3800, 0.04, 0.85);
+        this.createProceduralChamberThump(t + 0.048, 310, 75, 0.09, 0.65);
         break;
       }
       case 'slide_rack': {
-        // Heavy steel slide pulled back + forward slam lock into battery
-        this.createMechanicalClick(t, 0.05, 2500, 0.75);
-        this.createGunshotNoiseTransient(t + 0.02, 0.09, 1900, 400, 0.5);
-        this.createMechanicalClick(t + 0.08, 0.06, 3800, 0.9);
-        this.createGunshotSubBass(t + 0.08, 170, 55, 0.08, 0.55);
+        // Slide rearward travel ratchet + spring compression + forward release into battery lock
+        this.createProceduralMetalSnap(t, 2900, 0.03, 0.65);
+        this.createProceduralMagFriction(t + 0.01, 0.045, 1800, 3200, 0.4);
+        this.createProceduralMetalSnap(t + 0.045, 3500, 0.025, 0.7);
+        this.createProceduralMetalSnap(t + 0.075, 4600, 0.04, 0.9);
+        this.createProceduralChamberThump(t + 0.078, 240, 70, 0.085, 0.65);
         break;
       }
       case 'bolt_cycle': {
-        // AX-50 Straight-pull bolt cycle: rotation unlock + slide + chamber slam
-        this.createMechanicalClick(t, 0.04, 1900, 0.65);
-        this.createMechanicalClick(t + 0.06, 0.08, 2800, 0.8);
-        this.createGunshotSubBass(t + 0.06, 145, 42, 0.12, 0.6);
-        this.createMechanicalClick(t + 0.14, 0.05, 3400, 0.75);
+        // AX-50 Sniper Bolt cycle: handle lift cam unlock + sliding bolt draw + lock into battery
+        this.createProceduralMetalSnap(t, 2800, 0.035, 0.65);
+        this.createProceduralChamberThump(t, 190, 80, 0.05, 0.5);
+        this.createProceduralMagFriction(t + 0.04, 0.07, 2100, 1200, 0.45);
+        this.createProceduralMetalSnap(t + 0.11, 3400, 0.025, 0.6);
+        this.createProceduralMetalSnap(t + 0.16, 4400, 0.045, 0.85);
+        this.createProceduralChamberThump(t + 0.165, 290, 60, 0.11, 0.75);
         break;
       }
       case 'shell_insert': {
-        // Shotgun 12-gauge shell inserted through loading gate into tubular mag
-        this.createMechanicalClick(t, 0.03, 2200, 0.65);
-        this.createGunshotNoiseTransient(t + 0.015, 0.06, 1500, 500, 0.38);
-        this.createMechanicalClick(t + 0.04, 0.04, 3200, 0.75);
+        // Shotgun 12GA loading gate click + brass casing rim snap
+        this.createProceduralMetalSnap(t, 2700, 0.025, 0.6);
+        this.createProceduralMagFriction(t + 0.01, 0.04, 1500, 3100, 0.45);
+        this.createProceduralMetalSnap(t + 0.038, 4100, 0.032, 0.75);
         break;
       }
       case 'cock':
       default: {
-        // M4 bolt catch palm release or standard chambering
-        this.createMechanicalClick(t, 0.05, 2700, 0.8);
-        this.createMechanicalClick(t + 0.04, 0.06, 3600, 0.75);
-        this.createGunshotSubBass(t + 0.04, 180, 75, 0.09, 0.5);
+        // M4 ping-pong bolt catch release + buffer spring thrust + rotating bolt lock into chamber
+        this.createProceduralMetalSnap(t, 3800, 0.025, 0.75);
+        this.createProceduralMagFriction(t + 0.012, 0.05, 2600, 1100, 0.4);
+        this.createProceduralMetalSnap(t + 0.045, 4900, 0.038, 0.9);
+        this.createProceduralChamberThump(t + 0.048, 320, 70, 0.09, 0.7);
         break;
       }
     }
@@ -842,10 +989,123 @@ export class SoundEngine {
   public playPumpAction() {
     if (!this.ctx || !this.sfxGain) return;
     const t = this.ctx.currentTime;
-    this.createMechanicalClick(t, 0.05, 1900, 0.75);
-    this.createGunshotNoiseTransient(t + 0.01, 0.08, 1300, 300, 0.45);
-    this.createMechanicalClick(t + 0.08, 0.06, 3000, 0.9);
-    this.createGunshotSubBass(t + 0.08, 160, 48, 0.1, 0.6);
+    // Fore-end slide rearward racking stroke + forward ejection port lock
+    this.createProceduralMetalSnap(t, 2600, 0.03, 0.7);
+    this.createProceduralMagFriction(t + 0.01, 0.05, 1900, 1100, 0.45);
+    this.createProceduralMetalSnap(t + 0.058, 4200, 0.04, 0.85);
+    this.createProceduralChamberThump(t + 0.062, 260, 65, 0.08, 0.65);
+  }
+
+  // --- FREE FIRE SOUND EFFECTS ---
+  public playGlooWallDeploy() {
+    if (!this.ctx || !this.sfxGain) return;
+    const t = this.ctx.currentTime;
+    // Cryo-expansion burst + crystalline locking transient
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(240, t);
+    osc.frequency.exponentialRampToValueAtTime(780, t + 0.12);
+    gain.gain.setValueAtTime(0.7, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.28);
+    osc.connect(gain);
+    gain.connect(this.sfxGain);
+    osc.start(t);
+    osc.stop(t + 0.28);
+
+    this.createMechanicalClick(t + 0.05, 0.06, 3800, 0.85);
+    this.createMechanicalClick(t + 0.10, 0.08, 5200, 0.9);
+    this.createGunshotSubBass(t + 0.08, 150, 40, 0.14, 0.7);
+  }
+
+  public playGlooWallHit() {
+    const sample = this.freefireBuffers.get('gloowall_hit');
+    if (sample) {
+      const pitch = 0.92 + Math.random() * 0.16;
+      this.playSampleBuffer(sample, 1.1, pitch);
+    } else if (this.ctx && this.sfxGain) {
+      const t = this.ctx.currentTime;
+      this.createMechanicalClick(t, 0.06, 4200, 0.8);
+      this.createGunshotNoiseTransient(t, 0.12, 2800, 600, 0.7);
+    }
+  }
+
+  public playDangerAirstrike() {
+    const sample = this.freefireBuffers.get('danger_airstrike');
+    if (sample) {
+      this.playSampleBuffer(sample, 1.2, 0.95);
+    } else if (this.ctx && this.sfxGain) {
+      const t = this.ctx.currentTime;
+      this.createGunshotSubBass(t, 90, 25, 0.8, 1.0);
+      this.createGunshotNoiseTransient(t, 0.6, 900, 80, 0.9);
+    }
+  }
+
+  public playBooyah() {
+    if (!this.ctx || !this.sfxGain) return;
+    const t = this.ctx.currentTime;
+    // Free Fire Booyah triumphant fanfare brass chord
+    const freqs = [392.00, 523.25, 659.25, 783.99, 1046.50]; // G4, C5, E5, G5, C6
+    freqs.forEach((f, idx) => {
+      if (!this.ctx || !this.sfxGain) return;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(f, t + idx * 0.06);
+      gain.gain.setValueAtTime(0.001, t);
+      gain.gain.linearRampToValueAtTime(0.4 / (idx + 1), t + idx * 0.06 + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 2.4);
+      osc.connect(gain);
+      gain.connect(this.sfxGain);
+      osc.start(t + idx * 0.06);
+      osc.stop(t + 2.5);
+    });
+    this.createGunshotSubBass(t, 140, 45, 0.4, 0.8);
+  }
+
+  public playInhaler() {
+    if (!this.ctx || !this.sfxGain) return;
+    const t = this.ctx.currentTime;
+    // Aerated aerosol hiss + vital chime
+    this.createGunshotNoiseTransient(t, 0.35, 3400, 900, 0.5);
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(587.33, t + 0.1);
+    osc.frequency.exponentialRampToValueAtTime(880.00, t + 0.35);
+    gain.gain.setValueAtTime(0.2, t + 0.1);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.4);
+    osc.connect(gain);
+    gain.connect(this.sfxGain);
+    osc.start(t + 0.1);
+    osc.stop(t + 0.45);
+  }
+
+  public playMedkit() {
+    if (!this.ctx || !this.sfxGain) return;
+    const t = this.ctx.currentTime;
+    // Medical zipper + bandage wrap flutter
+    this.createGunshotNoiseTransient(t, 0.15, 2200, 600, 0.4);
+    this.createMechanicalClick(t + 0.12, 0.04, 3000, 0.5);
+    this.createGunshotNoiseTransient(t + 0.2, 0.18, 1600, 400, 0.4);
+  }
+
+  public playLaunchPad() {
+    if (!this.ctx || !this.sfxGain) return;
+    const t = this.ctx.currentTime;
+    // High-thrust pneumatic jump pad launch
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(120, t);
+    osc.frequency.exponentialRampToValueAtTime(580, t + 0.22);
+    gain.gain.setValueAtTime(0.6, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+    osc.connect(gain);
+    gain.connect(this.sfxGain);
+    osc.start(t);
+    osc.stop(t + 0.35);
+    this.createGunshotNoiseTransient(t, 0.3, 1800, 300, 0.7);
   }
 
   // --- 7. TACTICAL MOVEMENT SOUNDS ---
@@ -1331,7 +1591,7 @@ export class SoundEngine {
     osc.stop(t + 0.15);
   }
 
-  public playPickup(type: 'ammo' | 'armor' | 'stimpack' | 'tactical') {
+  public playPickup(type: string) {
     if (!this.ctx || !this.sfxGain) return;
     const t = this.ctx.currentTime;
 
@@ -1346,6 +1606,10 @@ export class SoundEngine {
     } else if (type === 'tactical') {
       this.createMechanicalClick(t, 0.04, 2900, 0.6);
       this.playTacticalSwitch();
+    } else if (type === 'inhaler') {
+      this.playInhaler();
+    } else if (type === 'medkit') {
+      this.playMedkit();
     } else {
       // Stim injector hiss & heart surge
       this.createGunshotNoiseTransient(t, 0.25, 3200, 600, 0.65);
@@ -1411,22 +1675,6 @@ export class SoundEngine {
         }
       }, 120);
     }
-  }
-
-  public playRadioChirp() {
-    if (!this.ctx || !this.voiceGain) return;
-    const t = this.ctx.currentTime;
-    const osc = this.ctx.createOscillator();
-    const gain = this.ctx.createGain();
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(1420, t);
-    osc.frequency.setValueAtTime(1780, t + 0.04);
-    gain.gain.setValueAtTime(0.32, t);
-    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.08);
-    osc.connect(gain);
-    gain.connect(this.voiceGain);
-    osc.start(t);
-    osc.stop(t + 0.08);
   }
 
   public playUIClick() {
@@ -1817,6 +2065,120 @@ export class SoundEngine {
     // Fast tactical click + glitch exit
     this.createMechanicalClick(t, 0.04, 3800, 0.7);
     this.createGunshotNoiseTransient(t, 0.06, 2400, 900, 0.25);
+  }
+
+  // --- AAA TACTICAL SQUAD RADIO COMMS SFX ---
+  public playRadioChirp(spatialPos?: THREE.Vector3) {
+    if (!this.ctx || !this.sfxGain) return;
+    const t = this.ctx.currentTime;
+
+    const destNode = spatialPos
+      ? this.create3DPanner(spatialPos, false, 0, 4.0, 75)?.panner || this.sfxGain
+      : this.sfxGain;
+
+    // 1. Radio Mic PTT Key Click
+    const osc = this.ctx.createOscillator();
+    const oscGain = this.ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(2450, t);
+    osc.frequency.setValueAtTime(1820, t + 0.025);
+    oscGain.gain.setValueAtTime(0.18, t);
+    oscGain.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
+    osc.connect(oscGain);
+    oscGain.connect(destNode);
+    osc.start(t);
+    osc.stop(t + 0.05);
+
+    // 2. Radio Squelch Noise Burst
+    const bufferSize = Math.floor(this.ctx.sampleRate * 0.06);
+    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.4));
+    }
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = buffer;
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(2800, t);
+    filter.Q.setValueAtTime(2.5, t);
+    const noiseGain = this.ctx.createGain();
+    noiseGain.gain.setValueAtTime(0.16, t);
+    noiseGain.gain.exponentialRampToValueAtTime(0.001, t + 0.06);
+
+    noise.connect(filter);
+    filter.connect(noiseGain);
+    noiseGain.connect(destNode);
+    noise.start(t);
+    noise.stop(t + 0.06);
+  }
+
+  public playRadioTacticalBark(actionType: string, spatialPos?: THREE.Vector3) {
+    if (!this.ctx || !this.sfxGain) return;
+    const t = this.ctx.currentTime;
+
+    const pannerData = spatialPos
+      ? this.create3DPanner(spatialPos, false, 0, 6.0, 85)
+      : null;
+    const destNode = pannerData ? pannerData.panner : this.sfxGain;
+
+    // Opening squelch
+    this.playRadioChirp(spatialPos);
+
+    // Synthesized radio vocal transmission envelope
+    const duration = actionType === 'contact' ? 0.38 : actionType === 'flank' ? 0.45 : 0.32;
+    const bufferSize = Math.floor(this.ctx.sampleRate * duration);
+    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+
+    // Pitched formant pulses simulating realistic radio voice modulation
+    const basePitch = actionType === 'pinned' ? 240 : actionType === 'contact' ? 220 : 190;
+    for (let i = 0; i < bufferSize; i++) {
+      const timeSec = i / this.ctx.sampleRate;
+      const mod = Math.sin(2 * Math.PI * basePitch * timeSec) * (0.5 + 0.5 * Math.sin(timeSec * 35));
+      const radioNoise = (Math.random() * 2 - 1) * 0.3;
+      data[i] = (mod * 0.7 + radioNoise) * (0.8 + 0.2 * Math.sin(timeSec * 12));
+    }
+
+    const voiceSource = this.ctx.createBufferSource();
+    voiceSource.buffer = buffer;
+
+    // Military radio bandpass telephone filter (300Hz - 3400Hz with resonance)
+    const bandpass = this.ctx.createBiquadFilter();
+    bandpass.type = 'bandpass';
+    bandpass.frequency.setValueAtTime(1600, t + 0.04);
+    bandpass.Q.setValueAtTime(1.8, t + 0.04);
+
+    const voiceGain = this.ctx.createGain();
+    voiceGain.gain.setValueAtTime(0.01, t + 0.04);
+    voiceGain.gain.linearRampToValueAtTime(0.22, t + 0.08);
+    voiceGain.gain.setValueAtTime(0.22, t + duration * 0.85);
+    voiceGain.gain.exponentialRampToValueAtTime(0.001, t + duration);
+
+    voiceSource.connect(bandpass);
+    bandpass.connect(voiceGain);
+    voiceGain.connect(destNode);
+
+    voiceSource.start(t + 0.04);
+    voiceSource.stop(t + duration);
+
+    // Closing roger-beep mic squelch
+    setTimeout(() => {
+      if (this.ctx && this.sfxGain) {
+        const tEnd = this.ctx.currentTime;
+        const endOsc = this.ctx.createOscillator();
+        const endGain = this.ctx.createGain();
+        endOsc.type = 'sine';
+        endOsc.frequency.setValueAtTime(1680, tEnd);
+        endOsc.frequency.exponentialRampToValueAtTime(840, tEnd + 0.04);
+        endGain.gain.setValueAtTime(0.12, tEnd);
+        endGain.gain.exponentialRampToValueAtTime(0.001, tEnd + 0.04);
+        endOsc.connect(endGain);
+        endGain.connect(destNode);
+        endOsc.start(tEnd);
+        endOsc.stop(tEnd + 0.04);
+      }
+    }, Math.floor(duration * 1000));
   }
 }
 

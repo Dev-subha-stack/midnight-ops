@@ -1,6 +1,6 @@
 {
   "name": "Frontline Ops: Tactical FPS",
-  "description": "AAA-grade 3D First-Person Shooter powered by ThreeJS featuring realistic tactical gunplay, PBR textures, dynamic lighting, recoil physics, bot AI, multiple weapon classes, tactical sprint/slide, scorestreaks, and comprehensive combat modes.",
+  "description": "AAA-grade 3D First-Person Shooter powered by ThreeJS featuring realistic tactical gunplay, Bermuda Island Battle Royale mode with Free Fire rules (EP energy points, Danger Zone airstrikes, 50-player survival, and BOOYAH! victory), authentic MaterialFoundry weapon reloads, PBR textures, and advanced bot AI.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

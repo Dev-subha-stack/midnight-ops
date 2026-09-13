@@ -855,20 +855,26 @@ export class ModelFactory {
         hammer.name = 'hammer';
         weaponGroup.add(hammer);
 
-        // High-Visibility 3-Dot Glowing Green Tritium Combat Sights
-        const frontSight = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.02, 0.022), blackSteelMat);
-        frontSight.position.set(0, 0.088, -0.18);
-        const frontDot = new THREE.Mesh(new THREE.SphereGeometry(0.003, 8, 8), tritiumGreenMat);
-        frontDot.position.set(0, 0.094, -0.17);
+        // High-Visibility 3-Dot Glowing Green Tritium Combat Sights (or Top-Rail Optic)
+        if (optic && optic !== 'iron_sight') {
+          const opticMesh = ModelFactory.createOpticMesh(optic, reticleColor, reticleStyle);
+          opticMesh.position.set(0, 0.088, -0.06);
+          weaponGroup.add(opticMesh);
+        } else {
+          const frontSight = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.02, 0.022), blackSteelMat);
+          frontSight.position.set(0, 0.088, -0.18);
+          const frontDot = new THREE.Mesh(new THREE.SphereGeometry(0.003, 8, 8), tritiumGreenMat);
+          frontDot.position.set(0, 0.094, -0.17);
 
-        const rearSight = new THREE.Mesh(new THREE.BoxGeometry(0.032, 0.02, 0.016), blackSteelMat);
-        rearSight.position.set(0, 0.088, 0.1);
-        const rearDotL = new THREE.Mesh(new THREE.SphereGeometry(0.003, 8, 8), tritiumGreenMat);
-        rearDotL.position.set(-0.01, 0.094, 0.092);
-        const rearDotR = rearDotL.clone();
-        rearDotR.position.x = 0.01;
+          const rearSight = new THREE.Mesh(new THREE.BoxGeometry(0.032, 0.02, 0.016), blackSteelMat);
+          rearSight.position.set(0, 0.088, 0.1);
+          const rearDotL = new THREE.Mesh(new THREE.SphereGeometry(0.003, 8, 8), tritiumGreenMat);
+          rearDotL.position.set(-0.01, 0.094, 0.092);
+          const rearDotR = rearDotL.clone();
+          rearDotR.position.x = 0.01;
 
-        weaponGroup.add(frontSight, frontDot, rearSight, rearDotL, rearDotR);
+          weaponGroup.add(frontSight, frontDot, rearSight, rearDotL, rearDotR);
+        }
         break;
       }
     }

@@ -83,15 +83,38 @@ export const Minimap: React.FC<MinimapProps> = ({ playerPos, playerYaw, bots, ua
     ctx.stroke();
     ctx.restore();
 
-    // Scale: 42 meters to radar radius
-    const mapScale = radarRadius / 42;
+    // Adaptive scale: 92m range in Battle Royale to see circles and POIs, 42m in TDM
+    const mapRange = battleRoyaleState ? 92 : 42;
+    const mapScale = radarRadius / mapRange;
 
-    // Draw Battle Royale Safe Zone Circles
+    // Draw Battle Royale Safe Zone Circles & Danger Zone
     if (battleRoyaleState) {
       const cos = Math.cos(playerYaw);
       const sin = Math.sin(playerYaw);
 
-      // Current Safe Zone
+      // Free Fire Red Danger Zone (Airstrike Bombardment)
+      if (battleRoyaleState.dangerZone) {
+        const dzDx = battleRoyaleState.dangerZone.center.x - playerPos.x;
+        const dzDz = battleRoyaleState.dangerZone.center.z - playerPos.z;
+        const dzRx = dzDx * cos - dzDz * sin;
+        const dzRy = dzDx * sin + dzDz * cos;
+        const dzScreenX = cx + dzRx * mapScale;
+        const dzScreenY = cy + dzRy * mapScale;
+        const dzScreenR = battleRoyaleState.dangerZone.radius * mapScale;
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(dzScreenX, dzScreenY, dzScreenR, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(239, 68, 68, 0.28)';
+        ctx.fill();
+        ctx.lineWidth = 1.8;
+        ctx.strokeStyle = '#ef4444';
+        ctx.setLineDash([4, 3]);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      // Current Safe Zone (Blue ring)
       const cDx = battleRoyaleState.circleCenter.x - playerPos.x;
       const cDz = battleRoyaleState.circleCenter.z - playerPos.z;
       const cRx = cDx * cos - cDz * sin;
@@ -103,8 +126,8 @@ export const Minimap: React.FC<MinimapProps> = ({ playerPos, playerYaw, bots, ua
       ctx.save();
       ctx.beginPath();
       ctx.arc(circleScreenX, circleScreenY, circleScreenR, 0, Math.PI * 2);
-      ctx.strokeStyle = battleRoyaleState.isShrinking ? 'rgba(239, 68, 68, 0.9)' : 'rgba(56, 189, 248, 0.85)';
-      ctx.lineWidth = 2;
+      ctx.strokeStyle = battleRoyaleState.isShrinking ? 'rgba(239, 68, 68, 0.95)' : 'rgba(56, 189, 248, 0.88)';
+      ctx.lineWidth = 2.2;
       ctx.stroke();
 
       // Next Safe Zone (Dotted white ring)
@@ -119,9 +142,36 @@ export const Minimap: React.FC<MinimapProps> = ({ playerPos, playerYaw, bots, ua
       ctx.beginPath();
       ctx.arc(nextX, nextY, nextR, 0, Math.PI * 2);
       ctx.setLineDash([3, 3]);
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
       ctx.lineWidth = 1.5;
       ctx.stroke();
+      ctx.restore();
+
+      // POI Town labels when on Bermuda map
+      const bermudaPois = [
+        { name: 'PEAK', x: 0, z: 0 },
+        { name: 'CLOCK', x: -55, z: 28 },
+        { name: 'FACTORY', x: 50, z: -35 },
+        { name: 'SHIPYARD', x: -35, z: -55 },
+        { name: 'HANGAR', x: 45, z: 45 },
+      ];
+
+      ctx.save();
+      ctx.font = 'bold 7px sans-serif';
+      ctx.fillStyle = 'rgba(148, 163, 184, 0.75)';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      bermudaPois.forEach(poi => {
+        const pDx = poi.x - playerPos.x;
+        const pDz = poi.z - playerPos.z;
+        const pRx = pDx * cos - pDz * sin;
+        const pRy = pDx * sin + pDz * cos;
+        const pX = cx + pRx * mapScale;
+        const pY = cy + pRy * mapScale;
+        if (Math.hypot(pRx, pRy) <= radarRadius - 12) {
+          ctx.fillText(poi.name, pX, pY);
+        }
+      });
       ctx.restore();
 
       // Airdrop Crate Blip on Minimap
@@ -169,6 +219,26 @@ export const Minimap: React.FC<MinimapProps> = ({ playerPos, playerYaw, bots, ua
 
       const dist = Math.hypot(rx, ry);
       if (dist <= radarRadius - 4) {
+        // Tactical cover / suppression / flanking aura
+        if (bot.isSuppressed) {
+          ctx.beginPath();
+          ctx.arc(blipX, blipY, 6.5, 0, Math.PI * 2);
+          ctx.strokeStyle = 'rgba(234, 179, 8, 0.9)'; // Yellow suppression halo
+          ctx.lineWidth = 1.2;
+          ctx.stroke();
+        } else if (bot.isFlanking) {
+          ctx.beginPath();
+          ctx.arc(blipX, blipY, 6.5, 0, Math.PI * 2);
+          ctx.strokeStyle = 'rgba(244, 63, 94, 0.9)'; // Rose/Purple flanking aura
+          ctx.setLineDash([2, 2]);
+          ctx.lineWidth = 1.2;
+          ctx.stroke();
+          ctx.setLineDash([]);
+        } else if (bot.isCrouchedInCover || bot.isPeekingCover) {
+          ctx.strokeStyle = isAlly ? 'rgba(56, 189, 248, 0.7)' : 'rgba(239, 68, 68, 0.7)';
+          ctx.strokeRect(blipX - 5, blipY - 5, 10, 10);
+        }
+
         ctx.beginPath();
         ctx.arc(blipX, blipY, isAlly ? 4.0 : (uavActive ? 4.5 : 3.5), 0, Math.PI * 2);
         ctx.fillStyle = isAlly ? '#06b6d4' : '#ef4444';
@@ -226,7 +296,7 @@ export const Minimap: React.FC<MinimapProps> = ({ playerPos, playerYaw, bots, ua
     ctx.fillText('N', nx, ny);
 
     ctx.restore();
-  }, [playerPos, playerYaw, bots, uavActive]);
+  }, [playerPos, playerYaw, bots, uavActive, battleRoyaleState]);
 
   return (
     <div className="relative w-36 h-36 rounded-full overflow-hidden shadow-2xl border-2 border-slate-700/90 bg-black/90 backdrop-blur-xl">

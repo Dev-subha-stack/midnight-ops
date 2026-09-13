@@ -1,6 +1,6 @@
 import React from 'react';
 import { GameSettings } from '../types';
-import { Sliders, X, Crosshair, Cpu, Cloud, Volume2 } from 'lucide-react';
+import { Sliders, X, Crosshair, Cpu, Cloud, Volume2, Sparkles } from 'lucide-react';
 import { soundManager } from '../game/audio';
 
 interface SettingsModalProps {
@@ -17,6 +17,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [current, setCurrent] = React.useState<GameSettings>({ ...settings });
 
   React.useEffect(() => {
+    setCurrent({ ...settings });
+  }, [settings]);
+
+  React.useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
       if (e.code === 'Escape' || e.code === 'Enter') {
         onClose();
@@ -26,14 +30,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     return () => window.removeEventListener('keydown', handleKey);
   }, [onClose]);
 
-  const handleChange = (key: keyof GameSettings, val: any) => {
-    const updated = { ...current, [key]: val };
+  const updateBatch = (partial: Partial<GameSettings>) => {
+    const updated = { ...current, ...partial };
     setCurrent(updated);
     onUpdateSettings(updated);
-
-    if (key === 'masterVolume' || key === 'sfxVolume') {
+    if ('masterVolume' in partial || 'sfxVolume' in partial) {
       soundManager.setVolumes(updated.masterVolume, updated.sfxVolume);
     }
+  };
+
+  const handleChange = (key: keyof GameSettings, val: any) => {
+    updateBatch({ [key]: val });
   };
 
   return (
@@ -129,6 +136,54 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
           </div>
 
+          {/* Graphics Quality & RTX Engine Mode */}
+          <div className="flex flex-col gap-2.5 bg-slate-900/40 p-4 rounded-xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-xs font-mono font-bold text-slate-400 uppercase">
+                <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Graphics Engine Mode</span>
+              </div>
+              <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded border ${
+                (current.graphicsMode || 'standard') === 'extreme'
+                  ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40 animate-pulse'
+                  : 'bg-cyan-500/10 text-cyan-400 border-cyan-500/30'
+              }`}>
+                {(current.graphicsMode || 'standard') === 'extreme' ? '⚡ RTX RAY-TRACING ACTIVE' : (current.graphicsMode || 'standard').toUpperCase()}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { id: 'smooth', label: 'Smooth', sub: 'High FPS' },
+                { id: 'standard', label: 'Standard', sub: 'Default AAA' },
+                { id: 'extreme', label: 'Extreme', sub: 'RTX Ray-Trace' },
+              ].map(g => (
+                <button
+                  key={g.id}
+                  onClick={() => {
+                    updateBatch({
+                      graphicsMode: g.id as any,
+                      graphicsQuality: g.id === 'smooth' ? 'medium' : g.id === 'standard' ? 'high' : 'ultra',
+                    });
+                  }}
+                  className={`py-2 px-2 rounded-lg text-left transition-all border cursor-pointer flex flex-col items-center justify-center text-center ${
+                    (current.graphicsMode || 'standard') === g.id
+                      ? 'bg-cyan-950/70 border-cyan-400 text-cyan-300 shadow-[0_0_12px_rgba(6,182,212,0.35)]'
+                      : 'bg-slate-900/80 border-slate-800 text-slate-400 hover:text-white hover:border-slate-700'
+                  }`}
+                >
+                  <span className="text-[11px] font-bold uppercase font-mono">{g.label}</span>
+                  <span className="text-[9px] opacity-75 font-mono">{g.sub}</span>
+                </button>
+              ))}
+            </div>
+            <p className="text-[10px] text-slate-400 font-mono">
+              {(current.graphicsMode || 'standard') === 'extreme' && '✨ Extreme Mode enables 4K PCF soft shadows, ACES filmic HDR tone mapping, specular gloss, and ray-marched ballistic light glow.'}
+              {(current.graphicsMode || 'standard') === 'standard' && '🎯 Standard Mode provides high-definition balanced graphics with crisp shadows and optimal performance.'}
+              {(current.graphicsMode || 'standard') === 'smooth' && '🚀 Smooth Mode optimizes rendering parameters for ultra-high framerates and competitive response time.'}
+            </p>
+          </div>
+
           {/* Environment */}
           <div className="flex flex-col gap-2.5 bg-slate-900/40 p-4 rounded-xl border border-slate-800/80">
             <div className="flex items-center gap-2 text-xs font-mono font-bold text-slate-400 uppercase">
@@ -137,18 +192,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
             <div className="grid grid-cols-3 gap-2">
               {[
-                { id: 'clear_day', label: 'Clear Day' },
-                { id: 'golden_sunset', label: 'Sunset' },
-                { id: 'midnight_fog', label: 'Midnight Ops' },
-                { id: 'tactical_storm', label: 'Rain Storm' },
-                { id: 'sandstorm', label: 'Sandstorm' },
-                { id: 'dynamic_cycle', label: 'Dynamic Cycle' },
+                { id: 'clear_day', label: 'Day (Noon)' },
+                { id: 'golden_sunset', label: 'Evening' },
+                { id: 'midnight_fog', label: 'Night' },
               ].map(w => (
                 <button
                   key={w.id}
                   onClick={() => handleChange('weatherPreset', w.id)}
-                  className={`py-1.5 px-2 rounded-lg text-[10px] font-bold uppercase transition-all border cursor-pointer font-mono text-center truncate ${
-                    (current.weatherPreset || 'dynamic_cycle') === w.id
+                  className={`py-2 px-2 rounded-lg text-[10px] font-bold uppercase transition-all border cursor-pointer font-mono text-center truncate ${
+                    (current.weatherPreset || 'clear_day') === w.id
                       ? 'bg-cyan-950/70 border-cyan-400 text-cyan-300 shadow-[0_0_8px_rgba(6,182,212,0.3)]'
                       : 'bg-slate-900/80 border-slate-800 text-slate-400 hover:text-white'
                   }`}

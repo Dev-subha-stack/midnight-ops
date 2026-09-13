@@ -1,10 +1,11 @@
 import React from 'react';
-import { Play, Sliders, RotateCcw, Crosshair, Home } from 'lucide-react';
-import { GameMode, WeatherType } from '../types';
+import { Play, Sliders, RotateCcw, Crosshair, Home, Sparkles } from 'lucide-react';
+import { GameMode, WeatherType, GraphicsMode } from '../types';
 
 interface PauseMenuProps {
   gameMode: GameMode;
   currentWeather?: WeatherType;
+  graphicsMode?: GraphicsMode;
   onResume: () => void;
   onOpenGunsmith: () => void;
   onOpenSettings: () => void;
@@ -12,11 +13,13 @@ interface PauseMenuProps {
   onReturnToHome?: () => void;
   onChangeMode: (mode: GameMode) => void;
   onSelectWeather?: (weather: WeatherType) => void;
+  onSelectGraphicsMode?: (mode: GraphicsMode) => void;
 }
 
 export const PauseMenu: React.FC<PauseMenuProps> = ({
   gameMode,
   currentWeather = 'dynamic_cycle',
+  graphicsMode = 'standard',
   onResume,
   onOpenGunsmith,
   onOpenSettings,
@@ -24,6 +27,7 @@ export const PauseMenu: React.FC<PauseMenuProps> = ({
   onReturnToHome,
   onChangeMode,
   onSelectWeather,
+  onSelectGraphicsMode,
 }) => {
   return (
     <div id="pause-menu" className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-xl p-4 sm:p-6 text-slate-200 select-none font-sans">
@@ -103,8 +107,43 @@ export const PauseMenu: React.FC<PauseMenuProps> = ({
             )}
           </div>
 
-          {/* Right: Environment Preset & Directives */}
-          <div className="md:col-span-6 flex flex-col gap-4">
+          {/* Right: Graphics Mode & Environment Preset */}
+          <div className="md:col-span-6 flex flex-col gap-3">
+            {/* Graphics Mode Switcher */}
+            {onSelectGraphicsMode && (
+              <div className="flex flex-col gap-2 bg-slate-900/40 p-3.5 rounded-xl border border-slate-800/80">
+                <div className="flex justify-between items-center text-[10px] font-mono text-slate-400 uppercase font-bold">
+                  <span className="flex items-center gap-1.5 text-cyan-400">
+                    <Sparkles className="w-3.5 h-3.5" /> Graphics Engine Mode
+                  </span>
+                  <span className={`text-[9px] px-1.5 py-0.2 rounded border ${
+                    graphicsMode === 'extreme' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40 font-bold' : 'text-slate-400 border-slate-700'
+                  }`}>
+                    {graphicsMode === 'extreme' ? 'RTX ACTIVE' : graphicsMode.toUpperCase()}
+                  </span>
+                </div>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {[
+                    { id: 'smooth', label: 'Smooth' },
+                    { id: 'standard', label: 'Standard' },
+                    { id: 'extreme', label: 'Extreme (RTX)' },
+                  ].map(g => (
+                    <button
+                      key={g.id}
+                      onClick={() => onSelectGraphicsMode(g.id as GraphicsMode)}
+                      className={`py-2 px-1.5 rounded-lg text-[10px] font-bold uppercase transition-all border font-mono cursor-pointer text-center truncate ${
+                        graphicsMode === g.id
+                          ? 'bg-cyan-950/70 border-cyan-400 text-cyan-300 shadow-[0_0_8px_rgba(6,182,212,0.3)]'
+                          : 'bg-slate-900/80 border-slate-800 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      {g.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Weather / Atmosphere Presets */}
             {onSelectWeather && (
               <div className="flex flex-col gap-2 bg-slate-900/40 p-3.5 rounded-xl border border-slate-800/80">
@@ -114,17 +153,14 @@ export const PauseMenu: React.FC<PauseMenuProps> = ({
                 </div>
                 <div className="grid grid-cols-3 gap-1.5">
                   {[
-                    { id: 'clear_day', label: 'High Noon' },
-                    { id: 'golden_sunset', label: 'Sunset' },
-                    { id: 'midnight_fog', label: 'Midnight' },
-                    { id: 'tactical_storm', label: 'Rain Storm' },
-                    { id: 'sandstorm', label: 'Sandstorm' },
-                    { id: 'dynamic_cycle', label: 'Dynamic' },
+                    { id: 'clear_day', label: 'Day (Noon)' },
+                    { id: 'golden_sunset', label: 'Evening' },
+                    { id: 'midnight_fog', label: 'Night' },
                   ].map(w => (
                     <button
                       key={w.id}
                       onClick={() => onSelectWeather(w.id as WeatherType)}
-                      className={`py-1.5 px-2 rounded-lg text-[10px] font-bold uppercase transition-all border font-mono cursor-pointer text-center truncate ${
+                      className={`py-2 px-2 rounded-lg text-[10px] font-bold uppercase transition-all border font-mono cursor-pointer text-center truncate ${
                         currentWeather === w.id
                           ? 'bg-cyan-950/70 border-cyan-400 text-cyan-300 shadow-[0_0_8px_rgba(6,182,212,0.3)]'
                           : 'bg-slate-900/80 border-slate-800 text-slate-400 hover:text-white'
@@ -138,7 +174,7 @@ export const PauseMenu: React.FC<PauseMenuProps> = ({
             )}
 
             {/* Tactical Controls Reference */}
-            <div className="flex flex-col gap-1.5 bg-slate-900/40 p-3.5 rounded-xl border border-slate-800/80 text-[10px] font-mono text-slate-400">
+            <div className="flex flex-col gap-1.5 bg-slate-900/40 p-3 rounded-xl border border-slate-800/80 text-[10px] font-mono text-slate-400">
               <span className="text-[10px] text-slate-300 uppercase font-bold tracking-wider">
                 Operative Hotkeys
               </span>

@@ -20,7 +20,7 @@ export class CollisionSystem {
   ): boolean {
     let hadCollision = false;
     const footY = pos.y - eyeHeight;
-    const headY = pos.y + 0.15;
+    const headY = Math.max(pos.y + 0.2, footY + 1.85);
 
     // Up to 4 relaxation iterations for clean corner and compound collision resolution
     for (let iter = 0; iter < 4; iter++) {

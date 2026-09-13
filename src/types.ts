@@ -102,6 +102,13 @@ export interface PlayerStats {
   reticleColor?: ReticleColor;
   reticleStyle?: ReticleStyle;
   isThermalActive?: boolean;
+  // Free Fire Battle Royale Attributes
+  ep?: number;
+  maxEp?: number;
+  vestLevel?: number;
+  helmetLevel?: number;
+  medkits?: number;
+  inhalers?: number;
 }
 
 export interface KillFeedItem {
@@ -117,11 +124,27 @@ export interface KillFeedItem {
 
 export type GameMode = 'tdm' | 'ffa' | 'battleroyale' | 'survival' | 'gungame' | 'targetrange' | 'training';
 
+export type MapType = 'warehouse' | 'bermuda';
+
+export interface FreeFireDangerZone {
+  x?: number;
+  z?: number;
+  center: { x: number; z: number };
+  radius: number;
+  timer?: number;
+  duration: number;
+  isActive?: boolean;
+  isWarning?: boolean;
+  blastTimer?: number;
+}
+
 export interface BattleRoyaleState {
   aliveCount: number;
   totalPlayers: number;
   circleRadius: number;
   nextCircleRadius: number;
+  shrinkStartRadius?: number;
+  shrinkStartCenter?: { x: number; z: number };
   circleCenter: { x: number; z: number };
   nextCircleCenter: { x: number; z: number };
   shrinkTimer: number;
@@ -138,6 +161,17 @@ export interface BattleRoyaleState {
   airdropPosition?: { x: number; y: number; z: number; isLooted: boolean } | null;
   placementRank?: number | null;
   isVictory?: boolean;
+  isBooyah?: boolean;
+  // Free Fire Specific Systems
+  ep: number; // Energy Points (0-200) - converts to HP
+  maxEp: number;
+  vestLevel: number; // 0=none, 1=33% reduction, 2=50% reduction, 3=66% reduction
+  helmetLevel: number; // 0=none, 1=30% reduction, 2=45% reduction, 3=60% reduction
+  medkitCount: number;
+  inhalerCount: number;
+  isGliding?: boolean;
+  glideAltitude?: number;
+  dangerZone?: FreeFireDangerZone | null;
 }
 
 export interface FloatingDamageNumberItem {
@@ -168,6 +202,9 @@ export interface TrainingTelemetryData {
   movingTargetSpeed: number;
 }
 
+export type GraphicsQuality = 'high' | 'ultra' | 'medium';
+export type GraphicsMode = 'smooth' | 'standard' | 'extreme';
+
 export interface GameSettings {
   mouseSensitivity: number;
   masterVolume: number;
@@ -180,8 +217,12 @@ export interface GameSettings {
   hitmarkerAudio: boolean;
   botCount: number;
   botDifficulty: 'recruit' | 'regular' | 'hardened' | 'veteran';
-  graphicsQuality: 'high' | 'ultra' | 'medium';
+  graphicsQuality: GraphicsQuality;
+  graphicsMode?: GraphicsMode;
   weatherPreset?: WeatherType;
+  mapType?: MapType;
+  infiniteAmmo?: boolean;
+  realisticShadows?: boolean;
 }
 
 export interface ScorestreakItem {
@@ -195,6 +236,17 @@ export interface ScorestreakItem {
 
 export type AIArchetype = 'assault' | 'sniper' | 'flanker' | 'heavy';
 export type AIAlertLevel = 'unalerted' | 'investigating' | 'combat' | 'retreating';
+export type SquadRole = 'suppressor' | 'flanker' | 'pointman' | 'overwatch' | 'anchor';
+
+export interface SquadRadioItem {
+  id: string;
+  speaker: string;
+  team: 'allies' | 'axis';
+  role?: SquadRole;
+  message: string;
+  actionType: 'contact' | 'flank' | 'pinned' | 'grenade' | 'push' | 'casualty' | 'compromised' | 'zone';
+  timestamp: number;
+}
 
 export interface EnemyBot {
   id: string;
@@ -217,6 +269,14 @@ export interface EnemyBot {
   kills: number;
   deaths: number;
   accuracy: number;
+  // AAA Tactical Telemetry
+  squadRole?: SquadRole;
+  tacticalAction?: string;
+  isSuppressed?: boolean;
+  isFlanking?: boolean;
+  isPeekingCover?: boolean;
+  isCrouchedInCover?: boolean;
+  voiceCallout?: string;
 }
 
 export interface HitmarkerEvent {
@@ -249,7 +309,7 @@ export interface EliminationAccolade {
   timestamp: number;
 }
 
-export type PickupType = 'ammo' | 'armor' | 'stimpack' | 'tactical';
+export type PickupType = 'ammo' | 'armor' | 'stimpack' | 'tactical' | 'inhaler' | 'medkit';
 
 export type TacticalType = 'smoke' | 'motion_sensor';
 
@@ -287,11 +347,19 @@ export interface FragGrenade {
   isExploded: boolean;
 }
 
-export type DestructibleType = 'concrete_wall' | 'wooden_crate' | 'explosive_barrel' | 'sandbag_barrier';
+export type DestructibleType =
+  | 'concrete_wall'
+  | 'wooden_crate'
+  | 'explosive_barrel'
+  | 'sandbag_barrier'
+  | 'cinderblock_wall'
+  | 'ammo_crate'
+  | 'propane_tank'
+  | 'wooden_pallet';
 export type DestructionStage = 'intact' | 'damaged' | 'critical' | 'destroyed';
 
-export type WeatherType = 'clear_day' | 'golden_sunset' | 'tactical_storm' | 'midnight_fog' | 'sandstorm' | 'dynamic_cycle';
-export type TimeOfDay = 'dawn' | 'noon' | 'sunset' | 'night' | 'storm' | 'sandstorm';
+export type WeatherType = 'clear_day' | 'golden_sunset' | 'midnight_fog';
+export type TimeOfDay = 'noon' | 'sunset' | 'night';
 
 export interface EnvironmentState {
   weather: WeatherType;

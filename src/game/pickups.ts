@@ -32,9 +32,48 @@ export class PickupManager {
       { id: 'pickup_armor_2', type: 'armor', pos: [22, 0.6, -18] },
       { id: 'pickup_stim_1', type: 'stimpack', pos: [-20, 0.6, 18] },
       { id: 'pickup_stim_2', type: 'stimpack', pos: [6, 0.6, -24] },
+      { id: 'pickup_inhaler_1', type: 'inhaler', pos: [-5, 0.6, 8] },
+      { id: 'pickup_inhaler_2', type: 'inhaler', pos: [8, 0.6, -6] },
     ];
 
     locations.forEach(loc => {
+      this.createPickup(loc.id, loc.type, new THREE.Vector3(...loc.pos));
+    });
+  }
+
+  public spawnBermudaPickups() {
+    // Clear existing default pickups
+    this.items.forEach(item => this.scene.remove(item.mesh));
+    this.items = [];
+
+    const bermudaLocations: { id: string; type: PickupType; pos: [number, number, number] }[] = [
+      // Clock Tower plaza
+      { id: 'b_ammo_clock_1', type: 'ammo', pos: [-55, 0.6, -45] },
+      { id: 'b_inhaler_clock', type: 'inhaler', pos: [-45, 0.6, -55] },
+      { id: 'b_armor_clock', type: 'armor', pos: [-50, 0.6, -38] },
+
+      // Factory warehouse floor & yard
+      { id: 'b_ammo_factory', type: 'ammo', pos: [55, 0.6, -40] },
+      { id: 'b_armor_factory', type: 'armor', pos: [62, 0.6, -50] },
+      { id: 'b_inhaler_factory', type: 'inhaler', pos: [46, 0.6, -45] },
+
+      // Shipyard docks
+      { id: 'b_ammo_ship_1', type: 'ammo', pos: [-50, 0.6, 50] },
+      { id: 'b_armor_ship', type: 'armor', pos: [-60, 0.6, 45] },
+      { id: 'b_inhaler_ship', type: 'inhaler', pos: [-55, 0.6, 58] },
+
+      // Pochinok village
+      { id: 'b_stim_poch_1', type: 'stimpack', pos: [45, 0.6, 52] },
+      { id: 'b_ammo_poch_2', type: 'ammo', pos: [55, 0.6, 48] },
+      { id: 'b_inhaler_poch', type: 'inhaler', pos: [50, 0.6, 60] },
+
+      // BimiSakti Tower central apex
+      { id: 'b_armor_bimi_apex', type: 'armor', pos: [0, 0.6, 4] },
+      { id: 'b_inhaler_bimi_apex', type: 'inhaler', pos: [-4, 0.6, -4] },
+      { id: 'b_ammo_bimi_launch', type: 'ammo', pos: [4, 0.6, -12] },
+    ];
+
+    bermudaLocations.forEach(loc => {
       this.createPickup(loc.id, loc.type, new THREE.Vector3(...loc.pos));
     });
   }
@@ -55,7 +94,7 @@ export class PickupManager {
     group.add(base);
 
     // Glowing ring on pad
-    const ringColor = type === 'ammo' ? 0xf59e0b : type === 'armor' ? 0x06b6d4 : 0xef4444;
+    const ringColor = type === 'ammo' ? 0xf59e0b : type === 'armor' ? 0x06b6d4 : type === 'inhaler' ? 0x10b981 : 0xef4444;
     const ringGeo = new THREE.TorusGeometry(0.45, 0.025, 8, 24);
     ringGeo.rotateX(Math.PI / 2);
     const ringMat = new THREE.MeshBasicMaterial({ color: ringColor });
@@ -89,6 +128,16 @@ export class PickupManager {
       const trim = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.08, 0.07), new THREE.MeshBasicMaterial({ color: 0x22d3ee }));
       trim.position.y = 0.08;
       itemGroup.add(trim);
+    } else if (type === 'inhaler') {
+      // Free Fire EP Inhaler (Emerald Green aerosol canister)
+      const canisterMat = new THREE.MeshStandardMaterial({ color: 0x10b981, metalness: 0.8, roughness: 0.2 });
+      const can = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.32, 16), canisterMat);
+      can.castShadow = true;
+      itemGroup.add(can);
+
+      const nozzle = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.08, 0.16), new THREE.MeshStandardMaterial({ color: 0xffffff }));
+      nozzle.position.set(0, 0.18, 0.05);
+      itemGroup.add(nozzle);
     } else {
       // Medical Stimpack Syringe
       const barrelMat = new THREE.MeshPhysicalMaterial({ color: 0xef4444, roughness: 0.1, transmission: 0.7, opacity: 0.85, transparent: true });
