@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { OpticType, ReticleColor, ReticleStyle, WeaponCamo, WeaponType } from '../types';
-import { OPTIC_REGISTRY, WEAPON_REGISTRY } from '../game/weapons';
-import { Sparkles, Check, X, Target, Crosshair, Eye, ZoomIn, Palette } from 'lucide-react';
+import { OpticType, ReticleColor, ReticleStyle, TacticalType, WeaponCamo, WeaponType } from '../types';
+import { OPTIC_REGISTRY, TACTICAL_EQUIPMENT_REGISTRY, WEAPON_REGISTRY } from '../game/weapons';
+import { Sparkles, Check, X, Target, Crosshair, Eye, ZoomIn, Palette, Radio, Sun, Zap, Cloud, Wifi, ShieldAlert } from 'lucide-react';
 import { soundManager } from '../game/audio';
 
 interface GunsmithModalProps {
@@ -10,13 +10,16 @@ interface GunsmithModalProps {
   currentOptic?: OpticType;
   currentReticleColor?: ReticleColor;
   currentReticleStyle?: ReticleStyle;
+  currentTactical?: TacticalType;
   onSelectWeapon: (
     weapon: WeaponType,
     camo: WeaponCamo,
     optic?: OpticType,
     reticleColor?: ReticleColor,
-    reticleStyle?: ReticleStyle
+    reticleStyle?: ReticleStyle,
+    tactical?: TacticalType
   ) => void;
+  onSelectTactical?: (tactical: TacticalType) => void;
   onClose: () => void;
 }
 
@@ -26,7 +29,9 @@ export const GunsmithModal: React.FC<GunsmithModalProps> = ({
   currentOptic = 'holo_553',
   currentReticleColor = 'red',
   currentReticleStyle = 'holo_ring',
+  currentTactical = 'smoke',
   onSelectWeapon,
+  onSelectTactical,
   onClose,
 }) => {
   const [selectedWeapon, setSelectedWeapon] = useState<WeaponType>(currentWeapon);
@@ -34,9 +39,10 @@ export const GunsmithModal: React.FC<GunsmithModalProps> = ({
   const [selectedOptic, setSelectedOptic] = useState<OpticType>(currentOptic);
   const [selectedReticleColor, setSelectedReticleColor] = useState<ReticleColor>(currentReticleColor);
   const [selectedReticleStyle, setSelectedReticleStyle] = useState<ReticleStyle>(currentReticleStyle);
-  const [activeTab, setActiveTab] = useState<'specs' | 'optics' | 'camo'>('optics');
+  const [selectedTactical, setSelectedTactical] = useState<TacticalType>(currentTactical);
+  const [activeTab, setActiveTab] = useState<'specs' | 'optics' | 'camo' | 'tactical'>('optics');
 
-  const weaponList: WeaponType[] = ['m4', 'mp5', 'sniper', 'shotgun', 'deagle'];
+  const weaponList: WeaponType[] = ['m4', 'ak47', 'scar', 'mp5', 'vector', 'shotgun', 'sniper', 'deagle'];
   const camoList: { id: WeaponCamo; name: string; color: string; desc: string }[] = [
     { id: 'standard', name: 'Tactical Cerakote', color: 'bg-zinc-800', desc: 'Military matte black finish' },
     { id: 'damascus', name: 'Damascus Steel', color: 'bg-gradient-to-r from-blue-600 via-indigo-500 to-purple-600', desc: 'Iridescent layered tempered steel' },
@@ -46,6 +52,8 @@ export const GunsmithModal: React.FC<GunsmithModalProps> = ({
   ];
 
   const opticList: OpticType[] = ['iron_sight', 'red_dot_micro', 'holo_553', 'acog_4x', 'sniper_variable', 'thermal_ir'];
+
+  const tacticalList: TacticalType[] = ['flashbang', 'concussion', 'heartbeat_sensor', 'smoke', 'motion_sensor'];
 
   const reticleColorList: { id: ReticleColor; name: string; hex: string }[] = [
     { id: 'red', name: 'Tactical Red', hex: '#ef4444' },
@@ -65,6 +73,7 @@ export const GunsmithModal: React.FC<GunsmithModalProps> = ({
 
   const activeCfg = WEAPON_REGISTRY[selectedWeapon];
   const activeOpticCfg = OPTIC_REGISTRY[selectedOptic];
+  const activeTacticalCfg = TACTICAL_EQUIPMENT_REGISTRY[selectedTactical];
 
   React.useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
@@ -79,7 +88,8 @@ export const GunsmithModal: React.FC<GunsmithModalProps> = ({
   const handleEquip = () => {
     soundManager.playOpticClick();
     soundManager.playReload(selectedWeapon, 'cock');
-    onSelectWeapon(selectedWeapon, selectedCamo, selectedOptic, selectedReticleColor, selectedReticleStyle);
+    onSelectWeapon(selectedWeapon, selectedCamo, selectedOptic, selectedReticleColor, selectedReticleStyle, selectedTactical);
+    onSelectTactical?.(selectedTactical);
     onClose();
   };
 
@@ -170,6 +180,16 @@ export const GunsmithModal: React.FC<GunsmithModalProps> = ({
                   }`}
                 >
                   <Palette className="w-3.5 h-3.5" /> Camo Finish
+                </button>
+                <button
+                  onClick={() => setActiveTab('tactical')}
+                  className={`px-3 py-1 rounded-lg text-xs font-mono font-bold uppercase transition-all cursor-pointer flex items-center gap-1.5 ${
+                    activeTab === 'tactical'
+                      ? 'bg-cyan-500 text-slate-950 shadow-md font-black'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Radio className="w-3.5 h-3.5" /> Equipment Loadout
                 </button>
                 <button
                   onClick={() => setActiveTab('specs')}
@@ -319,7 +339,79 @@ export const GunsmithModal: React.FC<GunsmithModalProps> = ({
               </div>
             )}
 
-            {/* TAB 3: BALLISTICS */}
+            {/* TAB 3: EQUIPMENT LOADOUT */}
+            {activeTab === 'tactical' && (
+              <div className="flex flex-col gap-4 animate-in fade-in duration-150">
+                <div className="flex justify-between items-center text-xs font-mono text-slate-400 uppercase font-bold">
+                  <span>Tactical Utility & Reconnaissance Equipment</span>
+                  <span className="text-cyan-400 font-bold">[Q] DEPLOY / QUICK USE</span>
+                </div>
+
+                {/* Tactical Item Cards Grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {tacticalList.map(tId => {
+                    const cfg = TACTICAL_EQUIPMENT_REGISTRY[tId];
+                    const isSelected = selectedTactical === tId;
+
+                    return (
+                      <button
+                        key={tId}
+                        onClick={() => {
+                          setSelectedTactical(tId);
+                          soundManager.playTacticalSwitch();
+                        }}
+                        className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col gap-2 ${
+                          isSelected
+                            ? 'border-cyan-400 bg-cyan-950/60 shadow-[0_0_15px_rgba(6,182,212,0.3)] text-white'
+                            : 'border-slate-800 bg-slate-950/60 text-slate-400 hover:border-slate-700 hover:text-slate-200'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <div className={`p-1.5 rounded-lg ${isSelected ? 'bg-cyan-500 text-slate-950' : 'bg-slate-900 text-cyan-400'}`}>
+                              {tId === 'flashbang' && <Sun className="w-4 h-4" />}
+                              {tId === 'concussion' && <Zap className="w-4 h-4" />}
+                              {tId === 'heartbeat_sensor' && <Radio className="w-4 h-4" />}
+                              {tId === 'smoke' && <Cloud className="w-4 h-4" />}
+                              {tId === 'motion_sensor' && <Wifi className="w-4 h-4" />}
+                            </div>
+                            <span className="text-xs font-bold text-white uppercase">{cfg.name}</span>
+                          </div>
+                          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700 text-cyan-400">
+                            CAPACITY ×{cfg.defaultCount}
+                          </span>
+                        </div>
+
+                        <span className="text-[9px] font-mono text-cyan-400 uppercase tracking-wider">{cfg.category}</span>
+                        <p className="text-[11px] text-slate-300 leading-relaxed">{cfg.desc}</p>
+
+                        <div className="flex items-center justify-between pt-2 border-t border-slate-800/80 text-[10px] font-mono text-slate-400">
+                          <span>Cooldown: {cfg.throwCooldownSec}s</span>
+                          {isSelected && (
+                            <span className="text-cyan-400 font-bold flex items-center gap-1">
+                              <Check className="w-3.5 h-3.5" /> EQUIPPED
+                            </span>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Tactical Deployment Guide Card */}
+                <div className="bg-slate-950/80 p-3 rounded-lg border border-slate-800/80 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <ShieldAlert className="w-4 h-4 text-cyan-400" />
+                    <span className="text-xs font-mono uppercase text-slate-300 font-bold">Tactical Deployment Tip</span>
+                  </div>
+                  <div className="text-xs font-mono text-slate-400">
+                    Press [Q] in combat to deploy | Press [X] to cycle tactical variants on the fly
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* TAB 4: BALLISTICS */}
             {activeTab === 'specs' && (
               <div className="flex flex-col gap-4 animate-in fade-in duration-150">
                 <div className="grid grid-cols-2 gap-4">
@@ -348,7 +440,7 @@ export const GunsmithModal: React.FC<GunsmithModalProps> = ({
               onClick={handleEquip}
               className="mt-auto w-full py-3.5 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black text-sm uppercase tracking-widest rounded-xl transition-all shadow-lg hover:shadow-cyan-500/25 flex items-center justify-center gap-2 cursor-pointer font-mono"
             >
-              <Check className="w-5 h-5" /> Equip Weapon, Optic & Camo
+              <Check className="w-5 h-5" /> Equip Weapon, Optic, Camo & Tactical Loadout
             </button>
           </div>
         </div>

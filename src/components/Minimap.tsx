@@ -7,11 +7,21 @@ interface MinimapProps {
   bots: EnemyBot[];
   uavActive: boolean;
   battleRoyaleState?: BattleRoyaleState | null;
+  shape?: 'circular' | 'square';
 }
 
-export const Minimap: React.FC<MinimapProps> = ({ playerPos, playerYaw, bots, uavActive, battleRoyaleState }) => {
+export const Minimap: React.FC<MinimapProps> = ({
+  playerPos,
+  playerYaw,
+  bots,
+  uavActive,
+  battleRoyaleState,
+  shape = 'circular',
+}) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const sweepAngleRef = useRef<number>(0);
+
+  const isSquare = shape === 'square';
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -23,69 +33,133 @@ export const Minimap: React.FC<MinimapProps> = ({ playerPos, playerYaw, bots, ua
     const height = canvas.height;
     const cx = width / 2;
     const cy = height / 2;
-    const radarRadius = cx - 6;
+    const radarRadius = cx - 8;
 
     // Advance sweep angle
     sweepAngleRef.current = (sweepAngleRef.current + (uavActive ? 0.08 : 0.04)) % (Math.PI * 2);
     const sweep = sweepAngleRef.current;
 
-    // Clear
+    // Clear canvas
     ctx.clearRect(0, 0, width, height);
 
-    // Background circle
     ctx.save();
-    ctx.beginPath();
-    ctx.arc(cx, cy, radarRadius, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(10, 15, 22, 0.92)';
-    ctx.fill();
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = uavActive ? 'rgba(56, 189, 248, 0.95)' : 'rgba(71, 85, 105, 0.85)';
-    ctx.stroke();
-    ctx.clip();
-
-    // Concentric Range Rings
-    ctx.strokeStyle = 'rgba(51, 65, 85, 0.5)';
-    ctx.lineWidth = 1;
-    [0.35, 0.7, 1.0].forEach(r => {
+    if (isSquare) {
+      // Modern Warfare / Warzone Square Radar Boundary
+      const pad = 6;
+      const cornerRadius = 10;
       ctx.beginPath();
-      ctx.arc(cx, cy, radarRadius * r, 0, Math.PI * 2);
+      if (typeof ctx.roundRect === 'function') {
+        ctx.roundRect(pad, pad, width - pad * 2, height - pad * 2, cornerRadius);
+      } else {
+        ctx.rect(pad, pad, width - pad * 2, height - pad * 2);
+      }
+      ctx.fillStyle = 'rgba(8, 12, 18, 0.94)';
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = uavActive ? 'rgba(56, 189, 248, 0.95)' : 'rgba(71, 85, 105, 0.85)';
       ctx.stroke();
-    });
+      ctx.clip();
 
-    // Crosshair Grid lines
-    ctx.strokeStyle = 'rgba(56, 189, 248, 0.2)';
-    ctx.beginPath();
-    ctx.moveTo(cx, cy - radarRadius);
-    ctx.lineTo(cx, cy + radarRadius);
-    ctx.moveTo(cx - radarRadius, cy);
-    ctx.lineTo(cx + radarRadius, cy);
-    ctx.stroke();
+      // Tactical Square Grid lines
+      ctx.strokeStyle = 'rgba(56, 189, 248, 0.12)';
+      ctx.lineWidth = 1;
+      const step = (width - pad * 2) / 4;
+      for (let i = 1; i < 4; i++) {
+        const p = pad + i * step;
+        ctx.beginPath();
+        ctx.moveTo(p, pad);
+        ctx.lineTo(p, height - pad);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(pad, p);
+        ctx.lineTo(width - pad, p);
+        ctx.stroke();
+      }
+
+      // Concentric Range Rings inside Square
+      ctx.strokeStyle = 'rgba(51, 65, 85, 0.55)';
+      [0.4, 0.75, 1.0].forEach(r => {
+        ctx.beginPath();
+        ctx.arc(cx, cy, radarRadius * r, 0, Math.PI * 2);
+        ctx.stroke();
+      });
+
+      // Axis cross lines
+      ctx.strokeStyle = 'rgba(56, 189, 248, 0.28)';
+      ctx.beginPath();
+      ctx.moveTo(cx, pad);
+      ctx.lineTo(cx, height - pad);
+      ctx.moveTo(pad, cy);
+      ctx.lineTo(width - pad, cy);
+      ctx.stroke();
+    } else {
+      // Classic 360 Radial Circular Radar
+      ctx.beginPath();
+      ctx.arc(cx, cy, radarRadius, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(10, 15, 22, 0.92)';
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = uavActive ? 'rgba(56, 189, 248, 0.95)' : 'rgba(71, 85, 105, 0.85)';
+      ctx.stroke();
+      ctx.clip();
+
+      // Concentric Range Rings
+      ctx.strokeStyle = 'rgba(51, 65, 85, 0.5)';
+      ctx.lineWidth = 1;
+      [0.35, 0.7, 1.0].forEach(r => {
+        ctx.beginPath();
+        ctx.arc(cx, cy, radarRadius * r, 0, Math.PI * 2);
+        ctx.stroke();
+      });
+
+      // Crosshair Grid lines
+      ctx.strokeStyle = 'rgba(56, 189, 248, 0.2)';
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - radarRadius);
+      ctx.lineTo(cx, cy + radarRadius);
+      ctx.moveTo(cx - radarRadius, cy);
+      ctx.lineTo(cx + radarRadius, cy);
+      ctx.stroke();
+    }
 
     // Rotating Radar Sweep Fan Beam (Call of Duty UAV Sweep)
-    const gradient = ctx.createRadialGradient(cx, cy, 0, cx, cy, radarRadius);
-    gradient.addColorStop(0, uavActive ? 'rgba(56, 189, 248, 0.3)' : 'rgba(56, 189, 248, 0.15)');
+    const sweepRadius = isSquare ? radarRadius * 1.35 : radarRadius;
+    const gradient = ctx.createRadialGradient(cx, cy, 0, cx, cy, sweepRadius);
+    gradient.addColorStop(0, uavActive ? 'rgba(56, 189, 248, 0.35)' : 'rgba(56, 189, 248, 0.16)');
     gradient.addColorStop(1, 'rgba(56, 189, 248, 0.0)');
 
     ctx.save();
     ctx.beginPath();
     ctx.moveTo(cx, cy);
-    ctx.arc(cx, cy, radarRadius, sweep - 0.45, sweep);
+    ctx.arc(cx, cy, sweepRadius, sweep - 0.45, sweep);
     ctx.closePath();
     ctx.fillStyle = gradient;
     ctx.fill();
 
-    // Sweep leading line
+    // Leading sweep ray line
     ctx.beginPath();
     ctx.moveTo(cx, cy);
-    ctx.lineTo(cx + Math.cos(sweep) * radarRadius, cy + Math.sin(sweep) * radarRadius);
-    ctx.strokeStyle = uavActive ? 'rgba(56, 189, 248, 0.9)' : 'rgba(56, 189, 248, 0.5)';
+    ctx.lineTo(cx + Math.cos(sweep) * sweepRadius, cy + Math.sin(sweep) * sweepRadius);
+    ctx.strokeStyle = uavActive ? 'rgba(56, 189, 248, 0.95)' : 'rgba(56, 189, 248, 0.55)';
     ctx.lineWidth = 1.5;
     ctx.stroke();
     ctx.restore();
 
-    // Adaptive scale: 92m range in Battle Royale to see circles and POIs, 42m in TDM
+    // Adaptive scale: 92m range in Battle Royale, 42m in TDM
     const mapRange = battleRoyaleState ? 92 : 42;
     const mapScale = radarRadius / mapRange;
+
+    // Helper to test if point is inside radar bounds
+    const isInsideBounds = (bx: number, by: number, padOffset: number = 4) => {
+      if (isSquare) {
+        return (
+          Math.abs(bx - cx) <= radarRadius + 2 - padOffset &&
+          Math.abs(by - cy) <= radarRadius + 2 - padOffset
+        );
+      }
+      return Math.hypot(bx - cx, by - cy) <= radarRadius - padOffset;
+    };
 
     // Draw Battle Royale Safe Zone Circles & Danger Zone
     if (battleRoyaleState) {
@@ -168,7 +242,7 @@ export const Minimap: React.FC<MinimapProps> = ({ playerPos, playerYaw, bots, ua
         const pRy = pDx * sin + pDz * cos;
         const pX = cx + pRx * mapScale;
         const pY = cy + pRy * mapScale;
-        if (Math.hypot(pRx, pRy) <= radarRadius - 12) {
+        if (isInsideBounds(pX, pY, 12)) {
           ctx.fillText(poi.name, pX, pY);
         }
       });
@@ -182,7 +256,7 @@ export const Minimap: React.FC<MinimapProps> = ({ playerPos, playerYaw, bots, ua
         const adRy = adDx * sin + adDz * cos;
         const adX = cx + adRx * mapScale;
         const adY = cy + adRy * mapScale;
-        if (Math.hypot(adRx, adRy) <= radarRadius - 4) {
+        if (isInsideBounds(adX, adY, 4)) {
           ctx.fillStyle = '#22c55e';
           ctx.beginPath();
           ctx.arc(adX, adY, 4.5, 0, Math.PI * 2);
@@ -217,8 +291,7 @@ export const Minimap: React.FC<MinimapProps> = ({ playerPos, playerYaw, bots, ua
       const blipX = cx + rx * mapScale;
       const blipY = cy + ry * mapScale;
 
-      const dist = Math.hypot(rx, ry);
-      if (dist <= radarRadius - 4) {
+      if (isInsideBounds(blipX, blipY, 4)) {
         // Tactical cover / suppression / flanking aura
         if (bot.isSuppressed) {
           ctx.beginPath();
@@ -296,11 +369,34 @@ export const Minimap: React.FC<MinimapProps> = ({ playerPos, playerYaw, bots, ua
     ctx.fillText('N', nx, ny);
 
     ctx.restore();
-  }, [playerPos, playerYaw, bots, uavActive, battleRoyaleState]);
+  }, [playerPos, playerYaw, bots, uavActive, battleRoyaleState, isSquare]);
 
   return (
-    <div className="relative w-36 h-36 rounded-full overflow-hidden shadow-2xl border-2 border-slate-700/90 bg-black/90 backdrop-blur-xl">
-      <canvas ref={canvasRef} width={144} height={144} className="w-full h-full block" />
+    <div
+      className={`relative overflow-hidden shadow-2xl border-2 border-slate-700/90 bg-black/90 backdrop-blur-xl transition-all duration-300 ${
+        isSquare ? 'w-40 h-40 rounded-xl' : 'w-36 h-36 rounded-full'
+      }`}
+    >
+      <canvas
+        ref={canvasRef}
+        width={isSquare ? 160 : 144}
+        height={isSquare ? 160 : 144}
+        className="w-full h-full block"
+      />
+
+      {/* Tactical Corner Brackets for Square Style */}
+      {isSquare && (
+        <>
+          <div className="absolute top-1 left-1 w-2.5 h-2.5 border-t-2 border-l-2 border-cyan-400/80 pointer-events-none" />
+          <div className="absolute top-1 right-1 w-2.5 h-2.5 border-t-2 border-r-2 border-cyan-400/80 pointer-events-none" />
+          <div className="absolute bottom-1 left-1 w-2.5 h-2.5 border-b-2 border-l-2 border-cyan-400/80 pointer-events-none" />
+          <div className="absolute bottom-1 right-1 w-2.5 h-2.5 border-b-2 border-r-2 border-cyan-400/80 pointer-events-none" />
+          <div className="absolute bottom-1 right-2 text-[8px] font-mono text-slate-500 pointer-events-none font-bold">
+            GRID // 04
+          </div>
+        </>
+      )}
+
       {uavActive && (
         <div className="absolute top-2 left-1/2 -translate-x-1/2 bg-sky-500 text-slate-950 text-[9px] font-black px-2 py-0.5 rounded tracking-widest uppercase animate-pulse shadow-md font-mono">
           UAV ACTIVE

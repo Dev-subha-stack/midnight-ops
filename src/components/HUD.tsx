@@ -7,6 +7,7 @@ import {
   GameMode,
   HitmarkerEvent,
   KillFeedItem,
+  LeanDirection,
   OpticType,
   PlayerStats,
   ReticleColor,
@@ -69,6 +70,9 @@ interface HUDProps {
   scopeShadowOffsetY?: number;
   isTacStance?: boolean;
   isMounted?: boolean;
+  leanState?: LeanDirection;
+  leanFactor?: number;
+  onToggleLean?: (direction: 'left' | 'right') => void;
   hitmarker: HitmarkerEvent | null;
   pickupNotice: { text: string; type: 'ammo' | 'armor' | 'stimpack' | 'tactical' } | null;
   accolades?: EliminationAccolade[];
@@ -86,6 +90,7 @@ interface HUDProps {
   environment?: EnvironmentState;
   trainingTelemetry?: TrainingTelemetryData;
   floatingDamageNumbers?: FloatingDamageNumberItem[];
+  minimapShape?: 'circular' | 'square';
   onResetTrainingTargets?: () => void;
   onSwitchWeapon?: (type: WeaponType) => void;
   onToggleWeather?: () => void;
@@ -102,6 +107,7 @@ export const HUD: React.FC<HUDProps> = ({
   stats,
   gameMode = 'tdm',
   battleRoyaleState,
+  minimapShape = 'circular',
   currentWeapon,
   equippedOptic = 'holo_553',
   reticleColor = 'red',
@@ -125,6 +131,10 @@ export const HUD: React.FC<HUDProps> = ({
   scopeShadowOffsetX = 0,
   scopeShadowOffsetY = 0,
   isTacStance = false,
+  isMounted = false,
+  leanState = 'none',
+  leanFactor = 0,
+  onToggleLean,
   hitmarker,
   pickupNotice,
   accolades = [],
@@ -534,6 +544,7 @@ export const HUD: React.FC<HUDProps> = ({
           bots={bots}
           uavActive={uavActive}
           battleRoyaleState={battleRoyaleState}
+          shape={minimapShape}
         />
 
         <div className="flex items-center gap-2 text-[9px] font-mono text-slate-400 bg-black/70 px-2 py-0.5 rounded border border-slate-800">
@@ -725,7 +736,13 @@ export const HUD: React.FC<HUDProps> = ({
 
       {/* CENTER: HIPFIRE CLEAN RETICLE */}
       {!isAiming && (
-        <div id="hud-crosshair-center" className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center justify-center pointer-events-none">
+        <div
+          id="hud-crosshair-center"
+          className="absolute top-1/2 left-1/2 flex items-center justify-center pointer-events-none transition-transform duration-75"
+          style={{
+            transform: `translate(-50%, -50%) rotate(${-(leanFactor || 0) * 15.5}deg)`,
+          }}
+        >
           <div
             className={`w-1 h-1 rounded-full ${targetLockedBot ? 'bg-red-500' : 'bg-white/90'}`}
           />
@@ -1085,6 +1102,12 @@ export const HUD: React.FC<HUDProps> = ({
               VAULTING
             </span>
           )}
+          {leanState !== 'none' && (
+            <span className="bg-cyan-500/20 text-cyan-300 px-1.5 py-0.2 rounded border border-cyan-400/60 text-[8px] font-black animate-pulse flex items-center gap-1">
+              <span>{leanState === 'left' ? '◄' : '►'}</span>
+              <span>PEEK {leanState.toUpperCase()}</span>
+            </span>
+          )}
         </div>
 
         <div className="bg-black/75 backdrop-blur-md px-3.5 py-2.5 rounded-lg rounded-tl-none border border-slate-800 shadow-xl flex flex-col space-y-2 w-64">
@@ -1244,7 +1267,21 @@ export const HUD: React.FC<HUDProps> = ({
               {wpnCfg.name}
             </span>
             <span className="text-[8px] font-mono text-slate-500 uppercase">
-              {currentWeapon === 'sniper' ? '.50 BMG' : currentWeapon === 'mp5' ? '9MM' : currentWeapon === 'shotgun' ? '12-GA' : currentWeapon === 'deagle' ? '.50 AE' : '5.56'}
+              {currentWeapon === 'ak47'
+                ? '7.62×39MM'
+                : currentWeapon === 'scar'
+                ? '7.62 NATO'
+                : currentWeapon === 'vector'
+                ? '.45 ACP'
+                : currentWeapon === 'sniper'
+                ? '.50 BMG'
+                : currentWeapon === 'mp5'
+                ? '9MM'
+                : currentWeapon === 'shotgun'
+                ? '12-GA'
+                : currentWeapon === 'deagle'
+                ? '.50 AE'
+                : '5.56 NATO'}
             </span>
           </div>
 
@@ -1274,29 +1311,100 @@ export const HUD: React.FC<HUDProps> = ({
             </div>
           ) : (
             /* Quick Weapon Selector Bar */
-            <div className="pt-1.5 border-t border-slate-800/80 flex items-center justify-between gap-1 pointer-events-auto">
+            <div className="pt-1.5 border-t border-slate-800/80 flex items-center justify-between gap-0.5 pointer-events-auto overflow-x-auto">
               {[
-                { id: 'm4' as WeaponType, label: '1' },
-                { id: 'mp5' as WeaponType, label: '2' },
-                { id: 'shotgun' as WeaponType, label: '3' },
-                { id: 'sniper' as WeaponType, label: '4' },
-                { id: 'deagle' as WeaponType, label: '5' },
+                { id: 'm4' as WeaponType, label: '1', name: 'M4' },
+                { id: 'ak47' as WeaponType, label: '2', name: 'AK' },
+                { id: 'scar' as WeaponType, label: '3', name: 'SCAR' },
+                { id: 'mp5' as WeaponType, label: '4', name: 'MP5' },
+                { id: 'vector' as WeaponType, label: '5', name: 'VEC' },
+                { id: 'shotgun' as WeaponType, label: '6', name: 'SG' },
+                { id: 'sniper' as WeaponType, label: '7', name: 'SNP' },
+                { id: 'deagle' as WeaponType, label: '8', name: '.50' },
               ].map(w => (
                 <button
                   key={w.id}
+                  title={`Equip ${w.name} [${w.label}]`}
                   onClick={() => onSwitchWeapon && onSwitchWeapon(w.id)}
-                  className={`px-1.5 py-0.5 rounded text-[9px] font-mono font-bold transition-all cursor-pointer ${
+                  className={`px-1.5 py-0.5 rounded text-[8px] font-mono font-bold transition-all cursor-pointer whitespace-nowrap ${
                     currentWeapon === w.id
-                      ? 'bg-cyan-400 text-black font-black'
-                      : 'bg-slate-900 text-slate-400 hover:bg-slate-800'
+                      ? 'bg-cyan-400 text-black font-black shadow-sm'
+                      : 'bg-slate-900/90 text-slate-400 hover:bg-slate-800 hover:text-white'
                   }`}
                 >
-                  {w.label}
+                  <span className="opacity-60 mr-0.5">{w.label}:</span>
+                  <span>{w.name}</span>
                 </button>
               ))}
             </div>
           )}
         </div>
+      </div>
+
+      {/* PUBG / BGMI TACTICAL PEEK & FIRE CONTROLS */}
+      <div
+        id="pubg-peek-controls"
+        className="absolute bottom-5 left-1/2 -translate-x-1/2 flex items-center gap-2.5 z-30 pointer-events-auto select-none"
+      >
+        {/* Peek Left (<) */}
+        <button
+          id="btn-lean-left"
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleLean?.('left');
+          }}
+          title="Peek Left (Press < or Comma) - Fire Supported"
+          className={`relative flex items-center gap-2 px-3 py-2 rounded-xl backdrop-blur-md transition-all font-mono border cursor-pointer ${
+            leanState === 'left'
+              ? 'bg-cyan-500/30 border-cyan-400 text-cyan-200 shadow-[0_0_20px_rgba(6,182,212,0.5)] scale-105'
+              : 'bg-black/65 border-slate-700/80 text-slate-300 hover:text-white hover:border-slate-500 hover:bg-black/80'
+          }`}
+        >
+          <div className={`transition-transform duration-200 ${leanState === 'left' ? '-rotate-12 scale-110' : ''}`}>
+            <Shield className="w-4 h-4 text-cyan-400 -rotate-12" />
+          </div>
+          <div className="flex flex-col items-start leading-none">
+            <span className="text-[10px] font-black uppercase tracking-wider">PEEK L</span>
+            <span className="text-[8px] font-bold text-cyan-400/90">&lt; KEY</span>
+          </div>
+          {leanState === 'left' && (
+            <span className="absolute -top-1 -right-1 flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-cyan-500"></span>
+            </span>
+          )}
+        </button>
+
+        {/* Peek Right (>) */}
+        <button
+          id="btn-lean-right"
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleLean?.('right');
+          }}
+          title="Peek Right (Press > or Period) - Fire Supported"
+          className={`relative flex items-center gap-2 px-3 py-2 rounded-xl backdrop-blur-md transition-all font-mono border cursor-pointer ${
+            leanState === 'right'
+              ? 'bg-cyan-500/30 border-cyan-400 text-cyan-200 shadow-[0_0_20px_rgba(6,182,212,0.5)] scale-105'
+              : 'bg-black/65 border-slate-700/80 text-slate-300 hover:text-white hover:border-slate-500 hover:bg-black/80'
+          }`}
+        >
+          <div className={`transition-transform duration-200 ${leanState === 'right' ? 'rotate-12 scale-110' : ''}`}>
+            <Shield className="w-4 h-4 text-cyan-400 rotate-12" />
+          </div>
+          <div className="flex flex-col items-start leading-none">
+            <span className="text-[10px] font-black uppercase tracking-wider">PEEK R</span>
+            <span className="text-[8px] font-bold text-cyan-400/90">&gt; KEY</span>
+          </div>
+          {leanState === 'right' && (
+            <span className="absolute -top-1 -right-1 flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-cyan-500"></span>
+            </span>
+          )}
+        </button>
       </div>
     </div>
   );

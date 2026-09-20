@@ -161,18 +161,18 @@ export class BotManager {
       // Player is squad leader of Allies team!
       // Allies team bots (4 friendly bots): Ghost, Soap, Price, Gaz
       const alliesRoster = [
-        { name: 'Ghost_Riley', archetype: 'flanker' as AIArchetype, weapon: 'mp5' as WeaponType },
-        { name: 'Soap_MacTavish', archetype: 'assault' as AIArchetype, weapon: 'm4' as WeaponType },
+        { name: 'Ghost_Riley', archetype: 'flanker' as AIArchetype, weapon: 'vector' as WeaponType },
+        { name: 'Soap_MacTavish', archetype: 'assault' as AIArchetype, weapon: 'scar' as WeaponType },
         { name: 'Price_Bravo6', archetype: 'heavy' as AIArchetype, weapon: 'shotgun' as WeaponType },
         { name: 'Gaz_Garrick', archetype: 'sniper' as AIArchetype, weapon: 'sniper' as WeaponType },
       ];
 
       // Axis team bots (5 enemy bots): Viper, Kruger, Minotaur, Bale, Shadow
       const axisRoster = [
-        { name: 'Viper_01', archetype: 'assault' as AIArchetype, weapon: 'm4' as WeaponType },
-        { name: 'Kruger_SpecOps', archetype: 'flanker' as AIArchetype, weapon: 'deagle' as WeaponType },
-        { name: 'Minotaur_Enforcer', archetype: 'heavy' as AIArchetype, weapon: 'shotgun' as WeaponType },
-        { name: 'Bale_Vanguard', archetype: 'assault' as AIArchetype, weapon: 'mp5' as WeaponType },
+        { name: 'Viper_01', archetype: 'assault' as AIArchetype, weapon: 'ak47' as WeaponType },
+        { name: 'Kruger_SpecOps', archetype: 'flanker' as AIArchetype, weapon: 'vector' as WeaponType },
+        { name: 'Minotaur_Enforcer', archetype: 'heavy' as AIArchetype, weapon: 'scar' as WeaponType },
+        { name: 'Bale_Vanguard', archetype: 'assault' as AIArchetype, weapon: 'ak47' as WeaponType },
         { name: 'Shadow_Lead', archetype: 'sniper' as AIArchetype, weapon: 'sniper' as WeaponType },
       ];
 
@@ -220,13 +220,14 @@ export class BotManager {
       // FFA, Battle Royale, or Gun Game
       const freeRoster = [
         { name: 'Viper_01', archetype: 'assault' as AIArchetype, weapon: 'm4' as WeaponType },
-        { name: 'Kruger_SpecOps', archetype: 'flanker' as AIArchetype, weapon: 'deagle' as WeaponType },
-        { name: 'Minotaur_Enforcer', archetype: 'heavy' as AIArchetype, weapon: 'shotgun' as WeaponType },
-        { name: 'Bale_Vanguard', archetype: 'assault' as AIArchetype, weapon: 'mp5' as WeaponType },
+        { name: 'Kruger_SpecOps', archetype: 'flanker' as AIArchetype, weapon: 'vector' as WeaponType },
+        { name: 'Minotaur_Enforcer', archetype: 'heavy' as AIArchetype, weapon: 'scar' as WeaponType },
+        { name: 'Bale_Vanguard', archetype: 'assault' as AIArchetype, weapon: 'ak47' as WeaponType },
         { name: 'Shadow_Lead', archetype: 'sniper' as AIArchetype, weapon: 'sniper' as WeaponType },
         { name: 'Ghost_Operative', archetype: 'flanker' as AIArchetype, weapon: 'mp5' as WeaponType },
-        { name: 'Ronin_Tactical', archetype: 'assault' as AIArchetype, weapon: 'm4' as WeaponType },
+        { name: 'Ronin_Tactical', archetype: 'assault' as AIArchetype, weapon: 'scar' as WeaponType },
         { name: 'Mace_Carnage', archetype: 'heavy' as AIArchetype, weapon: 'shotgun' as WeaponType },
+        { name: 'Nikto_Heavy', archetype: 'assault' as AIArchetype, weapon: 'ak47' as WeaponType },
       ];
 
       for (let i = 0; i < count; i++) {
@@ -260,6 +261,29 @@ export class BotManager {
       const dist = bot.position.distanceTo(pos);
       if (dist <= radius) {
         bot.onHearSound(pos, isGunfire);
+      }
+    });
+  }
+
+  // --- TACTICAL EQUIPMENT EFFECTS ON ENEMY BOTS ---
+  public blindBotsInRange(center: THREE.Vector3, radius: number, duration: number = 4.2) {
+    this.bots.forEach(bot => {
+      if (bot.isDead) return;
+      const dist = bot.position.distanceTo(center);
+      if (dist <= radius) {
+        bot.isBlind = true;
+        bot.blindTimer = duration;
+      }
+    });
+  }
+
+  public concussBotsInRange(center: THREE.Vector3, radius: number, duration: number = 3.8) {
+    this.bots.forEach(bot => {
+      if (bot.isDead) return;
+      const dist = bot.position.distanceTo(center);
+      if (dist <= radius) {
+        bot.isConcussed = true;
+        bot.concussedTimer = duration;
       }
     });
   }
@@ -455,6 +479,12 @@ export class BotController {
   public flinchDisplacement: THREE.Vector3 = new THREE.Vector3();
   public flinchVelocity: THREE.Vector3 = new THREE.Vector3();
   public aimDisruptionTimer: number = 0;
+
+  // Tactical variant effects (Flashbang & Concussion)
+  public isBlind: boolean = false;
+  public blindTimer: number = 0;
+  public isConcussed: boolean = false;
+  public concussedTimer: number = 0;
 
   // Procedural Multi-Joint Ragdoll Physics Simulation
   public isRagdollActive: boolean = false;
@@ -1088,6 +1118,16 @@ export class BotController {
     this.stateTimer += dt;
     this.strafeTimer += dt;
     this.animTimer += dt * 8;
+
+    // Tactical impairment timers
+    if (this.blindTimer > 0) {
+      this.blindTimer -= dt;
+      this.isBlind = this.blindTimer > 0;
+    }
+    if (this.concussedTimer > 0) {
+      this.concussedTimer -= dt;
+      this.isConcussed = this.concussedTimer > 0;
+    }
 
     // Reload management
     if (this.isReloading) {
@@ -1819,6 +1859,7 @@ export class BotController {
   }
 
   private checkLineOfSight(targetPos: THREE.Vector3): boolean {
+    if (this.isBlind) return false;
     const eyePos = new THREE.Vector3(this.position.x, this.position.y + 1.55, this.position.z);
     
     // Multi-elevation line-of-sight checks with smoke occlusion

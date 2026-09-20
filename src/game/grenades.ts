@@ -4,7 +4,7 @@ import { soundManager } from './audio';
 import { MapObstacle } from './map';
 import { ParticleSystem } from './particles';
 
-export type UtilityType = 'frag' | 'smoke' | 'motion_sensor';
+export type UtilityType = 'frag' | 'smoke' | 'motion_sensor' | 'flashbang' | 'concussion';
 
 export interface ActiveProjectile {
   id: string;
@@ -62,6 +62,9 @@ export class GrenadeManager {
 
   public onExplode: (center: THREE.Vector3, radius: number, maxDamage: number) => void = () => {};
   public onMotionDetect: (botIds: string[]) => void = () => {};
+  public onFlashbang: (center: THREE.Vector3) => void = () => {};
+  public onConcussion: (center: THREE.Vector3) => void = () => {};
+  public onHeartbeatScan: () => void = () => {};
 
   constructor(scene: THREE.Scene, particles: ParticleSystem, obstacles?: MapObstacle[]) {
     this.scene = scene;
@@ -90,7 +93,9 @@ export class GrenadeManager {
   }
 
   public toggleTacticalType(): TacticalType {
-    this.tacticalType = this.tacticalType === 'smoke' ? 'motion_sensor' : 'smoke';
+    const list: TacticalType[] = ['smoke', 'flashbang', 'concussion', 'motion_sensor', 'heartbeat_sensor'];
+    const idx = list.indexOf(this.tacticalType);
+    this.tacticalType = list[(idx + 1) % list.length];
     soundManager.playTacticalSwitch();
     return this.tacticalType;
   }
@@ -163,7 +168,7 @@ export class GrenadeManager {
     return true;
   }
 
-  // --- TACTICAL: DEPLOY ACTIVE UTILITY (SMOKE / MOTION SENSOR) ---
+  // --- TACTICAL: DEPLOY ACTIVE UTILITY (FLASHBANG, CONCUSSION, HEARTBEAT SENSOR, SMOKE, MOTION SENSOR) ---
   public deployTactical(
     origin: THREE.Vector3,
     direction: THREE.Vector3,
@@ -171,10 +176,18 @@ export class GrenadeManager {
   ): boolean {
     if (this.tacticalCount <= 0 || this.throwCooldown > 0) return false;
 
-    if (this.tacticalType === 'smoke') {
-      return this.throwSmokeGrenade(origin, direction, playerVelocity);
-    } else {
-      return this.deployMotionSensor(origin, direction, playerVelocity);
+    switch (this.tacticalType) {
+      case 'flashbang':
+        return this.throwFlashbang(origin, direction, playerVelocity);
+      case 'concussion':
+        return this.throwConcussion(origin, direction, playerVelocity);
+      case 'heartbeat_sensor':
+        return this.useHeartbeatSensor();
+      case 'motion_sensor':
+        return this.deployMotionSensor(origin, direction, playerVelocity);
+      case 'smoke':
+      default:
+        return this.throwSmokeGrenade(origin, direction, playerVelocity);
     }
   }
 
@@ -375,6 +388,128 @@ export class GrenadeManager {
       isCooked: false,
     });
 
+    return true;
+  }
+
+  // --- TACTICAL 3: M84 FLASHBANG GRENADE ---
+  public throwFlashbang(
+    origin: THREE.Vector3,
+    direction: THREE.Vector3,
+    playerVelocity?: THREE.Vector3
+  ): boolean {
+    if (this.tacticalCount <= 0) return false;
+
+    this.tacticalCount--;
+    this.throwCooldown = 0.6;
+    soundManager.playGrenadePin();
+
+    const group = new THREE.Group();
+    group.position.copy(origin);
+
+    // M84 Silver/Blue Ported Stun Body
+    const bodyGeo = new THREE.CylinderGeometry(0.045, 0.045, 0.14, 12);
+    const bodyMat = new THREE.MeshStandardMaterial({ color: 0x94a3b8, metalness: 0.85, roughness: 0.25 });
+    const body = new THREE.Mesh(bodyGeo, bodyMat);
+    body.castShadow = true;
+    group.add(body);
+
+    const bandGeo = new THREE.CylinderGeometry(0.047, 0.047, 0.03, 12);
+    const bandMat = new THREE.MeshStandardMaterial({ color: 0x2563eb, roughness: 0.5 });
+    const band = new THREE.Mesh(bandGeo, bandMat);
+    band.position.y = 0.02;
+    group.add(band);
+
+    const leverGeo = new THREE.BoxGeometry(0.015, 0.10, 0.01);
+    const leverMat = new THREE.MeshStandardMaterial({ color: 0x1d4ed8, metalness: 0.8 });
+    const lever = new THREE.Mesh(leverGeo, leverMat);
+    lever.position.set(0.04, 0.03, 0);
+    group.add(lever);
+
+    this.scene.add(group);
+
+    const vel = direction.clone().multiplyScalar(19.0).add(new THREE.Vector3(0, 3.4, 0));
+    if (playerVelocity) vel.addScaledVector(playerVelocity, 0.6);
+
+    const rotVel = new THREE.Vector3(
+      (Math.random() - 0.5) * 14,
+      (Math.random() - 0.5) * 14,
+      (Math.random() - 0.5) * 14
+    );
+
+    this.projectiles.push({
+      id: `flash_${Date.now()}_${Math.random()}`,
+      type: 'flashbang',
+      mesh: group,
+      position: origin.clone(),
+      velocity: vel,
+      rotVelocity: rotVel,
+      fuseTime: 1.25,
+      maxFuse: 1.25,
+      isCooked: false,
+    });
+
+    return true;
+  }
+
+  // --- TACTICAL 4: CONCUSSION STUN GRENADE ---
+  public throwConcussion(
+    origin: THREE.Vector3,
+    direction: THREE.Vector3,
+    playerVelocity?: THREE.Vector3
+  ): boolean {
+    if (this.tacticalCount <= 0) return false;
+
+    this.tacticalCount--;
+    this.throwCooldown = 0.6;
+    soundManager.playGrenadePin();
+
+    const group = new THREE.Group();
+    group.position.copy(origin);
+
+    // Concussion Hexagonal Rubberized Body
+    const bodyGeo = new THREE.CylinderGeometry(0.05, 0.05, 0.15, 8);
+    const bodyMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.9, metalness: 0.2 });
+    const body = new THREE.Mesh(bodyGeo, bodyMat);
+    body.castShadow = true;
+    group.add(body);
+
+    const stripeGeo = new THREE.CylinderGeometry(0.052, 0.052, 0.02, 8);
+    const stripeMat = new THREE.MeshStandardMaterial({ color: 0xf59e0b, roughness: 0.4 });
+    const stripe = new THREE.Mesh(stripeGeo, stripeMat);
+    group.add(stripe);
+
+    this.scene.add(group);
+
+    const vel = direction.clone().multiplyScalar(17.5).add(new THREE.Vector3(0, 3.2, 0));
+    if (playerVelocity) vel.addScaledVector(playerVelocity, 0.6);
+
+    const rotVel = new THREE.Vector3(
+      (Math.random() - 0.5) * 12,
+      (Math.random() - 0.5) * 12,
+      (Math.random() - 0.5) * 12
+    );
+
+    this.projectiles.push({
+      id: `concuss_${Date.now()}_${Math.random()}`,
+      type: 'concussion',
+      mesh: group,
+      position: origin.clone(),
+      velocity: vel,
+      rotVelocity: rotVel,
+      fuseTime: 1.3,
+      maxFuse: 1.3,
+      isCooked: false,
+    });
+
+    return true;
+  }
+
+  // --- TACTICAL 5: PORTABLE HEARTBEAT SENSOR ---
+  public useHeartbeatSensor(): boolean {
+    if (this.throwCooldown > 0) return false;
+    this.throwCooldown = 1.6;
+    soundManager.playHeartbeatSensorBeep(18);
+    this.onHeartbeatScan();
     return true;
   }
 
@@ -589,6 +724,16 @@ export class GrenadeManager {
         } else if (p.type === 'motion_sensor') {
           // Deployable Motion Sensor Beacon
           this.spawnMotionSensorStation(p.position);
+        } else if (p.type === 'flashbang') {
+          // M84 Magnesium Flashbang Detonation
+          soundManager.playFlashbangDetonate();
+          this.particles.emitExplosion(p.position, 1.0);
+          if (this.onFlashbang) this.onFlashbang(p.position.clone());
+        } else if (p.type === 'concussion') {
+          // Concussion Stun Shockwave Detonation
+          soundManager.playConcussionDetonate();
+          this.particles.emitExplosion(p.position, 1.3);
+          if (this.onConcussion) this.onConcussion(p.position.clone());
         }
 
         this.projectiles.splice(i, 1);

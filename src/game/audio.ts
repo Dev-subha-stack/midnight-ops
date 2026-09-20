@@ -3,6 +3,7 @@
 // supersonic bullet flyby doppler effects, multi-surface directional footsteps, and authentic weapon acoustics.
 
 import * as THREE from 'three';
+import { WeaponType } from '../types';
 
 export class SoundEngine {
   private ctx: AudioContext | null = null;
@@ -51,6 +52,12 @@ export class SoundEngine {
       '/sounds/weapons/m4_0.mp3', '/sounds/weapons/m4_1.mp3', '/sounds/weapons/m4_2.mp3', '/sounds/weapons/m4_3.mp3',
       '/sounds/weapons/m4_dist.mp3', '/sounds/weapons/m4_far.mp3',
       '/sounds/weapons/mp5_0.mp3', '/sounds/weapons/mp5_1.mp3', '/sounds/weapons/mp5_2.mp3', '/sounds/weapons/mp5_3.mp3',
+      '/sounds/weapons/ak47_0.mp3', '/sounds/weapons/ak47_1.mp3', '/sounds/weapons/ak47_2.mp3', '/sounds/weapons/ak47_3.mp3',
+      '/sounds/weapons/ak47_dist.mp3', '/sounds/weapons/ak47_far.mp3',
+      '/sounds/weapons/scar_0.mp3', '/sounds/weapons/scar_1.mp3', '/sounds/weapons/scar_2.mp3', '/sounds/weapons/scar_3.mp3',
+      '/sounds/weapons/scar_dist.mp3', '/sounds/weapons/scar_far.mp3',
+      '/sounds/weapons/vector_0.mp3', '/sounds/weapons/vector_1.mp3', '/sounds/weapons/vector_2.mp3', '/sounds/weapons/vector_3.mp3',
+      '/sounds/weapons/vector_dist.mp3', '/sounds/weapons/vector_far.mp3',
       '/sounds/weapons/sniper_0.mp3', '/sounds/weapons/sniper_1.mp3', '/sounds/weapons/sniper_2.mp3', '/sounds/weapons/sniper_3.mp3',
       '/sounds/weapons/sniper_dist.mp3', '/sounds/weapons/sniper_far.mp3',
       '/sounds/weapons/shotgun_0.mp3', '/sounds/weapons/shotgun_1.mp3', '/sounds/weapons/shotgun_2.mp3', '/sounds/weapons/shotgun_3.mp3',
@@ -176,6 +183,24 @@ export class SoundEngine {
         '/sounds/weapons/mp5_2.mp3',
         '/sounds/weapons/mp5_3.mp3',
       ],
+      ak47: [
+        '/sounds/weapons/ak47_0.mp3',
+        '/sounds/weapons/ak47_1.mp3',
+        '/sounds/weapons/ak47_2.mp3',
+        '/sounds/weapons/ak47_3.mp3',
+      ],
+      scar: [
+        '/sounds/weapons/scar_0.mp3',
+        '/sounds/weapons/scar_1.mp3',
+        '/sounds/weapons/scar_2.mp3',
+        '/sounds/weapons/scar_3.mp3',
+      ],
+      vector: [
+        '/sounds/weapons/vector_0.mp3',
+        '/sounds/weapons/vector_1.mp3',
+        '/sounds/weapons/vector_2.mp3',
+        '/sounds/weapons/vector_3.mp3',
+      ],
       sniper: [
         '/sounds/weapons/sniper_0.mp3',
         '/sounds/weapons/sniper_1.mp3',
@@ -195,6 +220,9 @@ export class SoundEngine {
         '/sounds/weapons/deagle_3.mp3',
       ],
       m4_dist: ['/sounds/weapons/m4_dist.mp3', '/sounds/weapons/m4_far.mp3'],
+      ak47_dist: ['/sounds/weapons/ak47_dist.mp3', '/sounds/weapons/ak47_far.mp3'],
+      scar_dist: ['/sounds/weapons/scar_dist.mp3', '/sounds/weapons/scar_far.mp3'],
+      vector_dist: ['/sounds/weapons/vector_dist.mp3', '/sounds/weapons/vector_far.mp3'],
       sniper_dist: ['/sounds/weapons/sniper_dist.mp3', '/sounds/weapons/sniper_far.mp3'],
     };
 
@@ -332,7 +360,7 @@ export class SoundEngine {
   }
 
   // --- 1. FIRST-PERSON WEAPON SHOOT SOUNDS ---
-  public playGunshot(type: 'm4' | 'mp5' | 'sniper' | 'shotgun' | 'deagle', isSilenced: boolean = false) {
+  public playGunshot(type: WeaponType, isSilenced: boolean = false) {
     if (!this.ctx || !this.sfxGain) return;
     const t = this.ctx.currentTime;
 
@@ -342,8 +370,12 @@ export class SoundEngine {
       const buffer = pubgList[Math.floor(Math.random() * pubgList.length)];
       const source = this.ctx.createBufferSource();
       source.buffer = buffer;
-      // Slight shot-to-shot organic timbre variation (±2%)
-      source.playbackRate.setValueAtTime(0.98 + Math.random() * 0.04, t);
+      // Custom physical pitch and timbre calibration per firearm caliber
+      let baseRate = 0.98 + Math.random() * 0.04;
+      if (type === 'ak47') baseRate = 0.86 + Math.random() * 0.03; // Deep, punchy 7.62x39mm bolt clatter
+      else if (type === 'scar') baseRate = 0.82 + Math.random() * 0.03; // Heavy 7.62x51mm NATO thunder
+      else if (type === 'vector') baseRate = 1.25 + Math.random() * 0.04; // Snappy, ultra-high 1200 RPM cyclic crack
+      source.playbackRate.setValueAtTime(baseRate, t);
 
       const gain = this.ctx.createGain();
       let volume = 1.0;
@@ -352,6 +384,9 @@ export class SoundEngine {
       else if (type === 'deagle') volume = 1.15;
       else if (type === 'mp5') volume = 0.95;
       else if (type === 'm4') volume = 1.05;
+      else if (type === 'ak47') volume = 1.25;
+      else if (type === 'scar') volume = 1.28;
+      else if (type === 'vector') volume = 1.05;
 
       if (isSilenced) {
         // Silencer acoustic muzzle damping
@@ -455,12 +490,39 @@ export class SoundEngine {
         this.createBulletCasingDrop(t + 0.18);
         break;
       }
+      case 'ak47': {
+        // Heavy 7.62x39mm Soviet Assault Rifle (Deep punch & metallic bolt rattle)
+        this.createGunshotNoiseTransient(t, 0.14, 2100, 260, 1.1);
+        this.createGunshotSubBass(t, 132, 38, 0.28, 1.05);
+        this.createMechanicalClick(t + 0.018, 0.05, 3000, 0.65);
+        this.createAcousticReverb(t, 0.45, 0.65);
+        this.createBulletCasingDrop(t + 0.15);
+        break;
+      }
+      case 'vector': {
+        // High cyclic rate 1200 RPM .45 ACP CQB (Super snappy high crack)
+        this.createGunshotNoiseTransient(t, 0.065, 3300, 480, 0.85);
+        this.createGunshotSubBass(t, 180, 62, 0.13, 0.75);
+        this.createMechanicalClick(t + 0.01, 0.03, 4800, 0.55);
+        this.createAcousticReverb(t, 0.18, 0.35);
+        this.createBulletCasingDrop(t + 0.09);
+        break;
+      }
+      case 'scar': {
+        // 7.62x51mm NATO Battle Rifle (Authoritative heavy thud & long resonance)
+        this.createGunshotNoiseTransient(t, 0.16, 1950, 240, 1.15);
+        this.createGunshotSubBass(t, 122, 34, 0.32, 1.15);
+        this.createMechanicalClick(t + 0.02, 0.055, 2900, 0.6);
+        this.createAcousticReverb(t, 0.5, 0.7);
+        this.createBulletCasingDrop(t + 0.16);
+        break;
+      }
     }
   }
 
   // --- 2. 3D SPATIAL BOT GUNSHOT (WITH OCCLUSION & DISTANCE ATTENUATION) ---
   public playSpatialGunshot(
-    type: 'm4' | 'mp5' | 'sniper' | 'shotgun' | 'deagle',
+    type: WeaponType,
     botPos: THREE.Vector3,
     isOccluded: boolean = false
   ) {
@@ -477,6 +539,12 @@ export class SoundEngine {
     if (distance > 35) {
       if (type === 'm4' && (this.pubgGunBuffers.get('m4_dist')?.length ?? 0) > 0) {
         soundKey = 'm4_dist';
+      } else if (type === 'ak47' && (this.pubgGunBuffers.get('ak47_dist')?.length ?? 0) > 0) {
+        soundKey = 'ak47_dist';
+      } else if (type === 'scar' && (this.pubgGunBuffers.get('scar_dist')?.length ?? 0) > 0) {
+        soundKey = 'scar_dist';
+      } else if (type === 'vector' && (this.pubgGunBuffers.get('vector_dist')?.length ?? 0) > 0) {
+        soundKey = 'vector_dist';
       } else if (type === 'sniper' && (this.pubgGunBuffers.get('sniper_dist')?.length ?? 0) > 0) {
         soundKey = 'sniper_dist';
       }
@@ -488,13 +556,20 @@ export class SoundEngine {
       const buffer = pubgList[Math.floor(Math.random() * pubgList.length)];
       const source = this.ctx.createBufferSource();
       source.buffer = buffer;
-      source.playbackRate.setValueAtTime(0.97 + Math.random() * 0.06, t);
+      let spatialRate = 0.97 + Math.random() * 0.06;
+      if (type === 'ak47') spatialRate = 0.86 + Math.random() * 0.04;
+      else if (type === 'scar') spatialRate = 0.82 + Math.random() * 0.04;
+      else if (type === 'vector') spatialRate = 1.25 + Math.random() * 0.05;
+      source.playbackRate.setValueAtTime(spatialRate, t);
 
       const gain = this.ctx.createGain();
       let volume = 0.95;
       if (type === 'sniper') volume = 1.35;
       else if (type === 'shotgun') volume = 1.15;
       else if (type === 'deagle') volume = 1.05;
+      else if (type === 'ak47') volume = 1.20;
+      else if (type === 'scar') volume = 1.22;
+      else if (type === 'vector') volume = 1.0;
       gain.gain.setValueAtTime(volume, t);
 
       source.connect(gain);
@@ -510,8 +585,10 @@ export class SoundEngine {
     let subStart = 140, subEnd = 45, subDuration = 0.2, transientFreq = 2200, transientDur = 0.1;
     if (type === 'sniper') {
       subStart = 85; subEnd = 24; subDuration = 0.65; transientFreq = 1200; transientDur = 0.28;
-    } else if (type === 'mp5') {
+    } else if (type === 'mp5' || type === 'vector') {
       subStart = 170; subEnd = 60; subDuration = 0.14; transientFreq = 2800; transientDur = 0.07;
+    } else if (type === 'ak47' || type === 'scar') {
+      subStart = 130; subEnd = 36; subDuration = 0.26; transientFreq = 2000; transientDur = 0.13;
     } else if (type === 'shotgun') {
       subStart = 115; subEnd = 35; subDuration = 0.35; transientFreq = 1500; transientDur = 0.2;
     } else if (type === 'deagle') {
@@ -571,7 +648,7 @@ export class SoundEngine {
   }
 
   // Backward compatibility alias
-  public playBotGunshot(type: 'm4' | 'mp5' | 'sniper' | 'shotgun' | 'deagle', distance: number) {
+  public playBotGunshot(type: WeaponType, distance: number) {
     if (!this.ctx) return;
     const dummyPos = this.listenerPos.clone().add(new THREE.Vector3(distance * 0.8, 0, distance * 0.6));
     this.playSpatialGunshot(type, dummyPos, false);
@@ -915,9 +992,56 @@ export class SoundEngine {
   }
 
   // --- 6. WEAPON RELOADS (AUTHENTIC 100% PROCEDURAL MECHANICAL CHOREOGRAPHY) ---
-  public playReload(type: string, stage: 'mag_out' | 'mag_in' | 'cock' | 'hk_slap' | 'slide_rack' | 'shell_insert' | 'bolt_cycle') {
+  public playReload(type: string, stage: 'mag_out' | 'mag_in' | 'cock' | 'hk_slap' | 'slide_rack' | 'shell_insert' | 'bolt_cycle' | 'ak_mag_out' | 'ak_mag_in' | 'ak_rack' | 'scar_bolt' | 'vector_charge') {
     if (!this.ctx || !this.sfxGain) return;
     const t = this.ctx.currentTime;
+
+    // AK-47 specific rock-and-lock choreography
+    if (type === 'ak47' || stage === 'ak_mag_out' || stage === 'ak_mag_in' || stage === 'ak_rack') {
+      if (stage === 'mag_out' || stage === 'ak_mag_out') {
+        // AK-47 paddle release latch click + curved steel mag rocking out
+        this.createProceduralMetalSnap(t, 2900, 0.032, 0.75);
+        this.createProceduralMagFriction(t + 0.012, 0.09, 1800, 950, 0.5);
+        this.createProceduralMetalSnap(t + 0.048, 2200, 0.035, 0.45);
+        return;
+      } else if (stage === 'mag_in' || stage === 'ak_mag_in') {
+        // Front lug contact + rock-and-lock rear retention latch engagement
+        this.createProceduralMetalSnap(t, 2100, 0.028, 0.6);
+        this.createProceduralMagFriction(t + 0.015, 0.06, 1200, 2400, 0.45);
+        this.createProceduralMetalSnap(t + 0.045, 3800, 0.04, 0.95);
+        this.createProceduralChamberThump(t + 0.048, 220, 55, 0.11, 0.75);
+        return;
+      } else if (stage === 'cock' || stage === 'ak_rack') {
+        // Heavy right-side reciprocating bolt carrier pull + spring slam into battery
+        this.createProceduralMetalSnap(t, 2700, 0.038, 0.7);
+        this.createProceduralMagFriction(t + 0.015, 0.06, 1700, 1100, 0.5);
+        this.createProceduralMetalSnap(t + 0.065, 4200, 0.045, 0.95);
+        this.createProceduralChamberThump(t + 0.07, 260, 60, 0.12, 0.85);
+        return;
+      }
+    }
+
+    // SCAR-17 specific heavy battle rifle reload
+    if (type === 'scar' || stage === 'scar_bolt') {
+      if (stage === 'cock' || stage === 'scar_bolt') {
+        this.createProceduralMetalSnap(t, 3200, 0.03, 0.8);
+        this.createProceduralMagFriction(t + 0.01, 0.045, 2200, 1300, 0.45);
+        this.createProceduralMetalSnap(t + 0.05, 4600, 0.04, 0.9);
+        this.createProceduralChamberThump(t + 0.052, 290, 65, 0.1, 0.75);
+        return;
+      }
+    }
+
+    // Vector CRB snappy SMG reload
+    if (type === 'vector' || stage === 'vector_charge') {
+      if (stage === 'cock' || stage === 'vector_charge') {
+        this.createProceduralMetalSnap(t, 4200, 0.022, 0.75);
+        this.createProceduralMagFriction(t + 0.008, 0.035, 3400, 1800, 0.4);
+        this.createProceduralMetalSnap(t + 0.035, 5100, 0.03, 0.85);
+        this.createProceduralChamberThump(t + 0.038, 340, 85, 0.07, 0.6);
+        return;
+      }
+    }
 
     switch (stage) {
       case 'mag_out': {
@@ -984,6 +1108,66 @@ export class SoundEngine {
         break;
       }
     }
+  }
+
+  // --- TACTICAL EQUIPMENT SOUND DESIGN ---
+  public playFlashbangDetonate() {
+    if (!this.ctx || !this.sfxGain) return;
+    const t = this.ctx.currentTime;
+    // Magnesium sharp blast transient + concussive air punch
+    this.createGunshotNoiseTransient(t, 0.08, 4500, 800, 1.2);
+    this.createGunshotSubBass(t, 190, 48, 0.16, 1.0);
+    this.createProceduralMetalSnap(t + 0.01, 5200, 0.04, 0.9);
+    this.playTinnitus();
+  }
+
+  public playTinnitus(duration: number = 3.2) {
+    if (!this.ctx || !this.sfxGain) return;
+    const t = this.ctx.currentTime;
+    // High-pitched acoustic trauma ringing (4.2 kHz pure sine)
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(4200, t);
+    osc.frequency.linearRampToValueAtTime(3900, t + duration);
+
+    gain.gain.setValueAtTime(0.45, t);
+    gain.gain.setValueAtTime(0.35, t + 0.4);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + duration);
+
+    osc.connect(gain);
+    gain.connect(this.sfxGain);
+    osc.start(t);
+    osc.stop(t + duration);
+  }
+
+  public playConcussionDetonate() {
+    if (!this.ctx || !this.sfxGain) return;
+    const t = this.ctx.currentTime;
+    // Massive concussive shockwave: low-frequency heavy air displacement
+    this.createGunshotSubBass(t, 95, 28, 0.55, 1.4);
+    this.createGunshotNoiseTransient(t, 0.22, 1400, 220, 1.1);
+    this.createAcousticReverb(t, 0.6, 0.85);
+  }
+
+  public playHeartbeatSensorBeep(distance: number = 20) {
+    if (!this.ctx || !this.sfxGain) return;
+    const t = this.ctx.currentTime;
+    // Bio-telemetry sonar ping: frequency rises as hostile gets closer
+    const freq = Math.max(480, Math.min(1400, 1400 - distance * 25));
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(freq, t);
+    osc.frequency.exponentialRampToValueAtTime(freq * 1.3, t + 0.08);
+
+    gain.gain.setValueAtTime(0.35, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
+
+    osc.connect(gain);
+    gain.connect(this.sfxGain);
+    osc.start(t);
+    osc.stop(t + 0.12);
   }
 
   public playPumpAction() {
@@ -1156,11 +1340,20 @@ export class SoundEngine {
     this.createMechanicalClick(t + 0.025, 0.04, 4800, 0.65);
   }
 
+  public playLean(direction: 'left' | 'right' | 'center') {
+    if (!this.ctx || !this.sfxGain) return;
+    const t = this.ctx.currentTime;
+    // PUBG/BGMI tactical body lean: cloth rustle, vest flex and subtle sling movement
+    const centerPitch = direction === 'center' ? 1100 : direction === 'left' ? 1250 : 1350;
+    this.createGunshotNoiseTransient(t, 0.09, centerPitch, 320, 0.38);
+    this.createMechanicalClick(t + 0.02, 0.03, direction === 'center' ? 2200 : 2800, 0.35);
+  }
+
   public playTacSprintStart() {
     if (!this.ctx || !this.sfxGain) return;
     const t = this.ctx.currentTime;
-    this.createGunshotNoiseTransient(t, 0.14, 950, 200, 0.5);
-    this.createMechanicalClick(t + 0.02, 0.04, 1900, 0.4);
+    // Heavy tactical combat sprint burst: deep foot push-off and gear rustle, no synthetic beeps
+    this.createGunshotNoiseTransient(t, 0.12, 600, 140, 0.35);
   }
 
   public playJump() {

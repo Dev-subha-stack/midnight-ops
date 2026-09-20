@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { BattleRoyaleState, EnvironmentState, FloatingDamageNumberItem, GameMode, GameSettings, HitmarkerEvent, KillFeedItem, MapType, PlayerEliminatedInfo, PlayerStats, TacticalType, TrainingTelemetryData, WeaponCamo, WeaponType, WeatherType } from '../types';
+import { BattleRoyaleState, EnvironmentState, FloatingDamageNumberItem, GameMode, GameSettings, HitmarkerEvent, KillFeedItem, LeanDirection, MapType, PlayerEliminatedInfo, PlayerStats, TacticalType, TrainingTelemetryData, WeaponCamo, WeaponType, WeatherType } from '../types';
 import { TacticalMap } from './map';
 import { ParticleSystem } from './particles';
 import { BotManager } from './ai';
@@ -11,7 +11,6 @@ import { EnvironmentManager } from './environment';
 import { TrainingManager } from './training';
 import { soundManager } from './audio';
 import { WEAPON_REGISTRY } from './weapons';
-import { MultiplayerManager } from './multiplayer/MultiplayerManager';
 
 export class GameEngine {
   public container: HTMLElement;
@@ -28,7 +27,6 @@ export class GameEngine {
   public pickupManager: PickupManager;
   public grenadeManager: GrenadeManager;
   public trainingManager: TrainingManager | null = null;
-  public multiplayerManager: MultiplayerManager | null = null;
 
   public settings: GameSettings;
   public gameMode: GameMode = 'tdm';
@@ -88,6 +86,7 @@ export class GameEngine {
   public onTrainingTelemetry: (data: TrainingTelemetryData) => void = () => {};
   public onFloatingNumbersUpdate: (items: FloatingDamageNumberItem[]) => void = () => {};
   public onPlayerEliminated: (info: PlayerEliminatedInfo | null) => void = () => {};
+  public onLeanUpdate?: (direction: LeanDirection, factor: number) => void;
 
   // Player Elimination State
   public isPlayerDead: boolean = false;
@@ -277,6 +276,12 @@ export class GameEngine {
       this.onTacticalUpdate(count, type);
     };
 
+    this.controller.onLeanChange = (dir, factor) => {
+      this.stats.leanState = dir;
+      this.stats.leanFactor = factor;
+      this.onLeanUpdate?.(dir, factor);
+    };
+
     // Bot vs Bot kills synchronization
     this.botManager.onBotKillBot = (killerTeam, killerName, victimName, weapon) => {
       if (killerTeam === 'allies') {
@@ -308,6 +313,18 @@ export class GameEngine {
 
     this.grenadeManager.onMotionDetect = (botIds) => {
       this.onMotionDetectNotice(botIds);
+    };
+
+    this.grenadeManager.onFlashbang = (center) => {
+      this.handleFlashbangDetonation(center);
+    };
+
+    this.grenadeManager.onConcussion = (center) => {
+      this.handleConcussionDetonation(center);
+    };
+
+    this.grenadeManager.onHeartbeatScan = () => {
+      this.handleHeartbeatScan();
     };
 
     // Pickups Handler
@@ -458,7 +475,7 @@ export class GameEngine {
 
     // Gun Game mode progression
     if (this.gameMode === 'gungame') {
-      const gunProgression: WeaponType[] = ['m4', 'mp5', 'shotgun', 'sniper', 'deagle'];
+      const gunProgression: WeaponType[] = ['m4', 'ak47', 'scar', 'mp5', 'vector', 'shotgun', 'sniper', 'deagle'];
       const nextIdx = (gunProgression.indexOf(this.controller.currentWeapon) + 1);
       if (nextIdx < gunProgression.length) {
         this.controller.equipWeapon(gunProgression[nextIdx]);
@@ -790,7 +807,7 @@ export class GameEngine {
 
     this.botManager.update(
       dt,
-      this.controller.position,
+      this.controller.camera.position,
       this.stats.health,
       (dmg, botName, wpn, botPos) => {
         this.takePlayerDamage(dmg, botName, wpn, botPos);
@@ -968,35 +985,6 @@ export class GameEngine {
       this.onBattleRoyaleUpdate?.({ ...br });
     }
 
-    // Multiplayer Networking Synchronization (WebRTC P2P)
-    if (this.multiplayerManager && this.multiplayerManager.isConnected) {
-      this.multiplayerManager.update(dt);
-      this.multiplayerManager.broadcastLocalState({
-        position: { x: this.controller.position.x, y: this.controller.position.y, z: this.controller.position.z },
-        velocity: { x: this.controller.velocity.x, y: this.controller.velocity.y, z: this.controller.velocity.z },
-        yaw: this.controller.yaw,
-        pitch: this.controller.pitch,
-        weapon: this.controller.currentWeapon,
-        camo: this.controller.currentCamo,
-        health: this.stats.health,
-        maxHealth: this.stats.maxHealth,
-        armor: this.stats.armor,
-        maxArmor: this.stats.maxArmor,
-        kills: this.stats.kills,
-        deaths: this.stats.deaths,
-        isShooting: this.controller.isShooting,
-        isAiming: this.controller.isAiming,
-        isSprinting: this.controller.isSprinting,
-        isTacSprinting: this.controller.isTacSprinting,
-        isSliding: this.controller.isSliding,
-        isDiving: this.controller.isDiving,
-        isTacStance: this.controller.isTacStance,
-        isMantling: this.controller.isMantling,
-        isReloading: this.controller.isReloading,
-        isDead: this.isPlayerDead,
-      });
-    }
-
     this.onScoreUpdate(this.alliesScore, this.axisScore, Math.max(0, Math.floor(this.matchTimeRemaining)));
   }
 
@@ -1093,6 +1081,78 @@ export class GameEngine {
 
   public toggleWeatherPreset(): WeatherType {
     return this.environment.toggleNextWeather();
+  }
+
+  private handleFlashbangDetonation(center: THREE.Vector3) {
+    // 1. Stun / blind enemy bots in 24m blast radius
+    this.botManager.blindBotsInRange(center, 24.0, 4.5);
+
+    // 2. Player flash proximity & line-of-sight check
+    const playerEye = this.camera.position.clone();
+    const distToFlash = playerEye.distanceTo(center);
+    if (distToFlash < 26.0) {
+      const toFlash = center.clone().sub(playerEye).normalize();
+      const lookDir = this.camera.getWorldDirection(new THREE.Vector3());
+      const dot = lookDir.dot(toFlash);
+
+      let intensity = 0;
+      if (dot > 0.15) {
+        // Direct gaze towards flashbang detonation
+        intensity = Math.max(0.4, 1.0 - (distToFlash / 26.0) * 0.7);
+        soundManager.playTinnitus(3.5 * intensity);
+      } else {
+        // Peripheral / facing away
+        intensity = Math.max(0.2, 0.5 - (distToFlash / 30.0) * 0.4);
+        soundManager.playTinnitus(1.5 * intensity);
+      }
+      this.controller.triggerFlashWhiteout(intensity);
+    }
+  }
+
+  private handleConcussionDetonation(center: THREE.Vector3) {
+    // 1. Stun enemy bots in 20m blast radius
+    this.botManager.concussBotsInRange(center, 20.0, 4.0);
+
+    // 2. Check player concussion proximity
+    const distToConcussion = this.camera.position.distanceTo(center);
+    if (distToConcussion < 18.0) {
+      const intensity = Math.max(0.25, 1.0 - distToConcussion / 18.0);
+      this.controller.triggerConcussion(intensity);
+      soundManager.playTinnitus(2.0 * intensity);
+    }
+  }
+
+  private handleHeartbeatScan() {
+    const playerPos = this.camera.position.clone();
+    const forward = this.camera.getWorldDirection(new THREE.Vector3());
+    let nearestDist = 999;
+    const detected: { id: string; distance: number; angleOffset: number }[] = [];
+
+    this.botManager.bots.forEach(bot => {
+      if (bot.isDead || bot.team === 'allies') return;
+      const toBot = bot.position.clone().sub(playerPos);
+      const dist = toBot.length();
+      if (dist <= 50.0) {
+        toBot.normalize();
+        const dot = forward.dot(toBot);
+        if (dot > 0.25) { // ~75 degree forward cone
+          nearestDist = Math.min(nearestDist, dist);
+          detected.push({
+            id: bot.id,
+            distance: Math.round(dist),
+            angleOffset: Math.atan2(toBot.x, toBot.z),
+          });
+        }
+      }
+    });
+
+    this.controller.triggerHeartbeatScan(detected);
+    if (detected.length > 0) {
+      soundManager.playHeartbeatSensorBeep(nearestDist);
+      this.onPickupNotice(`HEARTBEAT SCAN: ${detected.length} CONTACTS DETECTED`, 'tactical');
+    } else {
+      this.onPickupNotice('HEARTBEAT SCAN: NO HOSTILES IN FORWARD CONE', 'tactical');
+    }
   }
 
   private render() {

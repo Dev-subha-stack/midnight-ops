@@ -22,41 +22,49 @@ export class CollisionSystem {
     const footY = pos.y - eyeHeight;
     const headY = Math.max(pos.y + 0.2, footY + 1.85);
 
-    // Up to 4 relaxation iterations for clean corner and compound collision resolution
-    for (let iter = 0; iter < 4; iter++) {
+    // Up to 5 relaxation iterations for clean corner and compound collision resolution
+    for (let iter = 0; iter < 5; iter++) {
       let resolvedInIteration = false;
 
       for (let i = 0; i < obstacles.length; i++) {
         const obs = obstacles[i];
         if (!obs.box) continue;
 
-        // Quick AABB broadphase vertical overlap check
+        // Quick vertical overlap check
         const bMin = obs.box.min;
         const bMax = obs.box.max;
-        if (headY < bMin.y - 0.1 || footY > bMax.y + 0.1) {
+        if (headY < bMin.y - 0.05 || footY > bMax.y - 0.05) {
           continue;
         }
 
-        // Check if this obstacle has exact position, size, and rotation parameters
-        if (obs.pos && obs.size && obs.rot !== undefined && Math.abs(obs.rot) > 0.001) {
-          // OBB (Oriented Bounding Box) Resolution for Rotated Containers & Barriers
+        // Unified OBB / AABB resolution for all obstacles with position & size
+        if (obs.pos && obs.size) {
           const halfX = obs.size.x / 2;
           const halfZ = obs.size.z / 2;
-          const obsMinY = obs.pos.y - obs.size.y / 2;
-          const obsMaxY = obs.pos.y + obs.size.y / 2;
+          const halfY = obs.size.y / 2;
+          const obsMinY = obs.pos.y - halfY;
+          const obsMaxY = obs.pos.y + halfY;
 
-          if (headY < obsMinY || footY > obsMaxY) continue;
+          // Vertical clearance check
+          if (headY < obsMinY + 0.05 || footY > obsMaxY - 0.05) continue;
 
           // Transform entity (X, Z) into obstacle's local coordinate space
+          // In Three.js: worldX = localX * cos(rot) + localZ * sin(rot)
+          //              worldZ = -localX * sin(rot) + localZ * cos(rot)
+          // Inverse (world -> local):
+          //              localX = relX * cos(rot) - relZ * sin(rot)
+          //              localZ = relX * sin(rot) + relZ * cos(rot)
+          const rot = obs.rot || 0;
+          const cosR = Math.cos(rot);
+          const sinR = Math.sin(rot);
+
           const relX = pos.x - obs.pos.x;
           const relZ = pos.z - obs.pos.z;
-          const cosR = Math.cos(-obs.rot);
-          const sinR = Math.sin(-obs.rot);
 
           const localX = relX * cosR - relZ * sinR;
           const localZ = relX * sinR + relZ * cosR;
 
-          // Clamp to local box boundaries
+          // Clamp to local box boundaries to find closest surface point
           const closestLocalX = Math.max(-halfX, Math.min(localX, halfX));
           const closestLocalZ = Math.max(-halfZ, Math.min(localZ, halfZ));
 
@@ -73,34 +81,48 @@ export class CollisionSystem {
             let pushLocalZ = 0;
 
             if (dist > 0.0001) {
+              // Outside or touching corner: normal points radially away from closest point
               const penetration = radius - dist;
               pushLocalX = (locDx / dist) * penetration;
               pushLocalZ = (locDz / dist) * penetration;
             } else {
-              // Deep inside: push out to nearest local face
-              const dX1 = Math.abs(localX - (-halfX));
-              const dX2 = Math.abs(halfX - localX);
-              const dZ1 = Math.abs(localZ - (-halfZ));
-              const dZ2 = Math.abs(halfZ - localZ);
-              const minDist = Math.min(dX1, dX2, dZ1, dZ2);
+              // Deep inside the box (penetrated across face or corner)
+              const dLeft = localX - (-halfX); // dist to -X wall
+              const dRight = halfX - localX;   // dist to +X wall
+              const dBack = localZ - (-halfZ); // dist to -Z wall
+              const dFront = halfZ - localZ;   // dist to +Z wall
 
-              if (minDist === dX1) pushLocalX = -(halfX + radius) - localX;
-              else if (minDist === dX2) pushLocalX = (halfX + radius) - localX;
-              else if (minDist === dZ1) pushLocalZ = -(halfZ + radius) - localZ;
-              else pushLocalZ = (halfZ + radius) - localZ;
+              const minX = Math.min(dLeft, dRight);
+              const minZ = Math.min(dBack, dFront);
+
+              // If close to a corner on both axes, eject out past the corner
+              if (minX < radius && minZ < radius) {
+                const targetX = localX >= 0 ? (halfX + radius + 0.02) : (-halfX - radius - 0.02);
+                const targetZ = localZ >= 0 ? (halfZ + radius + 0.02) : (-halfZ - radius - 0.02);
+                pushLocalX = targetX - localX;
+                pushLocalZ = targetZ - localZ;
+              } else if (minX < minZ) {
+                // Eject along X
+                pushLocalX = (localX >= 0) ? (halfX + radius + 0.02 - localX) : (-halfX - radius - 0.02 - localX);
+                pushLocalZ = 0;
+              } else {
+                // Eject along Z
+                pushLocalX = 0;
+                pushLocalZ = (localZ >= 0) ? (halfZ + radius + 0.02 - localZ) : (-halfZ - radius - 0.02 - localZ);
+              }
             }
 
             // Rotate push vector back to world space
-            const worldCos = Math.cos(obs.rot);
-            const worldSin = Math.sin(obs.rot);
-            const pushWorldX = pushLocalX * worldCos - pushLocalZ * worldSin;
-            const pushWorldZ = pushLocalX * worldSin + pushLocalZ * worldCos;
+            // worldX = localX * cos(rot) + localZ * sin(rot)
+            // worldZ = -localX * sin(rot) + localZ * cos(rot)
+            const pushWorldX = pushLocalX * cosR + pushLocalZ * sinR;
+            const pushWorldZ = -pushLocalX * sinR + pushLocalZ * cosR;
 
             pos.x += pushWorldX;
             pos.z += pushWorldZ;
 
-            // Project velocity along contact normal
-            const pushLen = Math.sqrt(pushWorldX * pushWorldX + pushWorldZ * pushWorldZ);
+            // Project and eliminate incoming velocity along contact normal
+            const pushLen = Math.hypot(pushWorldX, pushWorldZ);
             if (pushLen > 0.0001) {
               const nx = pushWorldX / pushLen;
               const nz = pushWorldZ / pushLen;
@@ -114,7 +136,7 @@ export class CollisionSystem {
           continue;
         }
 
-        // Standard Axis-Aligned Box (AABB) Resolution
+        // Standard Axis-Aligned Box (AABB) Fallback for obstacles without explicit pos/size
         const min = obs.box.min;
         const max = obs.box.max;
 
@@ -148,20 +170,33 @@ export class CollisionSystem {
             const distMaxX = Math.abs(max.x - pos.x);
             const distMinZ = Math.abs(pos.z - min.z);
             const distMaxZ = Math.abs(max.z - pos.z);
-            const minDist = Math.min(distMinX, distMaxX, distMinZ, distMaxZ);
 
-            if (minDist === distMinX) {
-              pos.x = min.x - radius;
-              if (vel.x > 0) vel.x = 0;
-            } else if (minDist === distMaxX) {
-              pos.x = max.x + radius;
-              if (vel.x < 0) vel.x = 0;
-            } else if (minDist === distMinZ) {
-              pos.z = min.z - radius;
-              if (vel.z > 0) vel.z = 0;
+            const minX = Math.min(distMinX, distMaxX);
+            const minZ = Math.min(distMinZ, distMaxZ);
+
+            if (minX < radius && minZ < radius) {
+              pos.x = (distMinX < distMaxX ? min.x - radius - 0.02 : max.x + radius + 0.02);
+              pos.z = (distMinZ < distMaxZ ? min.z - radius - 0.02 : max.z + radius + 0.02);
+              if (distMinX < distMaxX && vel.x > 0) vel.x = 0;
+              if (distMinX >= distMaxX && vel.x < 0) vel.x = 0;
+              if (distMinZ < distMaxZ && vel.z > 0) vel.z = 0;
+              if (distMinZ >= distMaxZ && vel.z < 0) vel.z = 0;
+            } else if (minX < minZ) {
+              if (distMinX < distMaxX) {
+                pos.x = min.x - radius - 0.02;
+                if (vel.x > 0) vel.x = 0;
+              } else {
+                pos.x = max.x + radius + 0.02;
+                if (vel.x < 0) vel.x = 0;
+              }
             } else {
-              pos.z = max.z + radius;
-              if (vel.z < 0) vel.z = 0;
+              if (distMinZ < distMaxZ) {
+                pos.z = min.z - radius - 0.02;
+                if (vel.z > 0) vel.z = 0;
+              } else {
+                pos.z = max.z + radius + 0.02;
+                if (vel.z < 0) vel.z = 0;
+              }
             }
           }
         }
@@ -171,6 +206,61 @@ export class CollisionSystem {
     }
 
     return hadCollision;
+  }
+
+  /**
+   * Returns the highest solid walkable surface under an entity's feet (e.g. shipping container roofs,
+   * catwalks, crates, sandbags), or 0 for ground level.
+   */
+  public static getGroundElevation(
+    pos: THREE.Vector3,
+    radius: number,
+    eyeHeight: number,
+    obstacles: MapObstacle[]
+  ): number {
+    let maxElevation = 0;
+    const feetY = pos.y - eyeHeight;
+
+    for (let i = 0; i < obstacles.length; i++) {
+      const obs = obstacles[i];
+      if (!obs.box) continue;
+
+      const topY = obs.box.max.y;
+      // Only consider surfaces that are under or just at feet level (stepping threshold 0.35m)
+      if (topY > feetY + 0.35 || topY < 0.1) continue;
+
+      if (obs.pos && obs.size) {
+        const rot = obs.rot || 0;
+        const halfX = obs.size.x / 2 + radius * 0.4;
+        const halfZ = obs.size.z / 2 + radius * 0.4;
+
+        const relX = pos.x - obs.pos.x;
+        const relZ = pos.z - obs.pos.z;
+        const cosR = Math.cos(rot);
+        const sinR = Math.sin(rot);
+        const localX = relX * cosR - relZ * sinR;
+        const localZ = relX * sinR + relZ * cosR;
+
+        if (Math.abs(localX) <= halfX && Math.abs(localZ) <= halfZ) {
+          if (topY > maxElevation) {
+            maxElevation = topY;
+          }
+        }
+      } else {
+        const minX = obs.box.min.x - radius * 0.4;
+        const maxX = obs.box.max.x + radius * 0.4;
+        const minZ = obs.box.min.z - radius * 0.4;
+        const maxZ = obs.box.max.z + radius * 0.4;
+
+        if (pos.x >= minX && pos.x <= maxX && pos.z >= minZ && pos.z <= maxZ) {
+          if (topY > maxElevation) {
+            maxElevation = topY;
+          }
+        }
+      }
+    }
+
+    return maxElevation;
   }
 
   /**

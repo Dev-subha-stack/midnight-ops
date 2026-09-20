@@ -557,14 +557,13 @@ export class DestructionManager {
       }
     } else if (prop.type === 'explosive_barrel') {
       // Leaking fiery sparks when damaged
-      this.particles.emitMuzzleFlash(hp, hn);
+      this.particles.emitImpactSparks(hp, hn);
       if (healthPct <= 0) {
         this.detonateBarrel(prop);
         return true;
       }
     } else if (prop.type === 'propane_tank') {
       // High pressure gas flame flare
-      this.particles.emitMuzzleFlash(hp, hn);
       this.particles.emitImpactSparks(hp, hn);
       if (healthPct <= 0) {
         this.detonatePropaneTank(prop);

@@ -10,6 +10,7 @@ import {
   GameSettings,
   HitmarkerEvent,
   KillFeedItem,
+  LeanDirection,
   PlayerEliminatedInfo,
   PlayerStats,
   ScorestreakItem,
@@ -51,30 +52,18 @@ import {
   ShieldAlert,
   Headphones,
   Volume2,
+  Layers,
+  Cpu,
+  Activity,
+  ShieldCheck,
+  Check,
 } from 'lucide-react';
 import { soundManager } from './game/audio';
 import { DEFAULT_WEAPON_OPTICS, WEAPON_REGISTRY } from './game/weapons';
-import { isTouchDevice } from './utils/deviceDetection';
-import { MobileControls } from './components/MobileControls';
-import { MultiplayerModal } from './components/MultiplayerModal';
-import { MultiplayerManager } from './game/multiplayer/MultiplayerManager';
 
 export default function App() {
   const canvasContainerRef = useRef<HTMLDivElement | null>(null);
   const engineRef = useRef<GameEngine | null>(null);
-  const multiplayerManagerRef = useRef<MultiplayerManager>(new MultiplayerManager(isTouchDevice() ? 'mobile' : 'pc'));
-
-  // Device & Touch Controls Mode
-  const [isMobileDevice, setIsMobileDevice] = useState<boolean>(false);
-  const [isMultiplayerOpen, setIsMultiplayerOpen] = useState<boolean>(false);
-
-  useEffect(() => {
-    const hasTouch = isTouchDevice();
-    setIsMobileDevice(hasTouch);
-    if (multiplayerManagerRef.current) {
-      multiplayerManagerRef.current.platform = hasTouch ? 'mobile' : 'pc';
-    }
-  }, []);
 
   // Game Life Cycle States
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
@@ -164,6 +153,8 @@ export default function App() {
   const [playerPitch, setPlayerPitch] = useState<number>(0);
   const [uavActive, setUavActive] = useState<boolean>(false);
   const [battleRoyaleState, setBattleRoyaleState] = useState<BattleRoyaleState | null>(null);
+  const [leanState, setLeanState] = useState<LeanDirection>('none');
+  const [leanFactor, setLeanFactor] = useState<number>(0);
 
   // Training Mode Telemetry & Floating 3D Numbers
   const [trainingTelemetry, setTrainingTelemetry] = useState<TrainingTelemetryData>({
@@ -244,15 +235,6 @@ export default function App() {
 
     const engine = new GameEngine(canvasContainerRef.current, settings, gameMode);
     engineRef.current = engine;
-
-    if (multiplayerManagerRef.current) {
-      engine.multiplayerManager = multiplayerManagerRef.current;
-      multiplayerManagerRef.current.setSceneAndParticles(engine.scene, engine.particles);
-      multiplayerManagerRef.current.platform = isMobileDevice ? 'mobile' : 'pc';
-      if (engine.controller) {
-        engine.controller.multiplayerManager = multiplayerManagerRef.current;
-      }
-    }
 
     engine.onStatsUpdate = newStats => setStats(newStats);
     engine.onKillfeedEvent = item => setKillfeed(prev => [...prev, item]);
@@ -364,6 +346,8 @@ export default function App() {
         setScopeShadowOffsetY(engine.controller.scopeShadowOffsetY);
         setIsTacStance(engine.controller.isTacStance);
         setIsMounted(engine.controller.isMounted);
+        setLeanState(engine.controller.leanState);
+        setLeanFactor(engine.controller.currentLeanFactor);
       }
       frameId = requestAnimationFrame(syncHud);
     };
@@ -597,6 +581,9 @@ export default function App() {
           scopeShadowOffsetY={scopeShadowOffsetY}
           isTacStance={isTacStance}
           isMounted={isMounted}
+          leanState={leanState}
+          leanFactor={leanFactor}
+          onToggleLean={(dir) => engineRef.current?.controller.toggleLean(dir)}
           hitmarker={hitmarker}
           pickupNotice={pickupNotice}
           accolades={accolades}
@@ -649,53 +636,10 @@ export default function App() {
           onSelectWeapon={handleSelectWeapon}
           onClose={() => {
             setIsGunsmithOpen(false);
-            if (isPlaying && !isGameOver && !isMobileDevice) {
+            if (isPlaying && !isGameOver) {
               canvasContainerRef.current?.requestPointerLock();
             }
           }}
-        />
-      )}
-
-      {/* MULTIPLAYER / LAN LOBBY MODAL */}
-      {isMultiplayerOpen && (
-        <MultiplayerModal
-          multiplayerManager={multiplayerManagerRef.current}
-          onClose={() => setIsMultiplayerOpen(false)}
-          onStartMatch={(isHost, selectedMode) => {
-            setGameMode(selectedMode);
-            setIsMultiplayerOpen(false);
-            startMission();
-          }}
-        />
-      )}
-
-      {/* MOBILE TOUCH CONTROLS OVERLAY */}
-      {isPlaying && isMobileDevice && !isGameOver && !isPaused && !isGunsmithOpen && !isSettingsOpen && engineRef.current && (
-        <MobileControls
-          controller={engineRef.current.controller}
-          grenadeManager={engineRef.current.grenadeManager}
-          currentWeapon={currentWeapon}
-          ammoInMag={ammoInMag}
-          ammoReserve={ammoReserve}
-          grenadesCount={grenadesCount}
-          tacticalCount={tacticalCount}
-          tacticalType={tacticalType}
-          isAiming={isAiming}
-          isReloading={isReloading}
-          isHoldingBreath={isHoldingBreath}
-          isTacStance={isTacStance}
-          isMounted={isMounted}
-          laserActive={laserActive}
-          onSwitchWeapon={handleSelectWeapon}
-          onOpenGunsmith={() => setIsGunsmithOpen(true)}
-          onOpenSettings={() => setIsSettingsOpen(true)}
-          onOpenScoreboard={() => setIsScoreboardOpen(true)}
-          onPause={() => {
-            setIsPaused(true);
-            engineRef.current?.setPaused(true);
-          }}
-          onUseInhaler={() => engineRef.current?.useInhaler()}
-          onUseMedkit={() => engineRef.current?.useMedkit()}
         />
       )}
 
@@ -748,324 +692,533 @@ export default function App() {
         />
       )}
 
-      {/* HOMESCREEN - CLEAN CALL OF DUTY TACTICAL LOBBY */}
+      {/* HOMESCREEN - AAA TACTICAL MILITARY LOBBY OVERHAUL */}
       {!isPlaying && (
         <div
           id="start-screen"
-          className="absolute inset-0 z-40 flex flex-col justify-between bg-[#07090e] p-6 sm:p-10 text-slate-200 overflow-y-auto"
+          className="absolute inset-0 z-40 flex flex-col justify-between bg-[#070a11] p-4 sm:p-8 text-slate-200 overflow-y-auto"
           style={{
-            backgroundImage: 'radial-gradient(circle at 50% 10%, rgba(6, 182, 212, 0.08) 0%, rgba(15, 23, 42, 0.65) 50%, rgba(3, 7, 18, 0.98) 100%)',
+            backgroundImage: 'radial-gradient(circle at 50% 12%, rgba(6, 182, 212, 0.12) 0%, rgba(15, 23, 42, 0.75) 50%, rgba(2, 6, 23, 0.98) 100%)',
           }}
         >
-          {/* Subtle Ambient Scanlines */}
+          {/* Subtle Military Tactical Scanlines & Grid Overlay */}
           <div className="absolute inset-0 tactical-scanlines pointer-events-none opacity-20" />
+          <div
+            className="absolute inset-0 pointer-events-none opacity-5"
+            style={{
+              backgroundImage: 'linear-gradient(to right, #06b6d4 1px, transparent 1px), linear-gradient(to bottom, #06b6d4 1px, transparent 1px)',
+              backgroundSize: '48px 48px',
+            }}
+          />
 
-          {/* TOP GLOBAL COD NAVIGATION BAR */}
+          {/* TOP GLOBAL COMMAND BAR */}
           <header className="relative z-10 flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-slate-800/80">
             {/* Title & Brand */}
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/40 flex items-center justify-center text-cyan-400 font-mono font-black text-lg shadow-[0_0_15px_rgba(6,182,212,0.25)]">
-                FO
+              <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-cyan-500/20 to-slate-900 border border-cyan-500/50 flex items-center justify-center text-cyan-400 font-mono font-black text-xl shadow-[0_0_20px_rgba(6,182,212,0.3)]">
+                <Target className="w-6 h-6 text-cyan-400" />
               </div>
               <div className="flex flex-col text-left">
                 <div className="flex items-center gap-2">
-                  <h1 className="text-xl font-black font-mono tracking-tight text-white uppercase">
+                  <h1 className="text-xl font-black font-mono tracking-tight text-white uppercase flex items-center gap-1.5">
                     FRONTLINE OPS
                   </h1>
-                  <span className="text-[9px] bg-cyan-950 text-cyan-400 px-1.5 py-0.5 rounded border border-cyan-500/40 font-mono font-black tracking-widest uppercase">
-                    WARZONE
+                  <span className="text-[9px] bg-cyan-950/90 text-cyan-300 px-2 py-0.5 rounded border border-cyan-500/50 font-mono font-black tracking-widest uppercase">
+                    v2.4 RTX
                   </span>
                 </div>
                 <div className="flex items-center gap-2 text-[11px] font-mono text-slate-400">
                   <span className="text-emerald-400 font-bold flex items-center gap-1">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping inline-block" />
-                    128-TICK
+                    ONLINE // 128-TICK
                   </span>
+                  <span>•</span>
+                  <span className="text-cyan-400">BERMUDA SECTOR 7</span>
                   <span>•</span>
                   <span className="text-amber-400 font-bold">PRESTIGE 55</span>
                 </div>
               </div>
             </div>
 
-            {/* Horizontal COD Navigation Tabs */}
+            {/* Horizontal Global Navigation Tabs */}
             <nav className="flex items-center gap-2 font-mono text-xs">
               <button
-                className="px-4 py-2 rounded-lg bg-cyan-950/70 border border-cyan-500/80 text-cyan-300 font-black tracking-wider uppercase transition-all shadow-[0_0_10px_rgba(6,182,212,0.2)]"
+                className="px-4 py-2 rounded-lg bg-cyan-950/90 border border-cyan-500 text-cyan-300 font-black tracking-wider uppercase transition-all shadow-[0_0_15px_rgba(6,182,212,0.3)] flex items-center gap-1.5 cursor-pointer"
               >
-                PLAY
+                <Layers className="w-3.5 h-3.5 text-cyan-400" />
+                <span>DEPLOYMENT</span>
               </button>
-              <button
-                id="btn-nav-multiplayer"
-                onClick={() => setIsMultiplayerOpen(true)}
-                className="px-4 py-2 rounded-lg bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-500/70 hover:border-emerald-400 text-emerald-300 font-bold tracking-wider uppercase transition-all flex items-center gap-1.5 cursor-pointer shadow-[0_0_12px_rgba(16,185,129,0.2)]"
-              >
-                <Users className="w-3.5 h-3.5 text-emerald-400" />
-                <span>LAN MULTIPLAYER</span>
-              </button>
+
               <button
                 id="btn-nav-gunsmith"
                 onClick={() => setIsGunsmithOpen(true)}
-                className="px-4 py-2 rounded-lg bg-slate-900/80 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-slate-300 font-bold tracking-wider uppercase transition-all flex items-center gap-1.5 cursor-pointer"
+                className="px-4 py-2 rounded-lg bg-slate-900/80 hover:bg-slate-800 border border-slate-800 hover:border-cyan-500/60 text-slate-300 hover:text-white font-bold tracking-wider uppercase transition-all flex items-center gap-1.5 cursor-pointer"
               >
                 <Crosshair className="w-3.5 h-3.5 text-cyan-400" />
-                <span>WEAPONS</span>
+                <span>GUNSMITH [B]</span>
               </button>
+
+              <button
+                id="btn-nav-training"
+                onClick={() => {
+                  setGameMode('training');
+                  startMission();
+                }}
+                className="px-4 py-2 rounded-lg bg-slate-900/80 hover:bg-slate-800 border border-slate-800 hover:border-amber-500/60 text-slate-300 hover:text-amber-300 font-bold tracking-wider uppercase transition-all flex items-center gap-1.5 cursor-pointer"
+              >
+                <Award className="w-3.5 h-3.5 text-amber-400" />
+                <span>FIRING RANGE</span>
+              </button>
+
               <button
                 id="btn-nav-settings"
                 onClick={() => setIsSettingsOpen(true)}
-                className="px-4 py-2 rounded-lg bg-slate-900/80 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-slate-300 font-bold tracking-wider uppercase transition-all flex items-center gap-1.5 cursor-pointer"
+                className="px-4 py-2 rounded-lg bg-slate-900/80 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white font-bold tracking-wider uppercase transition-all flex items-center gap-1.5 cursor-pointer"
               >
                 <Sliders className="w-3.5 h-3.5 text-cyan-400" />
                 <span>SETTINGS</span>
               </button>
-              <button
-                id="btn-toggle-device"
-                onClick={() => setIsMobileDevice(prev => !prev)}
-                title="Toggle on-screen mobile touch controls overlay"
-                className={`px-3 py-2 rounded-lg border font-mono text-[11px] font-bold uppercase transition-all flex items-center gap-1.5 cursor-pointer ${
-                  isMobileDevice
-                    ? 'bg-amber-500/20 border-amber-500 text-amber-300 shadow-[0_0_10px_rgba(245,158,11,0.3)]'
-                    : 'bg-slate-900/80 border-slate-800 text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <span>{isMobileDevice ? '📱 MOBILE TOUCH ON' : '💻 PC MODE'}</span>
-              </button>
+
               <button
                 id="btn-test-audio"
                 onClick={() => {
                   soundManager.init();
                   soundManager.playGunshot(currentWeapon, false);
                 }}
-                title="Audition PUBG weapon sound dataset (M416/UMP/AWM/Pump/Deagle)"
+                title="Audition real-time firearm ballistic audio"
                 className="px-3.5 py-2 rounded-lg bg-slate-900/80 hover:bg-slate-800 border border-slate-800 hover:border-cyan-500/50 text-cyan-400 font-bold text-xs tracking-wider uppercase transition-all flex items-center gap-1.5 cursor-pointer"
               >
                 <Volume2 className="w-3.5 h-3.5 text-amber-400" />
-                <span>PUBG SFX</span>
+                <span>AUDITION SFX</span>
               </button>
             </nav>
 
             {/* Player Profile Dossier Card */}
-            <div className="flex items-center gap-3 bg-slate-900/80 px-3 py-1.5 rounded-xl border border-slate-800">
-              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-amber-500 to-red-600 flex items-center justify-center text-slate-950 font-black font-mono text-sm">
+            <div className="flex items-center gap-3 bg-slate-900/90 px-3.5 py-2 rounded-xl border border-slate-800 shadow-md">
+              <div className="relative w-9 h-9 rounded-lg bg-gradient-to-br from-amber-500 to-red-600 flex items-center justify-center text-slate-950 font-black font-mono text-sm shadow-md">
                 55
+                <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-slate-950" />
               </div>
               <div className="flex flex-col text-left">
-                <span className="text-xs font-black font-mono text-white leading-tight">GHOST [TF-141]</span>
-                <span className="text-[10px] font-mono text-amber-400 font-bold">TASK FORCE OPERATIVE</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-black font-mono text-white leading-tight">GHOST [TF-141]</span>
+                  <span className="text-[9px] font-mono px-1 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold">PRESTIGE</span>
+                </div>
+                <div className="flex items-center gap-2 text-[10px] font-mono text-slate-400">
+                  <span>K/D: <b className="text-cyan-300">2.85</b></span>
+                  <span>•</span>
+                  <span>WIN: <b className="text-emerald-400">74%</b></span>
+                </div>
               </div>
             </div>
           </header>
 
-          {/* MAIN COD STAGE: 2-COLUMN WIDE CLEAN PRESENTATION */}
-          <main className="relative z-10 w-full max-w-6xl mx-auto my-auto py-6 grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-            {/* LEFT COLUMN: PLAYLISTS & HIGH-IMPACT DEPLOY (7 Cols) */}
+          {/* MAIN OPERATIONAL DECK: 2-COLUMN BALANCED TACTICAL HUB */}
+          <main className="relative z-10 w-full max-w-7xl mx-auto my-auto py-5 grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            {/* LEFT COLUMN: MISSION PLAYLISTS & HIGH-IMPACT DEPLOY (7 Cols) */}
             <div className="lg:col-span-7 flex flex-col gap-4 text-left">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-mono font-bold uppercase tracking-widest text-cyan-400 flex items-center gap-1.5">
-                  <Target className="w-4 h-4" /> SELECT OPERATIONAL PLAYLIST
+              <div className="flex items-center justify-between border-b border-slate-800/60 pb-2">
+                <span className="text-xs font-mono font-black uppercase tracking-widest text-cyan-400 flex items-center gap-2">
+                  <Activity className="w-4 h-4 text-cyan-400" /> OPERATIONAL MISSION THEATERS
                 </span>
-                <span className="text-[10px] font-mono text-slate-500">4 MODES AVAILABLE</span>
+                <span className="text-[10px] font-mono text-slate-400 bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
+                  ACTIVE MODE: <b className="text-white uppercase">{gameMode}</b>
+                </span>
               </div>
 
-              {/* Clean Playlist Cards */}
+              {/* Tactical Playlist Cards */}
               <div className="flex flex-col gap-2.5">
                 {[
-                  { id: 'tdm', title: 'Team Deathmatch', badge: '5v5 TACTICAL', desc: 'Squad elimination. Allies vs Axis with designated spawn points.', icon: Users },
-                  { id: 'battleroyale', title: 'Battle Royale (Bermuda)', badge: 'FREE FIRE RULES', desc: 'New Bermuda Island map. Free Fire rules: EP auto-heal, Inhalers [H], Danger Zones, Glider descent, and Booyah victory.', icon: ShieldAlert },
-                  { id: 'ffa', title: 'Free For All', badge: 'SOLO COMBAT', desc: 'Every operative for themselves. Eliminate all hostiles on sight.', icon: Flame },
-                  { id: 'gungame', title: 'Gun Game Escalation', badge: 'WEAPON LADDER', desc: 'Advance through weapon tiers with each elimination.', icon: Award },
-                  { id: 'training', title: 'Ballistic Range', badge: 'TELEMETRY & DPS', desc: 'Dynamic moving steel targets with real-time ballistic accuracy metrics.', icon: Target },
-                ].map(m => (
-                  <button
-                    key={m.id}
-                    onClick={() => setGameMode(m.id as GameMode)}
-                    className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer flex items-center justify-between gap-4 ${
-                      gameMode === m.id
-                        ? 'bg-gradient-to-r from-cyan-950/80 to-slate-900/90 border-cyan-500 text-white shadow-[0_0_20px_rgba(6,182,212,0.25)]'
-                        : 'bg-slate-900/60 hover:bg-slate-900/90 border-slate-800/90 text-slate-300 hover:border-slate-700'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3.5">
-                      <div className={`p-2 rounded-lg ${gameMode === m.id ? 'bg-cyan-500 text-slate-950' : 'bg-slate-800 text-slate-400'}`}>
-                        <m.icon className="w-4 h-4" />
-                      </div>
-                      <div className="flex flex-col">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-black font-mono uppercase text-white">{m.title}</span>
-                          <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-cyan-300 border border-slate-700 font-bold">
-                            {m.badge}
+                  {
+                    id: 'tdm',
+                    title: 'Team Deathmatch',
+                    badge: '5v5 TACTICAL SQUAD',
+                    desc: 'Tactical team combat on Cargo Terminal. Allies vs Axis with dynamic squad respawn mechanics.',
+                    icon: Users,
+                    color: 'from-cyan-950/80 to-slate-900/90',
+                  },
+                  {
+                    id: 'battleroyale',
+                    title: 'Battle Royale (Bermuda Island)',
+                    badge: 'FREE FIRE RULES // BOOYAH',
+                    desc: '220x220m island drop. Inhalers [H], Gliders, Launch Pads, dynamic Danger Zones, and Booyah victory.',
+                    icon: ShieldAlert,
+                    color: 'from-amber-950/70 to-slate-900/90',
+                  },
+                  {
+                    id: 'ffa',
+                    title: 'Free For All',
+                    badge: 'SOLO OPERATIVE',
+                    desc: 'Every operative for themselves. High-intensity solo survival with instant respawn sequence.',
+                    icon: Flame,
+                    color: 'from-rose-950/70 to-slate-900/90',
+                  },
+                  {
+                    id: 'gungame',
+                    title: 'Gun Game Escalation',
+                    badge: 'WEAPON LADDER',
+                    desc: 'Advance across 10 weapon tiers with each elimination. Prove master mastery of all weapon classes.',
+                    icon: Award,
+                    color: 'from-violet-950/70 to-slate-900/90',
+                  },
+                  {
+                    id: 'training',
+                    title: 'Ballistic Range & Firing Drills',
+                    badge: 'REAL-TIME TELEMETRY & DPS',
+                    desc: 'Dynamic moving steel targets with distance indicators, muzzle velocity, bullet drop, and real-time accuracy telemetry.',
+                    icon: Target,
+                    color: 'from-emerald-950/70 to-slate-900/90',
+                  },
+                ].map(m => {
+                  const isSelected = gameMode === m.id;
+                  return (
+                    <button
+                      key={m.id}
+                      onClick={() => setGameMode(m.id as GameMode)}
+                      className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer flex items-center justify-between gap-4 group ${
+                        isSelected
+                          ? `bg-gradient-to-r ${m.color} border-cyan-400 text-white shadow-[0_0_20px_rgba(6,182,212,0.25)]`
+                          : 'bg-slate-900/60 hover:bg-slate-900/90 border-slate-800/80 text-slate-300 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3.5">
+                        <div
+                          className={`p-2.5 rounded-xl transition-all ${
+                            isSelected
+                              ? 'bg-cyan-500 text-slate-950 shadow-[0_0_12px_rgba(6,182,212,0.6)]'
+                              : 'bg-slate-800 text-slate-400 group-hover:text-slate-200'
+                          }`}
+                        >
+                          <m.icon className="w-5 h-5" />
+                        </div>
+                        <div className="flex flex-col">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-black font-mono uppercase text-white tracking-wide">
+                              {m.title}
+                            </span>
+                            <span className="text-[9px] font-mono px-2 py-0.5 rounded bg-slate-950/80 text-cyan-300 border border-slate-700 font-bold">
+                              {m.badge}
+                            </span>
+                          </div>
+                          <span className="text-xs text-slate-400 font-sans mt-0.5 leading-relaxed">
+                            {m.desc}
                           </span>
                         </div>
-                        <span className="text-xs text-slate-400 font-sans mt-0.5">{m.desc}</span>
                       </div>
-                    </div>
 
-                    {gameMode === m.id && (
-                      <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 shadow-[0_0_8px_#38bdf8] shrink-0" />
-                    )}
-                  </button>
-                ))}
+                      <div className="flex items-center gap-2 shrink-0">
+                        {isSelected ? (
+                          <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-cyan-500/20 border border-cyan-400/60 text-cyan-300 font-mono text-[10px] font-bold">
+                            <Check className="w-3.5 h-3.5" />
+                            <span>READY</span>
+                          </div>
+                        ) : (
+                          <ChevronRight className="w-4 h-4 text-slate-600 group-hover:text-slate-400 transition-colors" />
+                        )}
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
 
-              {/* High-Impact Deploy Action Button */}
-              <div className="pt-2 flex flex-col sm:flex-row gap-2.5">
+              {/* Primary High-Impact DEPLOY ACTION CONSOLE */}
+              <div className="pt-2 flex flex-col gap-2">
                 <button
                   id="btn-start-game"
                   onClick={startMission}
-                  className="flex-1 py-4 px-6 bg-gradient-to-r from-cyan-500 via-sky-400 to-teal-400 hover:from-cyan-400 hover:to-teal-300 text-slate-950 font-black text-base font-mono uppercase tracking-widest rounded-xl transition-all shadow-[0_0_30px_rgba(6,182,212,0.4)] hover:shadow-[0_0_40px_rgba(6,182,212,0.6)] flex items-center justify-center gap-3 cursor-pointer hover:scale-[1.01] active:scale-[0.99]"
+                  className="w-full py-4 px-6 bg-gradient-to-r from-cyan-500 via-sky-400 to-teal-400 hover:from-cyan-400 hover:to-teal-300 text-slate-950 font-black text-base font-mono uppercase tracking-widest rounded-xl transition-all shadow-[0_0_35px_rgba(6,182,212,0.45)] hover:shadow-[0_0_50px_rgba(6,182,212,0.65)] flex items-center justify-center gap-3 cursor-pointer hover:scale-[1.01] active:scale-[0.99]"
                 >
                   <Play className="w-5 h-5 fill-slate-950" />
-                  <span>DEPLOY // SOLO</span>
+                  <span>DEPLOY NOW // QUICK PLAY</span>
+                  <span className="text-xs font-bold text-slate-950 px-2 py-0.5 rounded bg-cyan-200/80 font-mono">
+                    [SPACE / ENTER]
+                  </span>
                 </button>
-                <button
-                  id="btn-open-multiplayer"
-                  onClick={() => setIsMultiplayerOpen(true)}
-                  className="py-4 px-6 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-base font-mono uppercase tracking-widest rounded-xl transition-all shadow-[0_0_25px_rgba(16,185,129,0.35)] hover:shadow-[0_0_35px_rgba(16,185,129,0.5)] flex items-center justify-center gap-2.5 cursor-pointer hover:scale-[1.01] active:scale-[0.99]"
-                >
-                  <Users className="w-5 h-5" />
-                  <span>HOST / JOIN LAN</span>
-                </button>
+
+                <div className="flex items-center justify-between text-[11px] font-mono text-slate-400 px-1">
+                  <span>TACTICAL ENGINE: <b className="text-emerald-400">SUB-STEPPED KINEMATICS</b></span>
+                  <span>SPECTATOR DELAY: <b className="text-cyan-300">0.00 MS</b></span>
+                  <span>CONTAINER COLLISION: <b className="text-emerald-400">HARDENED</b></span>
+                </div>
               </div>
             </div>
 
-            {/* RIGHT COLUMN: ACTIVE LOADOUT & ATMOSPHERE STATION (5 Cols) */}
+            {/* RIGHT COLUMN: ACTIVE LOADOUT, BOT TUNING & ATMOSPHERE (5 Cols) */}
             <div className="lg:col-span-5 flex flex-col gap-4 text-left">
-              {/* Weapon Showcase Card */}
-              <div className="bg-slate-900/70 p-4 rounded-xl border border-slate-800/90 flex flex-col gap-3">
+              {/* WEAPON LOADOUT CARD WITH QUICK SWITCHER */}
+              <div className="bg-slate-900/80 p-4 rounded-xl border border-slate-800/90 shadow-md flex flex-col gap-3">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-mono font-bold uppercase text-cyan-400 flex items-center gap-1.5">
-                    <Crosshair className="w-3.5 h-3.5" /> PRIMARY WEAPON
+                    <Crosshair className="w-3.5 h-3.5" /> PRIMARY WEAPON SPEC
                   </span>
                   <button
                     onClick={() => setIsGunsmithOpen(true)}
-                    className="text-[10px] font-mono text-cyan-400 hover:underline cursor-pointer font-bold"
+                    className="text-[10px] font-mono text-cyan-400 hover:underline cursor-pointer font-bold flex items-center gap-1"
                   >
-                    GUNSMITH [B] →
+                    <span>CUSTOMIZE GUNSMITH [B]</span>
+                    <ChevronRight className="w-3 h-3" />
                   </button>
                 </div>
 
-                <div className="bg-slate-950/80 p-3.5 rounded-lg border border-slate-800 flex flex-col gap-2">
+                {/* Quick Weapon Selector Carousel */}
+                <div className="grid grid-cols-4 sm:grid-cols-8 gap-1.5">
+                  {(['m4', 'ak47', 'scar', 'mp5', 'vector', 'shotgun', 'sniper', 'deagle'] as WeaponType[]).map(wId => {
+                    const cfg = WEAPON_REGISTRY[wId];
+                    const isCur = currentWeapon === wId;
+                    return (
+                      <button
+                        key={wId}
+                        onClick={() => {
+                          setCurrentWeapon(wId);
+                          soundManager.init();
+                          soundManager.playGunshot(wId, false);
+                        }}
+                        className={`p-1.5 rounded-lg border text-center transition-all cursor-pointer font-mono ${
+                          isCur
+                            ? 'bg-cyan-950 border-cyan-400 text-cyan-300 shadow-sm font-bold'
+                            : 'bg-slate-950/60 border-slate-800/80 text-slate-400 hover:text-slate-200 hover:border-slate-700'
+                        }`}
+                      >
+                        <div className="text-[10px] font-bold uppercase">{wId === 'sniper' ? 'AX-50' : wId === 'shotgun' ? 'M870' : wId.toUpperCase()}</div>
+                        <div className="text-[8px] opacity-75 uppercase">{cfg.category}</div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Active Weapon Telemetry Box */}
+                <div className="bg-slate-950/90 p-3.5 rounded-xl border border-slate-800 flex flex-col gap-2.5">
                   <div className="flex items-center justify-between">
-                    <span className="text-base font-black font-mono text-white uppercase">{activeWeaponCfg.name}</span>
+                    <div>
+                      <h3 className="text-base font-black font-mono text-white uppercase">{activeWeaponCfg.name}</h3>
+                      <span className="text-[10px] font-mono text-cyan-400 font-bold uppercase tracking-wider">{activeWeaponCfg.category} CLASS</span>
+                    </div>
                     <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-amber-400 font-bold">
-                      {currentCamo}
+                      {currentCamo} CAMO
                     </span>
                   </div>
 
-                  {/* Weapon Stats Bars */}
-                  <div className="grid grid-cols-2 gap-2 text-[10px] font-mono text-slate-400 pt-1 border-t border-slate-900">
-                    <div>DAMAGE: <b className="text-cyan-300">{activeWeaponCfg.damage}</b></div>
-                    <div>FIRE RATE: <b className="text-cyan-300">{activeWeaponCfg.fireRateRpm} RPM</b></div>
-                    <div>MAGAZINE: <b className="text-cyan-300">{activeWeaponCfg.magSize} RDS</b></div>
-                    <div>CLASS: <b className="text-cyan-300 uppercase">{activeWeaponCfg.category}</b></div>
+                  {/* Weapon Real-Time Ballistic Progress Bars */}
+                  <div className="flex flex-col gap-1.5 pt-1 border-t border-slate-900 text-[10px] font-mono">
+                    <div>
+                      <div className="flex justify-between text-slate-400 mb-0.5">
+                        <span>DAMAGE</span>
+                        <b className="text-cyan-300">{activeWeaponCfg.damage} HP</b>
+                      </div>
+                      <div className="w-full h-1.5 bg-slate-900 rounded-full overflow-hidden">
+                        <div className="h-full bg-cyan-400 rounded-full" style={{ width: `${Math.min(100, (activeWeaponCfg.damage / 140) * 100)}%` }} />
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="flex justify-between text-slate-400 mb-0.5">
+                        <span>FIRE RATE</span>
+                        <b className="text-cyan-300">{activeWeaponCfg.fireRateRpm} RPM</b>
+                      </div>
+                      <div className="w-full h-1.5 bg-slate-900 rounded-full overflow-hidden">
+                        <div className="h-full bg-cyan-400 rounded-full" style={{ width: `${Math.min(100, (activeWeaponCfg.fireRateRpm / 950) * 100)}%` }} />
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="flex justify-between text-slate-400 mb-0.5">
+                        <span>EFFECTIVE RANGE</span>
+                        <b className="text-cyan-300">{activeWeaponCfg.range} METERS</b>
+                      </div>
+                      <div className="w-full h-1.5 bg-slate-900 rounded-full overflow-hidden">
+                        <div className="h-full bg-cyan-400 rounded-full" style={{ width: `${Math.min(100, (activeWeaponCfg.range / 220) * 100)}%` }} />
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="flex justify-between text-slate-400 mb-0.5">
+                        <span>MAGAZINE CAPACITY</span>
+                        <b className="text-cyan-300">{activeWeaponCfg.magSize} ROUNDS</b>
+                      </div>
+                      <div className="w-full h-1.5 bg-slate-900 rounded-full overflow-hidden">
+                        <div className="h-full bg-cyan-400 rounded-full" style={{ width: `${Math.min(100, (activeWeaponCfg.magSize / 35) * 100)}%` }} />
+                      </div>
+                    </div>
                   </div>
                 </div>
 
-                {/* Tactical Utility Info */}
+                {/* Tactical Utility Info Pills */}
                 <div className="grid grid-cols-2 gap-2 text-xs font-mono">
-                  <div className="p-2 rounded bg-slate-950/70 border border-slate-800 text-slate-300 flex items-center gap-2">
+                  <div className="p-2 rounded-lg bg-slate-950/80 border border-slate-800 text-slate-300 flex items-center gap-2">
                     <Bomb className="w-3.5 h-3.5 text-amber-400" />
                     <span>[G] Frag (×2)</span>
                   </div>
-                  <div className="p-2 rounded bg-slate-950/70 border border-slate-800 text-slate-300 flex items-center gap-2">
+                  <div className="p-2 rounded-lg bg-slate-950/80 border border-slate-800 text-slate-300 flex items-center gap-2">
                     <Radio className="w-3.5 h-3.5 text-cyan-400" />
                     <span>[Q] Tactical (×2)</span>
                   </div>
                 </div>
               </div>
 
-              {/* Graphics Engine Mode Selector */}
-              <div className="bg-slate-900/70 p-4 rounded-xl border border-slate-800/90 flex flex-col gap-2.5">
+              {/* BOT MATCH TUNING HUB */}
+              <div className="bg-slate-900/80 p-4 rounded-xl border border-slate-800/90 shadow-md flex flex-col gap-2.5">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-mono font-bold uppercase text-cyan-400 flex items-center gap-1.5">
-                    <Sparkles className="w-3.5 h-3.5" /> GRAPHICS ENGINE MODE
+                    <Users className="w-3.5 h-3.5" /> AI OPERATIVE SQUAD TUNING
                   </span>
-                  <span className={`text-[9px] font-mono font-bold px-1.5 py-0.2 rounded border ${
-                    (settings.graphicsMode || 'standard') === 'extreme'
-                      ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40 animate-pulse'
-                      : 'bg-cyan-500/10 text-cyan-400 border-cyan-500/30'
-                  }`}>
-                    {(settings.graphicsMode || 'standard') === 'extreme' ? '⚡ RTX ACTIVE' : (settings.graphicsMode || 'standard').toUpperCase()}
-                  </span>
+                  <span className="text-[10px] font-mono text-slate-400">{settings.botCount} TOTAL TARGETS</span>
                 </div>
 
-                <div className="grid grid-cols-3 gap-1.5">
-                  {[
-                    { id: 'smooth', label: 'Smooth', sub: 'High FPS' },
-                    { id: 'standard', label: 'Standard', sub: 'Default AAA' },
-                    { id: 'extreme', label: 'Extreme', sub: 'RTX Ray-Trace' },
-                  ].map(g => (
-                    <button
-                      key={g.id}
-                      onClick={() => handleSelectGraphicsMode(g.id as GraphicsMode)}
-                      className={`p-2 rounded-lg border flex flex-col items-center justify-center gap-0.5 transition-all cursor-pointer ${
-                        (settings.graphicsMode || 'standard') === g.id
-                          ? 'bg-cyan-950/80 border-cyan-400 text-cyan-300 shadow-[0_0_10px_rgba(6,182,212,0.3)]'
-                          : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:text-slate-200'
-                      }`}
-                    >
-                      <span className="text-[10px] font-mono font-bold uppercase">{g.label}</span>
-                      <span className="text-[8px] opacity-75 font-mono">{g.sub}</span>
-                    </button>
-                  ))}
+                {/* Bot Count Selector */}
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] font-mono text-slate-400 w-12">COUNT:</span>
+                  <div className="grid grid-cols-5 gap-1 flex-1">
+                    {[2, 4, 6, 8, 10].map(cnt => (
+                      <button
+                        key={cnt}
+                        onClick={() => setSettings(s => ({ ...s, botCount: cnt }))}
+                        className={`py-1 rounded border text-center font-mono text-[10px] font-bold transition-all cursor-pointer ${
+                          settings.botCount === cnt
+                            ? 'bg-cyan-950 border-cyan-400 text-cyan-300 shadow-sm'
+                            : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        {cnt} AI
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Bot Difficulty Selector */}
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] font-mono text-slate-400 w-12">LEVEL:</span>
+                  <div className="grid grid-cols-4 gap-1 flex-1">
+                    {(['recruit', 'regular', 'hardened', 'veteran'] as const).map(diff => (
+                      <button
+                        key={diff}
+                        onClick={() => setSettings(s => ({ ...s, botDifficulty: diff }))}
+                        className={`py-1 rounded border text-center font-mono text-[10px] font-bold transition-all uppercase cursor-pointer ${
+                          settings.botDifficulty === diff
+                            ? 'bg-cyan-950 border-cyan-400 text-cyan-300 shadow-sm'
+                            : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        {diff}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
 
-              {/* Atmosphere & Weather Selector */}
-              <div className="bg-slate-900/70 p-4 rounded-xl border border-slate-800/90 flex flex-col gap-2.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-mono font-bold uppercase text-cyan-400 flex items-center gap-1.5">
-                    <CloudSunRain className="w-3.5 h-3.5" /> ATMOSPHERE PRESET
-                  </span>
-                  <span className="text-[10px] font-mono text-slate-500">[T] IN-GAME</span>
+              {/* Graphics Engine & Atmosphere Presets */}
+              <div className="grid grid-cols-2 gap-3">
+                {/* Graphics Mode */}
+                <div className="bg-slate-900/80 p-3.5 rounded-xl border border-slate-800/90 flex flex-col gap-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-mono font-bold uppercase text-cyan-400 flex items-center gap-1">
+                      <Sparkles className="w-3 h-3" /> GRAPHICS
+                    </span>
+                    <span className="text-[9px] font-mono text-emerald-400 font-bold uppercase">
+                      {(settings.graphicsMode || 'standard') === 'extreme' ? 'RTX' : (settings.graphicsMode || 'standard')}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-1">
+                    {[
+                      { id: 'smooth', label: '144 FPS' },
+                      { id: 'standard', label: 'STD' },
+                      { id: 'extreme', label: 'RTX' },
+                    ].map(g => (
+                      <button
+                        key={g.id}
+                        onClick={() => handleSelectGraphicsMode(g.id as GraphicsMode)}
+                        className={`py-1.5 rounded border text-center font-mono text-[9px] font-bold transition-all cursor-pointer ${
+                          (settings.graphicsMode || 'standard') === g.id
+                            ? 'bg-cyan-950 border-cyan-400 text-cyan-300 shadow-sm'
+                            : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        {g.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
-                <div className="grid grid-cols-3 gap-1.5">
-                  {[
-                    { id: 'clear_day', label: 'Day (Noon)', icon: Sun },
-                    { id: 'golden_sunset', label: 'Evening', icon: Sunset },
-                    { id: 'midnight_fog', label: 'Night', icon: Moon },
-                  ].map(w => (
-                    <button
-                      key={w.id}
-                      onClick={() => handleSelectWeather(w.id as WeatherType)}
-                      className={`p-2.5 rounded border flex flex-col items-center gap-1.5 transition-all cursor-pointer ${
-                        settings.weatherPreset === w.id
-                          ? 'bg-cyan-950/80 border-cyan-500 text-cyan-300 shadow-sm'
-                          : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:text-slate-200'
-                      }`}
-                    >
-                      <w.icon className="w-4 h-4" />
-                      <span className="text-[10px] font-mono font-bold uppercase">{w.label}</span>
-                    </button>
-                  ))}
+                {/* Atmosphere Preset */}
+                <div className="bg-slate-900/80 p-3.5 rounded-xl border border-slate-800/90 flex flex-col gap-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-mono font-bold uppercase text-cyan-400 flex items-center gap-1">
+                      <CloudSunRain className="w-3 h-3" /> ATMOSPHERE
+                    </span>
+                    <span className="text-[9px] font-mono text-slate-500">[T] KEY</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-1">
+                    {[
+                      { id: 'clear_day', label: 'DAY', icon: Sun },
+                      { id: 'golden_sunset', label: 'DUSK', icon: Sunset },
+                      { id: 'midnight_fog', label: 'NIGHT', icon: Moon },
+                    ].map(w => (
+                      <button
+                        key={w.id}
+                        onClick={() => handleSelectWeather(w.id as WeatherType)}
+                        className={`py-1.5 rounded border flex flex-col items-center justify-center gap-0.5 font-mono text-[9px] font-bold transition-all cursor-pointer ${
+                          settings.weatherPreset === w.id
+                            ? 'bg-cyan-950 border-cyan-400 text-cyan-300 shadow-sm'
+                            : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        <w.icon className="w-3 h-3" />
+                        <span>{w.label}</span>
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
-
-              {/* Session Telemetry Brief */}
-              <div className="flex items-center justify-between text-[10.5px] font-mono text-slate-400 bg-slate-900/50 px-3 py-2 rounded-lg border border-slate-800/80">
-                <span>BOTS: <b className="text-cyan-300">{settings.botCount} AI</b></span>
-                <span>DIFFICULTY: <b className="text-cyan-300 uppercase">{settings.botDifficulty}</b></span>
-                <span>AUDIO: <b className="text-emerald-400">3D HRTF</b></span>
               </div>
             </div>
           </main>
 
           {/* BOTTOM TACTICAL KEYBINDINGS STRIP */}
           <footer className="relative z-10 pt-3 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-3 text-[11px] font-mono text-slate-400">
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-              <span><kbd className="text-cyan-400 font-bold">WASD</kbd> Move</span>
-              <span><kbd className="text-cyan-400 font-bold">R-Click</kbd> ADS</span>
-              <span><kbd className="text-cyan-400 font-bold">R</kbd> Reload</span>
-              <span><kbd className="text-cyan-400 font-bold">G</kbd> Frag</span>
-              <span><kbd className="text-cyan-400 font-bold">Q</kbd> Tactical</span>
-              <span><kbd className="text-cyan-400 font-bold">F</kbd> Laser</span>
-              <span><kbd className="text-cyan-400 font-bold">V</kbd> Melee</span>
-              <span><kbd className="text-cyan-400 font-bold">TAB</kbd> Score</span>
-              <span><kbd className="text-cyan-400 font-bold">ESC</kbd> Pause</span>
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-1">
+              <span className="flex items-center gap-1">
+                <span className="text-slate-500 font-bold">MOVE:</span>
+                <kbd className="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700 text-cyan-400 font-bold">WASD</kbd>
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="text-slate-500 font-bold">SPRINT:</span>
+                <kbd className="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700 text-cyan-400 font-bold">SHIFT (×2 TAC)</kbd>
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="text-slate-500 font-bold">SLIDE / CROUCH:</span>
+                <kbd className="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700 text-cyan-400 font-bold">C / CTRL</kbd>
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="text-slate-500 font-bold">AIM:</span>
+                <kbd className="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700 text-cyan-400 font-bold">R-CLICK</kbd>
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="text-slate-500 font-bold">FIRE:</span>
+                <kbd className="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700 text-cyan-400 font-bold">L-CLICK</kbd>
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="text-slate-500 font-bold">RELOAD:</span>
+                <kbd className="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700 text-cyan-400 font-bold">R</kbd>
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="text-slate-500 font-bold">MELEE:</span>
+                <kbd className="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700 text-cyan-400 font-bold">V</kbd>
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="text-slate-500 font-bold">GUNSMITH:</span>
+                <kbd className="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700 text-cyan-400 font-bold">B</kbd>
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="text-slate-500 font-bold">LEAN:</span>
+                <kbd className="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700 text-cyan-400 font-bold">&lt; / &gt;</kbd>
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="text-slate-500 font-bold">PAUSE:</span>
+                <kbd className="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700 text-cyan-400 font-bold">ESC</kbd>
+              </span>
             </div>
 
-            <span className="text-slate-600 font-bold">FRONTLINE OPS // ENGINE 2.0</span>
+            <span className="text-slate-500 font-bold">
+              FRONTLINE OPS // SUB-STEPPED RIGID PHYSICS // BUILD 2026.9
+            </span>
           </footer>
         </div>
       )}

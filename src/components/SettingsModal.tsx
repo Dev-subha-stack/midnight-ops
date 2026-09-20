@@ -1,6 +1,6 @@
 import React from 'react';
 import { GameSettings } from '../types';
-import { Sliders, X, Crosshair, Cpu, Cloud, Volume2, Sparkles } from 'lucide-react';
+import { Sliders, X, Crosshair, Cpu, Cloud, Volume2, Sparkles, Compass, Circle, Square } from 'lucide-react';
 import { soundManager } from '../game/audio';
 
 interface SettingsModalProps {
@@ -110,6 +110,91 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 onChange={e => handleChange('fieldOfView', parseInt(e.target.value))}
                 className="w-full accent-cyan-400 cursor-pointer h-1.5 bg-slate-800 rounded-lg"
               />
+            </div>
+
+            {/* PUBG / BGMI Peek & Lean Mode */}
+            <div className="flex flex-col gap-1.5 pt-2 border-t border-slate-800/80">
+              <div className="flex justify-between items-center text-xs font-medium">
+                <span className="text-slate-300">PUBG / BGMI Lean Mode</span>
+                <span className="font-mono text-cyan-400 font-bold uppercase text-[10px]">
+                  {current.leanMode === 'hold' ? 'HOLD TO PEEK' : 'TAP TO TOGGLE'}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  { id: 'toggle', label: 'Tap to Toggle (< / >)' },
+                  { id: 'hold', label: 'Hold to Peek (< / >)' },
+                ].map(m => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => handleChange('leanMode', m.id)}
+                    className={`py-1.5 px-2 rounded-lg text-[10px] font-bold uppercase transition-all border cursor-pointer font-mono text-center ${
+                      (current.leanMode || 'toggle') === m.id
+                        ? 'bg-cyan-950/70 border-cyan-400 text-cyan-300 shadow-[0_0_8px_rgba(6,182,212,0.3)]'
+                        : 'bg-slate-900/80 border-slate-800 text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+              <span className="text-[10px] font-mono text-slate-500">
+                Hotkeys: &lt; (or Comma) to Lean Left, &gt; (or Period) to Lean Right. Firing supported while leaning.
+              </span>
+            </div>
+
+            {/* Tactical Radar / Minimap Display Style */}
+            <div className="flex flex-col gap-1.5 pt-2 border-t border-slate-800/80">
+              <div className="flex justify-between items-center text-xs font-medium">
+                <div className="flex items-center gap-1.5">
+                  <Compass className="w-3.5 h-3.5 text-cyan-400" />
+                  <span className="text-slate-300">Tactical Radar (Minimap) Style</span>
+                </div>
+                <span className="font-mono text-cyan-400 font-bold uppercase text-[10px]">
+                  {(current.minimapShape || 'circular') === 'square' ? 'WARZONE SQUARE' : 'CIRCULAR 360°'}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  {
+                    id: 'circular',
+                    label: 'Circular 360°',
+                    desc: 'Classic Radial Radar',
+                    icon: Circle,
+                  },
+                  {
+                    id: 'square',
+                    label: 'Square Grid',
+                    desc: 'Warzone / MW Corner View',
+                    icon: Square,
+                  },
+                ].map(style => {
+                  const Icon = style.icon;
+                  const isSelected = (current.minimapShape || 'circular') === style.id;
+                  return (
+                    <button
+                      key={style.id}
+                      type="button"
+                      onClick={() => handleChange('minimapShape', style.id)}
+                      className={`p-2 rounded-lg text-left transition-all border cursor-pointer font-mono flex items-center gap-2.5 ${
+                        isSelected
+                          ? 'bg-cyan-950/70 border-cyan-400 text-cyan-300 shadow-[0_0_10px_rgba(6,182,212,0.3)]'
+                          : 'bg-slate-900/80 border-slate-800 text-slate-400 hover:text-white hover:border-slate-700'
+                      }`}
+                    >
+                      <Icon className={`w-4 h-4 flex-shrink-0 ${isSelected ? 'text-cyan-400' : 'text-slate-500'}`} />
+                      <div className="flex flex-col">
+                        <span className="text-[11px] font-bold uppercase">{style.label}</span>
+                        <span className="text-[9px] opacity-75">{style.desc}</span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+              <span className="text-[10px] font-mono text-slate-500">
+                Square radar provides 25% expanded corner peripheral vision; Circular provides pure 360° compass bearings.
+              </span>
             </div>
           </div>
 

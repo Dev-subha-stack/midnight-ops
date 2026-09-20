@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { GameMode, GameSettings, HitmarkerEvent, OpticType, ReticleColor, ReticleStyle, TacticalType, WeaponCamo, WeaponType } from '../types';
+import { GameMode, GameSettings, HitmarkerEvent, LeanDirection, OpticType, ReticleColor, ReticleStyle, TacticalType, WeaponCamo, WeaponType } from '../types';
 import { soundManager } from './audio';
 import { ModelFactory } from './models';
 import { ParticleSystem } from './particles';
@@ -18,9 +18,12 @@ export class FPSController {
   public botManager: BotManager | null = null;
   public grenadeManager: GrenadeManager | null = null;
   public trainingManager: TrainingManager | null = null;
-  public multiplayerManager: any = null;
   public gameMode: GameMode = 'tdm';
   public playerShadowMesh: THREE.Group | null = null;
+  private shadowLocomotionPhase: number = 0;
+  private shadowRecoilKick: number = 0;
+  private shadowLandingImpact: number = 0;
+  private wasGroundedLastFrame: boolean = true;
   public settings: GameSettings;
 
   // Player State
@@ -36,6 +39,13 @@ export class FPSController {
   public isMantling: boolean = false;
   public isMounted: boolean = false;
   public isTacStance: boolean = false;
+  // Leaning Feature (PUBG / BGMI style: Peek Left [<] & Peek Right [>])
+  public leanState: LeanDirection = 'none';
+  public currentLeanFactor: number = 0; // -1 (full left) to +1 (full right)
+  public targetLeanFactor: number = 0;
+  public currentLeanOffset: THREE.Vector3 = new THREE.Vector3();
+  private leanKeyPressTime: number = 0;
+  private activeLeanKey: 'left' | 'right' | null = null;
   public isAiming: boolean = false;
   public isReloading: boolean = false;
   public isShooting: boolean = false;
@@ -45,14 +55,20 @@ export class FPSController {
   public equippedOptics: Record<WeaponType, OpticType> = { ...DEFAULT_WEAPON_OPTICS };
   public opticReticleColors: Record<WeaponType, ReticleColor> = {
     m4: 'red',
+    ak47: 'red',
+    scar: 'red',
     mp5: 'green',
+    vector: 'cyan',
     sniper: 'red',
     shotgun: 'red',
     deagle: 'green',
   };
   public opticReticleStyles: Record<WeaponType, ReticleStyle> = {
     m4: 'dot',
+    ak47: 'dot',
+    scar: 'holo_ring',
     mp5: 'dot',
+    vector: 'dot',
     sniper: 'mildot_circle',
     shotgun: 'dot',
     deagle: 'dot',
@@ -104,14 +120,20 @@ export class FPSController {
   public currentCamo: WeaponCamo = 'standard';
   public ammoInMag: Record<WeaponType, number> = {
     m4: 30,
+    ak47: 30,
+    scar: 20,
     mp5: 30,
+    vector: 33,
     sniper: 5,
     shotgun: 8,
     deagle: 7,
   };
   public ammoReserve: Record<WeaponType, number> = {
     m4: 120,
+    ak47: 120,
+    scar: 80,
     mp5: 150,
+    vector: 165,
     sniper: 25,
     shotgun: 32,
     deagle: 35,
@@ -161,6 +183,13 @@ export class FPSController {
   private swayTime: number = 0;
   private bobTimer: number = 0;
 
+  // Gun Running & Sprint Procedural Animation
+  private runCycle: number = 0;
+  private runningWeight: number = 0;
+  private sprintTurnLagX: number = 0;
+  private sprintTurnLagY: number = 0;
+  private runLandingShock: number = 0;
+
   private fireTimer: number = 0;
   private reloadTimer: number = 0;
   private footstepTimer: number = 0;
@@ -173,11 +202,6 @@ export class FPSController {
   private keys: Record<string, boolean> = {};
   public isLocked: boolean = false;
   public isDead: boolean = false;
-
-  // Mobile / Touch Controls Virtual Input
-  public touchMoveVector: { x: number; y: number } = { x: 0, y: 0 };
-  public touchIsSprinting: boolean = false;
-  public touchIsTacSprinting: boolean = false;
 
   public setDeadState(dead: boolean) {
     this.isDead = dead;
@@ -193,6 +217,7 @@ export class FPSController {
       this.isSprinting = false;
       this.isTacSprinting = false;
       this.isHoldingBreath = false;
+      this.setLean('none');
       this.targetEyeHeight = 0.35; // Collapse toward ground on elimination
     } else {
       this.targetEyeHeight = 1.7;
@@ -206,6 +231,46 @@ export class FPSController {
   public onGrenadeChange: (count: number) => void = () => {};
   public onTacticalChange: (count: number, type: TacticalType) => void = () => {};
   public onTriggerWeatherToggle?: () => void;
+  public onLeanChange?: (lean: LeanDirection, factor: number) => void;
+  public onFlashbangEffect?: (alpha: number) => void;
+  public onConcussionEffect?: (timer: number) => void;
+  public onHeartbeatUpdate?: (active: boolean, contacts: { id: string; distance: number; angleOffset: number }[]) => void;
+
+  // Tactical variant effects state
+  public flashWhiteoutAlpha: number = 0;
+  public concussedTimer: number = 0;
+  public heartbeatActiveTimer: number = 0;
+  public heartbeatContacts: { id: string; distance: number; angleOffset: number }[] = [];
+
+  public toggleLean(direction: 'left' | 'right') {
+    if (this.isDead || this.isMantling) return;
+    if (this.leanState === direction) {
+      this.setLean('none');
+    } else {
+      this.setLean(direction);
+    }
+  }
+
+  public setLean(direction: LeanDirection) {
+    if (this.isDead && direction !== 'none') return;
+    if (this.leanState === direction) return;
+
+    this.leanState = direction;
+    if (direction === 'left') {
+      this.targetLeanFactor = -1.0;
+      soundManager.playLean('left');
+    } else if (direction === 'right') {
+      this.targetLeanFactor = 1.0;
+      soundManager.playLean('right');
+    } else {
+      this.targetLeanFactor = 0.0;
+      soundManager.playLean('center');
+    }
+
+    if (this.onLeanChange) {
+      this.onLeanChange(this.leanState, this.targetLeanFactor);
+    }
+  }
 
   constructor(
     camera: THREE.PerspectiveCamera,
@@ -296,6 +361,13 @@ export class FPSController {
     this.weaponMesh = ModelFactory.createWeaponMesh(type, camo, currentOptic, currentColor, currentStyle);
     this.viewmodelRig.add(this.weaponMesh);
 
+    // Synchronize Real-time 3D Player & Gun Shadow Operator Proxy in map scene
+    if (this.playerShadowMesh) {
+      this.map.scene.remove(this.playerShadowMesh);
+    }
+    this.playerShadowMesh = ModelFactory.createPlayerShadowMesh(type, camo, currentOptic);
+    this.map.scene.add(this.playerShadowMesh);
+
     soundManager.playDrawWeapon();
     this.onAmmoChange(this.ammoInMag[type], this.ammoReserve[type]);
   }
@@ -304,10 +376,27 @@ export class FPSController {
     window.addEventListener('keydown', e => {
       this.keys[e.code] = true;
 
+      // Prevent repetitive trigger spam from holding keys (fixes continuous sound / sprint bug)
+      if (e.repeat) return;
+
       // Tactical Stance Toggle (Z or B Key)
       if (e.code === 'KeyZ' || e.code === 'KeyB') {
         this.isTacStance = !this.isTacStance;
         soundManager.playTacStanceToggle();
+      }
+
+      // BGMI / PUBG Leaning Feature: '<' (Comma) leans Left, '>' (Period) leans Right
+      const isLeftLean = e.code === 'Comma' || e.key === '<' || e.key === ',';
+      const isRightLean = e.code === 'Period' || e.key === '>' || e.key === '.';
+
+      if (isLeftLean && !e.repeat) {
+        this.leanKeyPressTime = performance.now();
+        this.activeLeanKey = 'left';
+        this.toggleLean('left');
+      } else if (isRightLean && !e.repeat) {
+        this.leanKeyPressTime = performance.now();
+        this.activeLeanKey = 'right';
+        this.toggleLean('right');
       }
 
       // Variable Zoom Optic / Thermal Toggle / Quick Melee (V Key)
@@ -426,12 +515,15 @@ export class FPSController {
         this.inspectWeapon();
       }
 
-      // Weapon quick switch keys 1-5
+      // Weapon quick switch keys 1-8
       if (e.code === 'Digit1') this.equipWeapon('m4');
-      if (e.code === 'Digit2') this.equipWeapon('mp5');
-      if (e.code === 'Digit3') this.equipWeapon('sniper');
-      if (e.code === 'Digit4') this.equipWeapon('shotgun');
-      if (e.code === 'Digit5') this.equipWeapon('deagle');
+      if (e.code === 'Digit2') this.equipWeapon('ak47');
+      if (e.code === 'Digit3') this.equipWeapon('scar');
+      if (e.code === 'Digit4') this.equipWeapon('mp5');
+      if (e.code === 'Digit5') this.equipWeapon('vector');
+      if (e.code === 'Digit6') this.equipWeapon('shotgun');
+      if (e.code === 'Digit7') this.equipWeapon('sniper');
+      if (e.code === 'Digit8') this.equipWeapon('deagle');
 
       // Reset Range Targets (K Key)
       if (e.code === 'KeyK' && this.trainingManager) {
@@ -452,6 +544,26 @@ export class FPSController {
 
     window.addEventListener('keyup', e => {
       this.keys[e.code] = false;
+
+      // Leaning release for hold-to-lean / tap-to-toggle hybrid
+      const isLeftLeanUp = e.code === 'Comma' || e.key === '<' || e.key === ',';
+      const isRightLeanUp = e.code === 'Period' || e.key === '>' || e.key === '.';
+      if (isLeftLeanUp && this.activeLeanKey === 'left') {
+        const holdDuration = performance.now() - this.leanKeyPressTime;
+        const isHoldMode = this.settings.leanMode === 'hold' || holdDuration > 260;
+        if (isHoldMode && this.leanState === 'left') {
+          this.setLean('none');
+        }
+        this.activeLeanKey = null;
+      } else if (isRightLeanUp && this.activeLeanKey === 'right') {
+        const holdDuration = performance.now() - this.leanKeyPressTime;
+        const isHoldMode = this.settings.leanMode === 'hold' || holdDuration > 260;
+        if (isHoldMode && this.leanState === 'right') {
+          this.setLean('none');
+        }
+        this.activeLeanKey = null;
+      }
+
       if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') {
         this.isTacSprinting = false;
         if (this.isHoldingBreath) {
@@ -479,7 +591,7 @@ export class FPSController {
         }
       }
 
-      const weapons: WeaponType[] = ['m4', 'mp5', 'sniper', 'shotgun', 'deagle'];
+      const weapons: WeaponType[] = ['m4', 'ak47', 'scar', 'mp5', 'vector', 'shotgun', 'sniper', 'deagle'];
       const currentIndex = weapons.indexOf(this.currentWeapon);
       if (e.deltaY > 0) {
         const nextIndex = (currentIndex + 1) % weapons.length;
@@ -534,12 +646,13 @@ export class FPSController {
       this.pitch -= e.movementY * sens * invert;
       this.pitch = Math.max(-Math.PI / 2.05, Math.min(Math.PI / 2.05, this.pitch));
 
-      // Viewmodel mouse inertia lag
-      const inertiaMult = this.isAiming ? 0.0003 : 0.0012;
+      // Viewmodel mouse inertia lag (amplified during sprint for realistic physical weapon weight)
+      const sprintInertiaBoost = this.isTacSprinting ? 2.4 : this.isSprinting ? 1.7 : 1.0;
+      const inertiaMult = (this.isAiming ? 0.0003 : 0.0012) * sprintInertiaBoost;
       this.swayInertiaX -= e.movementX * inertiaMult;
       this.swayInertiaY += e.movementY * inertiaMult;
-      this.swayInertiaX = Math.max(-0.06, Math.min(0.06, this.swayInertiaX));
-      this.swayInertiaY = Math.max(-0.06, Math.min(0.06, this.swayInertiaY));
+      this.swayInertiaX = Math.max(-0.08, Math.min(0.08, this.swayInertiaX));
+      this.swayInertiaY = Math.max(-0.08, Math.min(0.08, this.swayInertiaY));
     });
 
     document.addEventListener('pointerlockchange', () => {
@@ -751,6 +864,42 @@ export class FPSController {
         setTimeout(() => {
           if (this.isReloading) soundManager.playPumpAction();
         }, (this.reloadDuration * 0.78) * 1000);
+      } else if (this.currentWeapon === 'ak47') {
+        // AK-47 Rock-and-lock + heavy right-side charging handle rack
+        setTimeout(() => {
+          if (this.isReloading && !this.isTacticalReload) {
+            soundManager.playReload(this.currentWeapon, 'ak_mag_in');
+          }
+        }, (this.reloadDuration * 0.46) * 1000);
+        setTimeout(() => {
+          if (this.isReloading && !this.isTacticalReload) {
+            soundManager.playReload(this.currentWeapon, 'ak_rack');
+          }
+        }, (this.reloadDuration * 0.76) * 1000);
+      } else if (this.currentWeapon === 'scar') {
+        // SCAR-17 Heavy battle rifle lock + bolt release slap
+        setTimeout(() => {
+          if (this.isReloading && !this.isTacticalReload) {
+            soundManager.playReload(this.currentWeapon, 'mag_in');
+          }
+        }, (this.reloadDuration * 0.45) * 1000);
+        setTimeout(() => {
+          if (this.isReloading && !this.isTacticalReload) {
+            soundManager.playReload(this.currentWeapon, 'scar_bolt');
+          }
+        }, (this.reloadDuration * 0.74) * 1000);
+      } else if (this.currentWeapon === 'vector') {
+        // Vector CRB fast stick mag insert + snappy slide release
+        setTimeout(() => {
+          if (this.isReloading && !this.isTacticalReload) {
+            soundManager.playReload(this.currentWeapon, 'mag_in');
+          }
+        }, (this.reloadDuration * 0.42) * 1000);
+        setTimeout(() => {
+          if (this.isReloading && !this.isTacticalReload) {
+            soundManager.playReload(this.currentWeapon, 'vector_charge');
+          }
+        }, (this.reloadDuration * 0.70) * 1000);
       } else {
         // M4 ping-pong bolt catch release
         setTimeout(() => {
@@ -861,10 +1010,32 @@ export class FPSController {
     }
   }
 
+  public setTacticalType(type: TacticalType) {
+    if (!this.grenadeManager) return;
+    this.grenadeManager.setTacticalType(type);
+    this.onTacticalChange(this.grenadeManager.getTacticalCount(), type);
+  }
+
   public toggleTacticalType() {
     if (!this.grenadeManager) return;
     const newType = this.grenadeManager.toggleTacticalType();
     this.onTacticalChange(this.grenadeManager.getTacticalCount(), newType);
+  }
+
+  public triggerFlashWhiteout(intensity: number) {
+    this.flashWhiteoutAlpha = Math.min(1.0, Math.max(this.flashWhiteoutAlpha, intensity));
+    this.onFlashbangEffect?.(this.flashWhiteoutAlpha);
+  }
+
+  public triggerConcussion(intensity: number) {
+    this.concussedTimer = Math.max(this.concussedTimer, 3.2 * intensity);
+    this.onConcussionEffect?.(this.concussedTimer);
+  }
+
+  public triggerHeartbeatScan(contacts: { id: string; distance: number; angleOffset: number }[]) {
+    this.heartbeatActiveTimer = 4.0;
+    this.heartbeatContacts = contacts;
+    this.onHeartbeatUpdate?.(true, contacts);
   }
 
   public toggleTacticalGear() {
@@ -879,157 +1050,6 @@ export class FPSController {
     this.isInspecting = true;
     this.inspectTimer = this.inspectDuration;
     soundManager.playInspect();
-  }
-
-  // --- MOBILE & TOUCH CONTROLS API ---
-  public handleTouchMove(x: number, y: number, isSprint: boolean = false, isTacSprint: boolean = false) {
-    this.touchMoveVector.x = Math.max(-1, Math.min(1, x));
-    this.touchMoveVector.y = Math.max(-1, Math.min(1, y));
-    this.touchIsSprinting = isSprint;
-    this.touchIsTacSprinting = isTacSprint;
-    if (isTacSprint && this.tacSprintStamina > 0.2) {
-      this.isTacSprinting = true;
-    }
-  }
-
-  public handleTouchLook(dx: number, dy: number, sensitivity: number = 1.0) {
-    if (this.isDead) return;
-    const sens = (this.settings.mouseSensitivity || 1.0) * sensitivity * 0.0038;
-    const invert = this.settings.invertY ? -1 : 1;
-
-    this.yaw -= dx * sens;
-    this.pitch -= dy * sens * invert;
-    this.pitch = Math.max(-Math.PI / 2.05, Math.min(Math.PI / 2.05, this.pitch));
-
-    const inertiaMult = this.isAiming ? 0.0004 : 0.0016;
-    this.swayInertiaX -= dx * inertiaMult;
-    this.swayInertiaY += dy * inertiaMult;
-    this.swayInertiaX = Math.max(-0.06, Math.min(0.06, this.swayInertiaX));
-    this.swayInertiaY = Math.max(-0.06, Math.min(0.06, this.swayInertiaY));
-  }
-
-  public triggerShoot(pressed: boolean) {
-    if (this.isDead) return;
-    this.isShooting = pressed;
-    if (pressed && !this.isReloading && !this.isMeleeing) {
-      if (this.isTacSprinting || this.isSprinting) {
-        this.isTacSprinting = false;
-        this.isSprinting = false;
-        this.touchIsTacSprinting = false;
-        this.touchIsSprinting = false;
-      }
-      this.tryShoot();
-    }
-  }
-
-  public triggerAim(pressed?: boolean) {
-    if (this.isDead) return;
-    if (pressed !== undefined) {
-      this.isAiming = pressed;
-    } else {
-      this.isAiming = !this.isAiming;
-    }
-    if (this.isAiming) {
-      soundManager.playScopeRaise();
-    } else {
-      if (this.isHoldingBreath) {
-        this.isHoldingBreath = false;
-        soundManager.playExhale();
-      }
-      if (this.isMounted) {
-        this.isMounted = false;
-      }
-    }
-  }
-
-  public triggerJump() {
-    if (this.isDead) return;
-    if (this.isSliding || this.isDiving) {
-      this.cancelSlide(true);
-      return;
-    }
-    if (!this.isMantling && this.tryLedgeMantle()) {
-      return;
-    }
-    if (this.isGrounded) {
-      this.velocity.y = 6.4;
-      this.isGrounded = false;
-      soundManager.playJump();
-    }
-  }
-
-  public triggerCrouchOrSlide() {
-    if (this.isDead) return;
-    if (this.isSliding || this.isDiving) {
-      this.cancelSlide(false);
-      return;
-    }
-    if (this.isTacSprinting && this.isGrounded) {
-      this.startDolphinDive();
-    } else if (this.isSprinting && this.isGrounded) {
-      this.startSlide();
-    } else {
-      this.isCrouching = !this.isCrouching;
-      soundManager.playSlideCancel();
-    }
-  }
-
-  public triggerReload() {
-    if (this.isDead || this.isReloading || this.isMeleeing) return;
-    this.reload();
-  }
-
-  public triggerGrenade() {
-    if (this.isDead || this.isMeleeing) return;
-    this.throwGrenade();
-  }
-
-  public triggerTactical() {
-    if (this.isDead || this.isMeleeing) return;
-    this.deployTactical();
-  }
-
-  public triggerSwapTactical() {
-    this.toggleTacticalType();
-    soundManager.playTacticalSwap();
-  }
-
-  public triggerTacStance() {
-    this.isTacStance = !this.isTacStance;
-    soundManager.playTacStanceToggle();
-  }
-
-  public triggerInspect() {
-    if (!this.isReloading && !this.isShooting && !this.isMeleeing) {
-      this.inspectWeapon();
-    }
-  }
-
-  public triggerLaser() {
-    this.toggleTacticalGear();
-  }
-
-  public triggerMount() {
-    if (!this.isMeleeing && !this.isMantling) {
-      this.toggleMount();
-    }
-  }
-
-  public triggerHoldBreath() {
-    if (this.isAiming && this.breathStamina > 0.12 && !this.isHyperventilating) {
-      this.isHoldingBreath = !this.isHoldingBreath;
-      if (this.isHoldingBreath) {
-        soundManager.playInhale();
-      } else {
-        soundManager.playExhale();
-      }
-    }
-  }
-
-  public triggerMelee() {
-    if (!this.isMeleeing && !this.isDead) {
-      this.performMelee();
-    }
   }
 
   public tryShoot() {
@@ -1093,6 +1113,7 @@ export class FPSController {
     // Viewmodel punch back & snap up
     this.weaponKickZ = this.isAiming ? 0.04 : 0.09;
     this.weaponKickRotX = this.isAiming ? 0.05 : 0.12;
+    this.shadowRecoilKick = this.isAiming ? 0.08 : 0.16;
 
     // Play gunshot audio
     soundManager.playGunshot(this.currentWeapon);
@@ -1100,13 +1121,19 @@ export class FPSController {
     // Alert AI bots of gunshot sound
     this.botManager?.notifySound(this.camera.position, 65, true);
 
-    // Muzzle FX & Shell Casing
-    const muzzlePos = this.camera.position.clone().add(this.camera.getWorldDirection(new THREE.Vector3()).multiplyScalar(0.7));
+    // Muzzle FX & Shell Casing (Photorealistic weapon barrel alignment)
     const forwardDir = this.camera.getWorldDirection(new THREE.Vector3());
     const rightDir = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
+    const downDir = new THREE.Vector3(0, -1, 0).applyQuaternion(this.camera.quaternion);
 
-    this.particles.emitMuzzleFlash(muzzlePos, forwardDir);
-    this.particles.emitShellCasing(muzzlePos.clone().add(rightDir.clone().multiplyScalar(0.15)), rightDir);
+    // Position muzzle flash along physical barrel line rather than blocking optical reticle
+    const muzzlePos = this.camera.position.clone()
+      .add(forwardDir.clone().multiplyScalar(0.62))
+      .add(downDir.clone().multiplyScalar(this.isAiming ? 0.13 : 0.09))
+      .add(rightDir.clone().multiplyScalar(this.isAiming ? 0.03 : 0.11));
+
+    this.particles.emitMuzzleFlash(muzzlePos, forwardDir, true);
+    this.particles.emitShellCasing(muzzlePos.clone().add(rightDir.clone().multiplyScalar(0.12)), rightDir);
 
     // Simulate Ballistics with Bullet Drop & Material Penetration
     this.simulateBallistics(wpnCfg);
@@ -1130,10 +1157,6 @@ export class FPSController {
       shootDir.addScaledVector(right, spreadX);
       shootDir.addScaledVector(up, spreadY);
       shootDir.normalize();
-
-      if (this.multiplayerManager && this.multiplayerManager.isConnected) {
-        this.multiplayerManager.broadcastShoot(this.camera.position, shootDir, this.currentWeapon);
-      }
 
       let currentPos = this.camera.position.clone();
       let velocity = shootDir.clone().multiplyScalar(muzzleVelocity);
@@ -1328,6 +1351,23 @@ export class FPSController {
 
     // Movement & Physics with Full Obstacle Collisions
     this.updateMovement(dt);
+
+    // Tactical variant visual/sensory effect decay
+    if (this.flashWhiteoutAlpha > 0) {
+      this.flashWhiteoutAlpha = Math.max(0, this.flashWhiteoutAlpha - dt * 0.42);
+      this.onFlashbangEffect?.(this.flashWhiteoutAlpha);
+    }
+    if (this.concussedTimer > 0) {
+      this.concussedTimer = Math.max(0, this.concussedTimer - dt);
+      this.onConcussionEffect?.(this.concussedTimer);
+    }
+    if (this.heartbeatActiveTimer > 0) {
+      this.heartbeatActiveTimer = Math.max(0, this.heartbeatActiveTimer - dt);
+      if (this.heartbeatActiveTimer <= 0) {
+        this.heartbeatContacts = [];
+        this.onHeartbeatUpdate?.(false, []);
+      }
+    }
 
     // Update Tactical Laser Sight
     this.updateLaserSight();
@@ -1530,12 +1570,15 @@ export class FPSController {
     // Decay Landing Jolt
     this.landingJolt = THREE.MathUtils.lerp(this.landingJolt, 0, dt * 12);
 
-    // Calculate Dynamic Camera Roll (Strafe Banking + Sliding Lean)
+    // Calculate Dynamic Camera Roll (Strafe Banking + Sliding Lean + PUBG/BGMI Leaning Roll)
     let targetRoll = 0;
     if (this.keys['KeyA'] || this.keys['ArrowLeft']) targetRoll += 0.038;
     if (this.keys['KeyD'] || this.keys['ArrowRight']) targetRoll -= 0.038;
     if (this.isSliding) targetRoll += 0.085;
-    this.cameraRoll = THREE.MathUtils.lerp(this.cameraRoll, targetRoll, dt * 10);
+    // PUBG/BGMI Tactical Lean: ~15.5 deg (0.27 rad) head tilt
+    const leanRoll = -this.currentLeanFactor * 0.27;
+    targetRoll += leanRoll;
+    this.cameraRoll = THREE.MathUtils.lerp(this.cameraRoll, targetRoll, dt * 14);
 
     // Apply Camera Rotation with Recoil & Dynamic Roll
     this.camera.rotation.order = 'YXZ';
@@ -1546,14 +1589,8 @@ export class FPSController {
     // Viewmodel Positioning, Breathing Sway, Reload & Melee Choreography
     this.updateViewmodel(dt);
 
-    // Synchronize Real-time Player Shadow Proxy
-    if (this.playerShadowMesh) {
-      this.playerShadowMesh.position.set(this.position.x, this.position.y - this.currentEyeHeight, this.position.z);
-      this.playerShadowMesh.rotation.y = this.yaw;
-      const targetScaleY = this.isSliding ? 0.45 : this.isCrouching ? 0.65 : 1.0;
-      this.playerShadowMesh.scale.set(1.0, THREE.MathUtils.lerp(this.playerShadowMesh.scale.y, targetScaleY, dt * 14), 1.0);
-      this.playerShadowMesh.visible = !this.isDead;
-    }
+    // Synchronize Real-time Articulated Player & Gun Shadow Operator Proxy
+    this.updatePlayerShadow(dt);
 
     // Update 3D Spatial Web Audio Listener orientation & velocity
     const forwardDir = new THREE.Vector3();
@@ -1622,17 +1659,14 @@ export class FPSController {
     this.isCrouching = this.keys['KeyC'] || this.keys['ControlLeft'];
     
     // Sprint and Tactical Sprint state resolution
-    const movingForward =
-      ((this.keys['KeyW'] || this.keys['ArrowUp']) && !this.keys['KeyS'] && !this.keys['ArrowDown']) ||
-      this.touchMoveVector.y > 0.25;
-    const holdingShift = this.keys['ShiftLeft'] || this.keys['ShiftRight'] || this.touchIsSprinting || this.touchIsTacSprinting;
+    const movingForward = (this.keys['KeyW'] || this.keys['ArrowUp']) && !this.keys['KeyS'] && !this.keys['ArrowDown'];
+    const holdingShift = this.keys['ShiftLeft'] || this.keys['ShiftRight'];
 
     if (holdingShift && movingForward && !this.isCrouching && !this.isAiming) {
-      if ((this.isTacSprinting || this.touchIsTacSprinting) && this.tacSprintStamina > 0.05) {
+      if (this.isTacSprinting && this.tacSprintStamina > 0.05) {
         // Continue Tactical Sprint
         this.tacSprintStamina = Math.max(0, this.tacSprintStamina - dt * 0.28);
         this.isSprinting = true;
-        this.isTacSprinting = true;
       } else {
         // Standard Sprint
         this.isTacSprinting = false;
@@ -1647,15 +1681,26 @@ export class FPSController {
       this.tacSprintStamina = Math.min(1.0, this.tacSprintStamina + dt * 0.55);
     }
 
+    // Cancel lean if player begins sprinting, diving, sliding, or mantling
+    if ((this.isSprinting || this.isTacSprinting || this.isSliding || this.isDiving || this.isMantling) && this.leanState !== 'none') {
+      this.setLean('none');
+    }
+
     // Eye height lerp (Dive, Slide, Crouch, Stand)
     this.targetEyeHeight = this.isDiving ? 0.38 : this.isSliding ? 0.65 : this.isCrouching ? 0.95 : 1.7;
     this.currentEyeHeight = THREE.MathUtils.lerp(this.currentEyeHeight, this.targetEyeHeight, dt * 16);
 
     let baseSpeed = 6.0;
     if (this.isAiming) baseSpeed = this.isTacStance ? 4.2 : 3.0;
+    else if (Math.abs(this.currentLeanFactor) > 0.15) baseSpeed = 3.6; // Tactical controlled peek stride
     else if (this.isCrouching) baseSpeed = 3.2;
     else if (this.isTacSprinting) baseSpeed = 13.0; // COD super sprint velocity
     else if (this.isSprinting) baseSpeed = 9.2;
+
+    // Concussion neural suppression slows movement
+    if (this.concussedTimer > 0) {
+      baseSpeed *= 0.52;
+    }
 
     if (this.isDiving) {
       this.diveTimer -= dt;
@@ -1684,11 +1729,6 @@ export class FPSController {
       if (this.keys['KeyS'] || this.keys['ArrowDown']) moveVector.z += 1;
       if (this.keys['KeyA'] || this.keys['ArrowLeft']) moveVector.x -= 1;
       if (this.keys['KeyD'] || this.keys['ArrowRight']) moveVector.x += 1;
-
-      if (this.touchMoveVector.x !== 0 || this.touchMoveVector.y !== 0) {
-        moveVector.x += this.touchMoveVector.x;
-        moveVector.z -= this.touchMoveVector.y;
-      }
     }
 
     if (moveVector.lengthSq() > 0) {
@@ -1747,13 +1787,30 @@ export class FPSController {
       this.velocity.y -= (this.isDiving ? 14.5 : 19.5) * dt;
     }
 
-    // Integrate Position
-    this.position.x += this.velocity.x * dt;
-    this.position.y += this.velocity.y * dt;
-    this.position.z += this.velocity.z * dt;
+    // Robust Vertical Elevation & Floor Support (Catwalks, Crates, Shipping Container Roofs, Ground)
+    const groundElevation = CollisionSystem.getGroundElevation(this.position, 0.48, this.currentEyeHeight, this.map.obstacles);
+    const minFloorY = groundElevation + this.currentEyeHeight;
 
-    // Floor collision
-    if (this.position.y <= this.currentEyeHeight) {
+    // Sub-stepped Horizontal Integration: guarantees movement steps stay under 0.06m
+    // This physically prevents high-speed sprinting, sliding, or diving from tunneling through container corners!
+    const horizDist = Math.hypot(this.velocity.x, this.velocity.z) * dt;
+    const subSteps = Math.max(1, Math.min(6, Math.ceil(horizDist / 0.06)));
+    const subDt = dt / subSteps;
+
+    for (let s = 0; s < subSteps; s++) {
+      this.position.x += this.velocity.x * subDt;
+      this.position.z += this.velocity.z * subDt;
+      CollisionSystem.resolveEntityCollision(this.position, this.velocity, 0.48, this.currentEyeHeight, this.map.obstacles);
+    }
+
+    this.position.y += this.velocity.y * dt;
+
+    // Floor and Solid Surface collision (Catwalks, Crates, Shipping Containers, Terrain)
+    if (this.position.y <= minFloorY) {
+      if (!this.isGrounded) {
+        this.shadowLandingImpact = Math.min(0.22, Math.abs(this.velocity.y) * 0.025 + 0.08);
+        this.runLandingShock = Math.min(0.06, Math.abs(this.velocity.y) * 0.008 + 0.02);
+      }
       if (!this.isGrounded && (this.velocity.y < -3 || this.isDiving)) {
         if (this.isDiving) {
           soundManager.playLand();
@@ -1764,20 +1821,50 @@ export class FPSController {
           this.landingJolt = -0.06; // Camera dip on hard impact
         }
       }
-      this.position.y = this.currentEyeHeight;
+      this.position.y = minFloorY;
       this.velocity.y = 0;
       this.isGrounded = true;
+    } else {
+      if (this.position.y > minFloorY + 0.12 && this.isGrounded) {
+        this.isGrounded = false;
+      }
     }
-
-    // CRITICAL: Robust Entity-Obstacle Collision Resolution
-    CollisionSystem.resolveEntityCollision(this.position, this.velocity, 0.48, this.currentEyeHeight, this.map.obstacles);
 
     // Dynamic Arena / Island Boundaries (Bermuda: 220x220m vs Warehouse: 90x90m)
     const boundLimit = this.map.mapType === 'bermuda' ? 104 : 43;
     this.position.x = Math.max(-boundLimit, Math.min(boundLimit, this.position.x));
     this.position.z = Math.max(-boundLimit, Math.min(boundLimit, this.position.z));
 
-    this.camera.position.copy(this.position);
+    // Leaning Factor Interpolation (PUBG/BGMI snappy response)
+    this.currentLeanFactor = THREE.MathUtils.lerp(this.currentLeanFactor, this.targetLeanFactor, dt * 16.0);
+    if (Math.abs(this.currentLeanFactor) < 0.002 && this.targetLeanFactor === 0) {
+      this.currentLeanFactor = 0;
+    }
+
+    // Leaning Lateral Translation & Obstacle Protection
+    const maxLeanDistance = 0.42; // meters (PUBG standard corner clearance)
+    let targetLeanDist = this.currentLeanFactor * maxLeanDistance;
+
+    // Raycast obstacle clearance test to avoid clipping camera inside adjacent walls/crates
+    const rightDir = new THREE.Vector3(1, 0, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw);
+    if (Math.abs(this.currentLeanFactor) > 0.02 && this.map?.obstacles?.length) {
+      const probeDir = rightDir.clone().multiplyScalar(Math.sign(this.currentLeanFactor));
+      const eyePos = this.position.clone();
+      const obstacleMeshes = this.map.obstacles.map(o => o.mesh);
+      const probeRay = new THREE.Raycaster(eyePos, probeDir, 0.05, maxLeanDistance + 0.15);
+      const hits = probeRay.intersectObjects(obstacleMeshes, true);
+      if (hits.length > 0 && hits[0].distance < maxLeanDistance + 0.15) {
+        const allowed = Math.max(0.04, hits[0].distance - 0.12);
+        targetLeanDist = Math.sign(this.currentLeanFactor) * Math.min(Math.abs(targetLeanDist), allowed);
+      }
+    }
+
+    const targetLeanOffset = rightDir.clone().multiplyScalar(targetLeanDist);
+    // Spine bending vertical dip (~0.05m)
+    targetLeanOffset.y = -Math.abs(this.currentLeanFactor) * 0.05;
+
+    this.currentLeanOffset.lerp(targetLeanOffset, dt * 18.0);
+    this.camera.position.copy(this.position).add(this.currentLeanOffset);
   }
 
   private updateViewmodel(dt: number) {
@@ -1839,28 +1926,43 @@ export class FPSController {
           else if (this.currentWeapon === 'shotgun') { targetOffset.y = -0.123; targetOffset.z = -0.31; }
           else if (this.currentWeapon === 'deagle') { targetOffset.y = -0.136; targetOffset.z = -0.28; }
           else if (this.currentWeapon === 'sniper') { targetOffset.y = -0.143; targetOffset.z = -0.34; }
+          else if (this.currentWeapon === 'ak47') { targetOffset.y = -0.148; targetOffset.z = -0.33; }
+          else if (this.currentWeapon === 'scar') { targetOffset.y = -0.144; targetOffset.z = -0.32; }
+          else if (this.currentWeapon === 'vector') { targetOffset.y = -0.138; targetOffset.z = -0.31; }
         } else if (currentOptic === 'holo_553') {
           if (this.currentWeapon === 'm4') { targetOffset.y = -0.147; targetOffset.z = -0.32; }
           else if (this.currentWeapon === 'mp5') { targetOffset.y = -0.127; targetOffset.z = -0.30; }
           else if (this.currentWeapon === 'shotgun') { targetOffset.y = -0.127; targetOffset.z = -0.31; }
           else if (this.currentWeapon === 'deagle') { targetOffset.y = -0.140; targetOffset.z = -0.28; }
           else if (this.currentWeapon === 'sniper') { targetOffset.y = -0.147; targetOffset.z = -0.34; }
+          else if (this.currentWeapon === 'ak47') { targetOffset.y = -0.152; targetOffset.z = -0.33; }
+          else if (this.currentWeapon === 'scar') { targetOffset.y = -0.148; targetOffset.z = -0.32; }
+          else if (this.currentWeapon === 'vector') { targetOffset.y = -0.142; targetOffset.z = -0.31; }
         } else if (currentOptic === 'iron_sight') {
           if (this.currentWeapon === 'm4') { targetOffset.y = -0.121; targetOffset.z = -0.32; }
           else if (this.currentWeapon === 'mp5') { targetOffset.y = -0.056; targetOffset.z = -0.30; }
           else if (this.currentWeapon === 'shotgun') { targetOffset.y = -0.054; targetOffset.z = -0.32; }
           else if (this.currentWeapon === 'deagle') { targetOffset.y = -0.094; targetOffset.z = -0.28; }
           else if (this.currentWeapon === 'sniper') { targetOffset.y = -0.121; targetOffset.z = -0.34; }
+          else if (this.currentWeapon === 'ak47') { targetOffset.y = -0.124; targetOffset.z = -0.33; }
+          else if (this.currentWeapon === 'scar') { targetOffset.y = -0.122; targetOffset.z = -0.32; }
+          else if (this.currentWeapon === 'vector') { targetOffset.y = -0.116; targetOffset.z = -0.31; }
         } else if (currentOptic === 'acog_4x') {
           if (this.currentWeapon === 'm4') { targetOffset.y = -0.140; targetOffset.z = -0.33; }
           else if (this.currentWeapon === 'mp5') { targetOffset.y = -0.120; targetOffset.z = -0.31; }
           else if (this.currentWeapon === 'deagle') { targetOffset.y = -0.133; targetOffset.z = -0.29; }
           else if (this.currentWeapon === 'sniper') { targetOffset.y = -0.140; targetOffset.z = -0.35; }
+          else if (this.currentWeapon === 'ak47') { targetOffset.y = -0.145; targetOffset.z = -0.34; }
+          else if (this.currentWeapon === 'scar') { targetOffset.y = -0.142; targetOffset.z = -0.33; }
+          else if (this.currentWeapon === 'vector') { targetOffset.y = -0.136; targetOffset.z = -0.32; }
         } else if (currentOptic === 'thermal_flir' || currentOptic === 'thermal_ir') {
           if (this.currentWeapon === 'm4') { targetOffset.y = -0.143; targetOffset.z = -0.34; }
           else if (this.currentWeapon === 'mp5') { targetOffset.y = -0.123; targetOffset.z = -0.32; }
           else if (this.currentWeapon === 'deagle') { targetOffset.y = -0.136; targetOffset.z = -0.30; }
           else if (this.currentWeapon === 'sniper') { targetOffset.y = -0.143; targetOffset.z = -0.36; }
+          else if (this.currentWeapon === 'ak47') { targetOffset.y = -0.148; targetOffset.z = -0.35; }
+          else if (this.currentWeapon === 'scar') { targetOffset.y = -0.145; targetOffset.z = -0.34; }
+          else if (this.currentWeapon === 'vector') { targetOffset.y = -0.140; targetOffset.z = -0.33; }
         } else if (currentOptic === 'sniper_variable') {
           targetOffset.y = -0.175;
           targetOffset.z = -0.36;
@@ -1883,12 +1985,12 @@ export class FPSController {
     } else if (this.isTacSprinting) {
       // MW-Style Tactical Sprint High-Ready Weapon Position
       targetOffset = {
-        x: 0.18,
-        y: -0.26,
-        z: -0.28,
-        rx: 0.65,
-        ry: -0.35,
-        rz: 0.48, // Gun pointed straight up
+        x: 0.16,
+        y: -0.21,
+        z: -0.30,
+        rx: 0.38,
+        ry: -0.15,
+        rz: 0.18,
       };
     } else if (this.isSprinting) {
       targetOffset = { ...offsetCfg.sprint };
@@ -1905,14 +2007,57 @@ export class FPSController {
     const swayX = Math.cos(this.swayTime * 0.8) * swayAmp;
     const swayY = Math.sin(this.swayTime * 1.6) * swayAmp;
 
-    // Walk, sprint, and tac-sprint bobbing
-    const isMoving = this.velocity.x !== 0 || this.velocity.z !== 0;
-    const bobSpeed = this.isTacSprinting ? 18 : this.isSprinting ? 14 : isMoving ? 9 : 2;
-    this.bobTimer += dt * bobSpeed;
+    // Recovery dampening for running landing shock
+    this.runLandingShock = THREE.MathUtils.lerp(this.runLandingShock, 0, dt * 10);
 
-    const bobMult = this.isMounted ? 0.0002 : this.isAiming ? 0.0006 : this.isTacSprinting ? 0.028 : isMoving ? 0.015 : 0.003;
-    const bobX = Math.cos(this.bobTimer * 0.5) * bobMult;
-    const bobY = Math.sin(this.bobTimer) * (bobMult * 1.2);
+    // AAA Gun Running Kinematics & Modern Warfare Style Weapon Locomotion Animations
+    const horizSpeed = Math.hypot(this.velocity.x, this.velocity.z);
+    const isMovingGrounded = horizSpeed > 0.45 && this.isGrounded && !this.isSliding && !this.isDiving && !this.isMantling;
+    
+    // Target running animation weight: 0 when aiming/still, 1.0 in sprint, 1.35 in tac-sprint, 0.35 in combat walk
+    let targetRunWeight = 0;
+    if (isMovingGrounded && !this.isAiming) {
+      if (this.isTacSprinting) targetRunWeight = 1.35;
+      else if (this.isSprinting) targetRunWeight = 1.0;
+      else targetRunWeight = 0.35;
+    }
+    this.runningWeight = THREE.MathUtils.lerp(this.runningWeight, targetRunWeight, dt * 10);
+
+    // Stride cadence speed scales dynamically with velocity
+    const strideFreq = this.isTacSprinting ? 14.5 : this.isSprinting ? 12.2 : 8.5;
+    if (isMovingGrounded) {
+      this.runCycle += dt * strideFreq;
+    }
+
+    // Procedural Running Offsets & Multi-Axis Rotations
+    let runOffX = 0, runOffY = 0, runOffZ = 0;
+    let runRotX = 0, runRotY = 0, runRotZ = 0;
+
+    if (this.runningWeight > 0.001) {
+      const rw = this.runningWeight;
+      const isTac = this.isTacSprinting;
+
+      // 1. Position Offsets:
+      // X: Smooth lateral stride swing (Figure-8 pendulum)
+      runOffX = Math.cos(this.runCycle) * (isTac ? 0.026 : 0.018) * rw;
+      // Y: Pelvic & shoulder stride dip on footfalls (2x frequency) plus landing cushion
+      runOffY = (Math.abs(Math.sin(this.runCycle)) * -0.024 + Math.sin(this.runCycle * 2) * 0.008) * (isTac ? 1.3 : 1.0) * rw - this.runLandingShock;
+      // Z: Forward / backward inertial push-pull along weapon bore
+      runOffZ = Math.sin(this.runCycle * 2) * (isTac ? 0.022 : 0.012) * rw;
+
+      // 2. Angular Rotations: Pitch, Yaw, Roll
+      // Pitch: Barrel dips forward-down as foot hits ground, springs back up during swing phase
+      runRotX = (Math.sin(this.runCycle * 2) * (isTac ? 0.065 : 0.042) + this.runLandingShock * 0.9) * rw;
+      // Yaw: Weapon rhythmically points across the chest as arms swing in counter-motion
+      runRotY = Math.sin(this.runCycle) * (isTac ? 0.095 : 0.068) * rw;
+      // Roll: Weapon banks side-to-side with alternating foot push-off
+      runRotZ = Math.cos(this.runCycle) * (isTac ? 0.135 : 0.065) * rw;
+    }
+
+    // Subtle idle breathing sway
+    const bobMult = this.isMounted ? 0.0002 : this.isAiming ? 0.0005 : isMovingGrounded ? 0.003 : 0.0015;
+    const bobX = Math.cos(this.swayTime * 0.6) * bobMult;
+    const bobY = Math.sin(this.swayTime * 1.2) * bobMult;
 
     // Strafe banking roll
     const strafeRoll = (this.keys['KeyA'] || this.keys['ArrowLeft']) ? 0.04 : (this.keys['KeyD'] || this.keys['ArrowRight']) ? -0.04 : 0;
@@ -2255,17 +2400,19 @@ export class FPSController {
     }
 
     // Final Position & Rotation integration
-    const finalX = targetOffset.x + bobX + swayX + this.swayInertiaX + reloadOffX + meleeOffX;
-    const finalY = targetOffset.y + bobY + swayY + this.swayInertiaY + reloadOffY + meleeOffY + mantleOffY + drawOffY;
-    const finalZ = targetOffset.z + this.weaponKickZ + reloadOffZ + meleeOffZ;
+    const finalX = targetOffset.x + bobX + runOffX + swayX + this.swayInertiaX + reloadOffX + meleeOffX;
+    const finalY = targetOffset.y + bobY + runOffY + swayY + this.swayInertiaY + reloadOffY + meleeOffY + mantleOffY + drawOffY;
+    const finalZ = targetOffset.z + runOffZ + this.weaponKickZ + reloadOffZ + meleeOffZ;
 
     this.weaponMesh.position.x = THREE.MathUtils.lerp(this.weaponMesh.position.x, finalX, dt * 20);
     this.weaponMesh.position.y = THREE.MathUtils.lerp(this.weaponMesh.position.y, finalY, dt * 20);
     this.weaponMesh.position.z = THREE.MathUtils.lerp(this.weaponMesh.position.z, finalZ, dt * 25);
 
-    const finalRotX = targetOffset.rx + this.weaponKickRotX - this.swayInertiaY * 1.5 + reloadRotX + meleeRotX + inspectRotX + mantleRotX + drawRotX;
-    const finalRotY = targetOffset.ry + this.swayInertiaX * 1.5 + reloadRotY + meleeRotY + inspectRotY;
-    const finalRotZ = targetOffset.rz + strafeRoll + reloadRotZ + meleeRotZ + inspectRotZ;
+    const finalRotX = targetOffset.rx + runRotX + this.weaponKickRotX - this.swayInertiaY * 1.5 + reloadRotX + meleeRotX + inspectRotX + mantleRotX + drawRotX;
+    const finalRotY = targetOffset.ry + runRotY + this.swayInertiaX * 1.5 + reloadRotY + meleeRotY + inspectRotY;
+    // Natural weapon lean reaction when hipfiring; in ADS keep optical reticle dead-centered
+    const weaponLeanRoll = !this.isAiming ? (-this.currentLeanFactor * 0.07) : 0;
+    const finalRotZ = targetOffset.rz + runRotZ + strafeRoll + reloadRotZ + meleeRotZ + inspectRotZ + weaponLeanRoll;
 
     this.weaponMesh.rotation.x = THREE.MathUtils.lerp(this.weaponMesh.rotation.x, finalRotX, dt * 20);
     this.weaponMesh.rotation.y = THREE.MathUtils.lerp(this.weaponMesh.rotation.y, finalRotY, dt * 20);
@@ -2279,62 +2426,73 @@ export class FPSController {
       const leftArm = this.armsMesh.getObjectByName('left_arm_group');
       const rightArm = this.armsMesh.getObjectByName('right_arm_group');
 
-      if (this.isMantling && leftArm && rightArm) {
-        // Arms reach out and push down against the ledge
-        const mp = 1 - (this.mantleTimer / this.mantleDuration);
-        const reach = Math.sin(mp * Math.PI);
-        leftArm.position.set(-0.2 + reach * 0.05, -0.05 + reach * 0.22, -0.35 - reach * 0.2);
-        leftArm.rotation.set(-reach * 0.6, 0, reach * 0.3);
-        rightArm.position.set(0.2 - reach * 0.05, -0.05 + reach * 0.22, -0.35 - reach * 0.2);
-        rightArm.rotation.set(-reach * 0.6, 0, -reach * 0.3);
-      } else if (this.isDiving && leftArm && rightArm) {
-        // Arms extended forward cushioning dive
-        leftArm.position.set(-0.22, -0.22, -0.38);
-        leftArm.rotation.set(0.35, 0.1, -0.25);
-        rightArm.position.set(0.22, -0.22, -0.38);
-        rightArm.rotation.set(0.35, -0.1, 0.25);
-      } else if (this.isReloading && leftArm) {
-        const p = Math.max(0, Math.min(1, 1 - (this.reloadTimer / this.reloadDuration)));
-        if (p < 0.45) {
-          // Phase 1: Left arm breaks grip, reaches down to plate carrier pouch
-          const sub = p / 0.45;
-          const reachCurve = Math.sin(sub * Math.PI * 0.5);
-          leftArm.position.y = -0.17 - reachCurve * 0.22;
-          leftArm.position.z = -0.14 - reachCurve * 0.15;
-          leftArm.position.x = -0.17 - reachCurve * 0.05;
-          leftArm.rotation.x = reachCurve * 0.45;
-          leftArm.rotation.z = -reachCurve * 0.2;
-        } else if (p < 0.78) {
-          // Phase 2: Insert fresh magazine with forceful palm thrust
-          const sub = (p - 0.45) / 0.33;
-          leftArm.position.y = -0.39 + sub * 0.22;
-          leftArm.position.z = -0.29 + sub * 0.15;
-          leftArm.position.x = -0.22 + sub * 0.05;
-          leftArm.rotation.x = 0.45 * (1 - sub);
-          leftArm.rotation.z = -0.2 * (1 - sub);
-        } else {
-          // Phase 3: Chamber round / slap bolt and return to handguard
-          const sub = (p - 0.78) / 0.22;
-          leftArm.position.set(-0.17, -0.17, -0.14);
-          leftArm.rotation.set(0, 0, 0);
+      if (leftArm && rightArm) {
+        const targetLeftPos = new THREE.Vector3(-0.17, -0.17, -0.14);
+        const targetLeftRot = new THREE.Vector3(0, 0, 0);
+        const targetRightPos = new THREE.Vector3(0.19, -0.19, 0.22);
+        const targetRightRot = new THREE.Vector3(0, 0, 0);
+
+        if (this.isMantling) {
+          // Arms reach out and push down against the ledge
+          const mp = 1 - (this.mantleTimer / this.mantleDuration);
+          const reach = Math.sin(mp * Math.PI);
+          targetLeftPos.set(-0.2 + reach * 0.05, -0.05 + reach * 0.22, -0.35 - reach * 0.2);
+          targetLeftRot.set(-reach * 0.6, 0, reach * 0.3);
+          targetRightPos.set(0.2 - reach * 0.05, -0.05 + reach * 0.22, -0.35 - reach * 0.2);
+          targetRightRot.set(-reach * 0.6, 0, -reach * 0.3);
+        } else if (this.isDiving) {
+          // Arms extended forward cushioning dive
+          targetLeftPos.set(-0.22, -0.22, -0.38);
+          targetLeftRot.set(0.35, 0.1, -0.25);
+          targetRightPos.set(0.22, -0.22, -0.38);
+          targetRightRot.set(0.35, -0.1, 0.25);
+        } else if (this.isReloading) {
+          const p = Math.max(0, Math.min(1, 1 - (this.reloadTimer / this.reloadDuration)));
+          if (p < 0.45) {
+            // Phase 1: Left arm breaks grip, reaches down to plate carrier pouch
+            const sub = p / 0.45;
+            const reachCurve = Math.sin(sub * Math.PI * 0.5);
+            targetLeftPos.set(-0.17 - reachCurve * 0.05, -0.17 - reachCurve * 0.22, -0.14 - reachCurve * 0.15);
+            targetLeftRot.set(reachCurve * 0.45, 0, -reachCurve * 0.2);
+          } else if (p < 0.78) {
+            // Phase 2: Insert fresh magazine with forceful palm thrust
+            const sub = (p - 0.45) / 0.33;
+            targetLeftPos.set(-0.22 + sub * 0.05, -0.39 + sub * 0.22, -0.29 + sub * 0.15);
+            targetLeftRot.set(0.45 * (1 - sub), 0, -0.2 * (1 - sub));
+          } else {
+            // Phase 3: Chamber round / slap bolt and return to handguard
+            targetLeftPos.set(-0.17, -0.17, -0.14);
+            targetLeftRot.set(0, 0, 0);
+          }
+        } else if (this.isTacSprinting) {
+          // High-speed one-handed tactical sprint carry (left arm pumps naturally in rhythm with stride)
+          const leftArmPumpY = Math.sin(this.runCycle) * 0.06 * this.runningWeight;
+          const leftArmPumpZ = Math.cos(this.runCycle) * 0.08 * this.runningWeight;
+          targetLeftPos.set(-0.22, -0.28 + leftArmPumpY, -0.06 + leftArmPumpZ);
+          targetLeftRot.set(-0.35 + leftArmPumpY * 1.2, 0.15, -0.25);
+
+          const rightArmBounceY = Math.abs(Math.sin(this.runCycle)) * -0.02 * this.runningWeight;
+          targetRightPos.set(0.18, -0.18 + rightArmBounceY, 0.2);
+          targetRightRot.set(0.12, -0.05, 0.08);
+        } else if (this.isSprinting) {
+          // Standard sprint carry: both hands stay securely locked to rifle, flexing with the stride
+          const sprintArmFlex = Math.sin(this.runCycle) * 0.02 * this.runningWeight;
+          targetLeftPos.set(-0.17 + sprintArmFlex, -0.17, -0.14);
+          targetLeftRot.set(sprintArmFlex * 0.5, 0, 0);
+          targetRightPos.set(0.19 - sprintArmFlex, -0.19, 0.22);
+          targetRightRot.set(sprintArmFlex * 0.5, 0, 0);
         }
-      } else if (this.isTacSprinting && leftArm && rightArm) {
-        // High-speed one-handed tactical sprint carry
-        leftArm.position.set(-0.24, -0.35, -0.05);
-        leftArm.rotation.set(-0.45, 0.2, -0.35);
-        rightArm.position.set(0.18, -0.18, 0.2);
-        rightArm.rotation.set(0.35, -0.1, 0.25);
-      } else if (this.isSprinting && leftArm && rightArm) {
-        // Standard sprint carry
-        leftArm.position.set(-0.19, -0.22, -0.08);
-        leftArm.rotation.set(-0.25, 0.1, -0.15);
-        rightArm.position.set(0.19, -0.20, 0.18);
-        rightArm.rotation.set(0.15, -0.05, 0.1);
-      } else if (leftArm && rightArm) {
-        leftArm.position.set(-0.17, -0.17, -0.14);
-        leftArm.rotation.set(0, 0, 0);
-        rightArm.position.set(0.19, -0.19, 0.22);
-        rightArm.rotation.set(0, 0, 0);
+
+        // Smoothly lerp arm joints to completely prevent popping, jittering, or hand-gun separation
+        leftArm.position.lerp(targetLeftPos, dt * 18);
+        leftArm.rotation.x = THREE.MathUtils.lerp(leftArm.rotation.x, targetLeftRot.x, dt * 18);
+        leftArm.rotation.y = THREE.MathUtils.lerp(leftArm.rotation.y, targetLeftRot.y, dt * 18);
+        leftArm.rotation.z = THREE.MathUtils.lerp(leftArm.rotation.z, targetLeftRot.z, dt * 18);
+
+        rightArm.position.lerp(targetRightPos, dt * 18);
+        rightArm.rotation.x = THREE.MathUtils.lerp(rightArm.rotation.x, targetRightRot.x, dt * 18);
+        rightArm.rotation.y = THREE.MathUtils.lerp(rightArm.rotation.y, targetRightRot.y, dt * 18);
+        rightArm.rotation.z = THREE.MathUtils.lerp(rightArm.rotation.z, targetRightRot.z, dt * 18);
       }
 
       // Ensure viewmodel rig is completely hidden when aiming down high-power optical scopes
@@ -2344,5 +2502,348 @@ export class FPSController {
         if (this.laserBeam) this.laserBeam.visible = false;
       }
     }
+  }
+
+  // Real-time Articulated Operator & Weapon Shadow Kinematics
+  private updatePlayerShadow(dt: number) {
+    if (!this.playerShadowMesh) return;
+
+    if (this.isDead) {
+      this.playerShadowMesh.visible = false;
+      return;
+    }
+    this.playerShadowMesh.visible = true;
+
+    // Position operator proxy at ground plane beneath player's feet
+    const feetY = this.position.y - this.currentEyeHeight;
+    this.playerShadowMesh.position.set(
+      this.position.x + this.currentLeanOffset.x * 0.4,
+      feetY,
+      this.position.z + this.currentLeanOffset.z * 0.4
+    );
+    this.playerShadowMesh.rotation.y = this.yaw;
+
+    // Movement speed & directional analysis
+    const horizSpeed = Math.hypot(this.velocity.x, this.velocity.z);
+    const isMoving = horizSpeed > 0.35 && this.isGrounded;
+
+    // Compute forward/backward and strafe velocity in player local space
+    const forward = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw);
+    const right = new THREE.Vector3(1, 0, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw);
+    const fwdVelocity = this.velocity.dot(forward);
+    const strafeVelocity = this.velocity.dot(right);
+
+    // Dynamic stride frequency scaling
+    let strideSpeed = 0;
+    if (isMoving) {
+      if (this.isTacSprinting) {
+        strideSpeed = 16.5;
+      } else if (this.isSprinting) {
+        strideSpeed = 13.0;
+      } else if (this.isCrouching) {
+        strideSpeed = 7.5;
+      } else {
+        strideSpeed = 9.0;
+      }
+      const dirSign = fwdVelocity >= -0.2 ? 1 : -1;
+      this.shadowLocomotionPhase += dt * strideSpeed * dirSign;
+    } else {
+      this.shadowLocomotionPhase = THREE.MathUtils.lerp(this.shadowLocomotionPhase, 0, dt * 6);
+    }
+
+    const pelvis = this.playerShadowMesh.getObjectByName('shadow_pelvis');
+    const leftHip = this.playerShadowMesh.getObjectByName('shadow_left_hip');
+    const rightHip = this.playerShadowMesh.getObjectByName('shadow_right_hip');
+    const leftKnee = this.playerShadowMesh.getObjectByName('shadow_left_knee');
+    const rightKnee = this.playerShadowMesh.getObjectByName('shadow_right_knee');
+    const upperBody = this.playerShadowMesh.getObjectByName('shadow_upper_body');
+    const leftShoulder = this.playerShadowMesh.getObjectByName('shadow_left_shoulder');
+    const rightShoulder = this.playerShadowMesh.getObjectByName('shadow_right_shoulder');
+    const leftElbow = this.playerShadowMesh.getObjectByName('shadow_left_elbow');
+    const rightElbow = this.playerShadowMesh.getObjectByName('shadow_right_elbow');
+    const weaponGroup = this.playerShadowMesh.getObjectByName('shadow_weapon_group');
+
+    // --- 1. PELVIS & LOWER BODY KINEMATICS ---
+    let targetPelvisY = 0.88;
+    let targetPelvisRotX = 0;
+    let targetPelvisRotZ = 0;
+
+    let targetLeftHipRotX = 0;
+    let targetLeftHipRotZ = 0;
+    let targetLeftKneeRotX = 0;
+
+    let targetRightHipRotX = 0;
+    let targetRightHipRotZ = 0;
+    let targetRightKneeRotX = 0;
+
+    if (this.isSliding) {
+      // Combat Baseball Slide: Hips drop low, right leg leads forward, left leg tucked underneath
+      targetPelvisY = 0.32;
+      targetPelvisRotX = -0.3;
+      targetPelvisRotZ = 0.18;
+
+      // Lead leg extended forward
+      targetRightHipRotX = 1.25;
+      targetRightHipRotZ = 0.15;
+      targetRightKneeRotX = 0.15;
+
+      // Rear leg bent back under body
+      targetLeftHipRotX = -0.85;
+      targetLeftHipRotZ = -0.35;
+      targetLeftKneeRotX = 1.95;
+    } else if (this.isDiving) {
+      // Dolphin Dive: Airborne horizontal body dive
+      targetPelvisY = 0.38;
+      targetPelvisRotX = 0.65;
+      targetLeftHipRotX = -0.4;
+      targetRightHipRotX = -0.35;
+      targetLeftKneeRotX = 0.3;
+      targetRightKneeRotX = 0.25;
+    } else if (!this.isGrounded) {
+      // Airborne Jump / Fall: Legs tuck up with knees bent ready to absorb landing
+      const airLift = THREE.MathUtils.clamp(-this.velocity.y * 0.04, -0.2, 0.4);
+      targetPelvisY = 0.88;
+      targetLeftHipRotX = -0.45 - airLift * 0.3;
+      targetRightHipRotX = -0.35 - airLift * 0.3;
+      targetLeftKneeRotX = 0.75 + airLift * 0.4;
+      targetRightKneeRotX = 0.65 + airLift * 0.4;
+      targetLeftHipRotZ = -0.1;
+      targetRightHipRotZ = 0.1;
+    } else if (this.isCrouching) {
+      // Tactical Crouch: Hips lower to 0.54m, knees spread outwards and flex forward
+      targetPelvisY = 0.54 - this.shadowLandingImpact;
+      targetPelvisRotX = 0.15;
+
+      if (isMoving) {
+        // Crouch Walk Stride
+        const crouchStride = Math.sin(this.shadowLocomotionPhase) * 0.42;
+        targetLeftHipRotX = -0.65 + crouchStride;
+        targetRightHipRotX = -0.65 - crouchStride;
+        targetLeftKneeRotX = 1.25 + Math.max(0, -crouchStride) * 0.6;
+        targetRightKneeRotX = 1.25 + Math.max(0, crouchStride) * 0.6;
+      } else {
+        targetLeftHipRotX = -0.65;
+        targetRightHipRotX = -0.65;
+        targetLeftKneeRotX = 1.35;
+        targetRightKneeRotX = 1.35;
+      }
+      targetLeftHipRotZ = -0.18;
+      targetRightHipRotZ = 0.18;
+    } else {
+      // Standing / Walking / Sprinting / Tac-Sprinting Locomotion
+      targetPelvisY = 0.88 - this.shadowLandingImpact;
+
+      if (isMoving) {
+        // Natural hip bob with stride
+        const hipBob = Math.abs(Math.sin(this.shadowLocomotionPhase)) * (this.isTacSprinting ? 0.045 : 0.025);
+        targetPelvisY += hipBob;
+
+        // Stride amplitude scales with sprint speed
+        const strideAmp = this.isTacSprinting ? 0.75 : this.isSprinting ? 0.62 : 0.45;
+        const stride = Math.sin(this.shadowLocomotionPhase) * strideAmp;
+
+        // Forward leg swing & backward push-off with natural knee flexion
+        targetLeftHipRotX = stride;
+        targetRightHipRotX = -stride;
+
+        // Knee bends naturally when leg pulls backward (prevents rigid peg-leg look)
+        targetLeftKneeRotX = Math.max(0, -stride * 1.4);
+        targetRightKneeRotX = Math.max(0, stride * 1.4);
+
+        // Lateral strafe leg angle
+        const strafeTilt = THREE.MathUtils.clamp(strafeVelocity / 6, -0.22, 0.22);
+        targetLeftHipRotZ = strafeTilt - 0.05;
+        targetRightHipRotZ = strafeTilt + 0.05;
+      } else {
+        // Idle Combat Stance: slight natural offset
+        targetLeftHipRotX = 0.06;
+        targetRightHipRotX = -0.06;
+        targetLeftKneeRotX = 0.08;
+        targetRightKneeRotX = 0.08;
+        targetLeftHipRotZ = -0.04;
+        targetRightHipRotZ = 0.04;
+      }
+    }
+
+    // Apply smooth interpolation to pelvis & legs
+    if (pelvis) {
+      pelvis.position.y = THREE.MathUtils.lerp(pelvis.position.y, targetPelvisY, dt * 14);
+      pelvis.rotation.x = THREE.MathUtils.lerp(pelvis.rotation.x, targetPelvisRotX, dt * 14);
+      pelvis.rotation.z = THREE.MathUtils.lerp(pelvis.rotation.z, targetPelvisRotZ, dt * 14);
+    }
+    if (leftHip) {
+      leftHip.rotation.x = THREE.MathUtils.lerp(leftHip.rotation.x, targetLeftHipRotX, dt * 18);
+      leftHip.rotation.z = THREE.MathUtils.lerp(leftHip.rotation.z, targetLeftHipRotZ, dt * 18);
+    }
+    if (rightHip) {
+      rightHip.rotation.x = THREE.MathUtils.lerp(rightHip.rotation.x, targetRightHipRotX, dt * 18);
+      rightHip.rotation.z = THREE.MathUtils.lerp(rightHip.rotation.z, targetRightHipRotZ, dt * 18);
+    }
+    if (leftKnee) {
+      leftKnee.rotation.x = THREE.MathUtils.lerp(leftKnee.rotation.x, targetLeftKneeRotX, dt * 18);
+    }
+    if (rightKnee) {
+      rightKnee.rotation.x = THREE.MathUtils.lerp(rightKnee.rotation.x, targetRightKneeRotX, dt * 18);
+    }
+
+    // --- 2. UPPER BODY, TORSO & HEAD KINEMATICS ---
+    if (upperBody) {
+      // Pitches with camera pitch, rolls with Q/E lean, hunches forward during slide/crouch
+      const targetUpperY = pelvis ? pelvis.position.y + 0.06 : 0.94;
+      let targetUpperPitch = this.pitch * 0.85;
+      const targetUpperRoll = -this.currentLeanFactor * 0.22;
+      let targetUpperYaw = 0;
+
+      if (this.isSliding) {
+        targetUpperPitch -= 0.35; // Leans back against slide momentum
+      } else if (this.isDiving) {
+        targetUpperPitch += 0.55;
+      } else if (this.isCrouching) {
+        targetUpperPitch += 0.18; // Hunches forward in ready posture
+      } else if (isMoving) {
+        // Slight torso forward drive and subtle spine twist with stride
+        const fwdLean = this.isTacSprinting ? 0.22 : this.isSprinting ? 0.14 : 0.06;
+        targetUpperPitch += fwdLean;
+        targetUpperYaw = Math.sin(this.shadowLocomotionPhase) * 0.08;
+      }
+
+      upperBody.position.y = THREE.MathUtils.lerp(upperBody.position.y, targetUpperY, dt * 14);
+      upperBody.rotation.x = THREE.MathUtils.lerp(upperBody.rotation.x, targetUpperPitch, dt * 16);
+      upperBody.rotation.y = THREE.MathUtils.lerp(upperBody.rotation.y, targetUpperYaw, dt * 16);
+      upperBody.rotation.z = THREE.MathUtils.lerp(upperBody.rotation.z, targetUpperRoll, dt * 16);
+    }
+
+    // --- 3. ARMS & WEAPON KINEMATICS ---
+    let leftShoulderRotX = 0.55;
+    let leftShoulderRotY = -0.22;
+    let leftShoulderRotZ = 0.15;
+    let leftElbowRotX = -0.75;
+
+    let rightShoulderRotX = 0.65;
+    let rightShoulderRotY = 0.12;
+    let rightShoulderRotZ = -0.15;
+    let rightElbowRotX = -0.65;
+
+    let weaponPosZ = 0.34;
+    let weaponPosY = 0.32;
+    let weaponRotX = 0;
+    let weaponRotZ = 0;
+
+    // Apply gunshot recoil kick
+    weaponPosZ -= this.shadowRecoilKick * 0.12;
+    weaponPosY += this.shadowRecoilKick * 0.06;
+    weaponRotX += this.shadowRecoilKick * 0.35;
+    rightShoulderRotX += this.shadowRecoilKick * 0.2;
+    leftShoulderRotX += this.shadowRecoilKick * 0.15;
+
+    if (this.isMeleeing) {
+      // Tactical knife slash: Right arm swipes across in aggressive arc
+      rightShoulderRotX = 1.35;
+      rightShoulderRotY = -0.45;
+      rightShoulderRotZ = 0.35;
+      rightElbowRotX = -0.25;
+      leftShoulderRotX = 0.25;
+    } else if (this.isReloading) {
+      // Tactical Reload Animation: Weapon tilts up, left arm reaches to plate carrier pouch and drives fresh mag
+      const reloadPct = Math.max(0, Math.min(1, 1 - (this.reloadTimer / Math.max(0.1, this.reloadDuration))));
+      weaponRotZ = -0.25;
+      weaponRotX = 0.22;
+
+      if (reloadPct < 0.45) {
+        // Dip down to chest pouch
+        const sub = reloadPct / 0.45;
+        const reachCurve = Math.sin(sub * Math.PI * 0.5);
+        leftShoulderRotX = 0.2 - reachCurve * 0.35;
+        leftShoulderRotY = 0.1;
+        leftElbowRotX = -0.3 + reachCurve * 0.4;
+      } else if (reloadPct < 0.78) {
+        // Slam fresh magazine into receiver
+        const sub = (reloadPct - 0.45) / 0.33;
+        leftShoulderRotX = -0.15 + sub * 0.7;
+        leftShoulderRotY = -0.2;
+        leftElbowRotX = 0.1 - sub * 0.85;
+      } else {
+        // Return hand to handguard
+        leftShoulderRotX = 0.55;
+        leftElbowRotX = -0.75;
+      }
+    } else if (this.isTacSprinting) {
+      // Tactical Sprint: Weapon carried high-ready in right hand, left arm pumps in athletic stride
+      rightShoulderRotX = 0.45;
+      rightShoulderRotY = -0.15;
+      rightShoulderRotZ = 0.25;
+      rightElbowRotX = -0.85;
+
+      weaponPosZ = 0.26;
+      weaponPosY = 0.38;
+      weaponRotX = 0.45; // Gun pointed upward in high-ready
+      weaponRotZ = 0.22;
+
+      // Left arm natural running counter-swing
+      const armPump = Math.sin(this.shadowLocomotionPhase) * 0.55;
+      leftShoulderRotX = -0.15 + armPump;
+      leftShoulderRotY = 0.1;
+      leftShoulderRotZ = -0.25;
+      leftElbowRotX = -0.95;
+    } else if (this.isSprinting) {
+      // Standard Sprint: Low-ready carry across chest
+      rightShoulderRotX = 0.48;
+      rightShoulderRotY = 0.08;
+      rightElbowRotX = -0.72;
+
+      leftShoulderRotX = 0.42;
+      leftShoulderRotY = -0.18;
+      leftElbowRotX = -0.68;
+
+      weaponPosY = 0.26;
+      weaponRotX = -0.15;
+    } else if (this.isAiming) {
+      // ADS Aim Down Sights: Weapon locked tight to eye line and shoulder pocket
+      rightShoulderRotX = 0.72;
+      rightShoulderRotY = 0.05;
+      rightShoulderRotZ = -0.08;
+      rightElbowRotX = -0.82;
+
+      leftShoulderRotX = 0.62;
+      leftShoulderRotY = -0.15;
+      leftShoulderRotZ = 0.08;
+      leftElbowRotX = -0.78;
+
+      weaponPosZ = 0.38;
+      weaponPosY = 0.36;
+    } else if (this.isTacStance) {
+      // Tactical Stance (Canted Weapon Angle)
+      weaponRotZ = 0.42;
+      rightShoulderRotZ = 0.12;
+      leftShoulderRotZ = 0.18;
+    }
+
+    if (leftShoulder) {
+      leftShoulder.rotation.x = THREE.MathUtils.lerp(leftShoulder.rotation.x, leftShoulderRotX, dt * 18);
+      leftShoulder.rotation.y = THREE.MathUtils.lerp(leftShoulder.rotation.y, leftShoulderRotY, dt * 18);
+      leftShoulder.rotation.z = THREE.MathUtils.lerp(leftShoulder.rotation.z, leftShoulderRotZ, dt * 18);
+    }
+    if (leftElbow) {
+      leftElbow.rotation.x = THREE.MathUtils.lerp(leftElbow.rotation.x, leftElbowRotX, dt * 18);
+    }
+    if (rightShoulder) {
+      rightShoulder.rotation.x = THREE.MathUtils.lerp(rightShoulder.rotation.x, rightShoulderRotX, dt * 18);
+      rightShoulder.rotation.y = THREE.MathUtils.lerp(rightShoulder.rotation.y, rightShoulderRotY, dt * 18);
+      rightShoulder.rotation.z = THREE.MathUtils.lerp(rightShoulder.rotation.z, rightShoulderRotZ, dt * 18);
+    }
+    if (rightElbow) {
+      rightElbow.rotation.x = THREE.MathUtils.lerp(rightElbow.rotation.x, rightElbowRotX, dt * 18);
+    }
+    if (weaponGroup) {
+      weaponGroup.position.z = THREE.MathUtils.lerp(weaponGroup.position.z, weaponPosZ, dt * 18);
+      weaponGroup.position.y = THREE.MathUtils.lerp(weaponGroup.position.y, weaponPosY, dt * 18);
+      weaponGroup.rotation.x = THREE.MathUtils.lerp(weaponGroup.rotation.x, weaponRotX, dt * 18);
+      weaponGroup.rotation.z = THREE.MathUtils.lerp(weaponGroup.rotation.z, weaponRotZ, dt * 18);
+    }
+
+    // Decay transient recoil and impact impulses
+    this.shadowRecoilKick = THREE.MathUtils.lerp(this.shadowRecoilKick, 0, dt * 14);
+    this.shadowLandingImpact = THREE.MathUtils.lerp(this.shadowLandingImpact, 0, dt * 12);
+    this.wasGroundedLastFrame = this.isGrounded;
   }
 }

@@ -1,4 +1,4 @@
-export type WeaponType = 'm4' | 'mp5' | 'sniper' | 'shotgun' | 'deagle';
+export type WeaponType = 'm4' | 'mp5' | 'sniper' | 'shotgun' | 'deagle' | 'ak47' | 'vector' | 'scar';
 
 export type WeaponCamo = 'standard' | 'damascus' | 'gold' | 'woodland' | 'carbon' | 'obsidian';
 
@@ -7,6 +7,8 @@ export type OpticType = 'iron_sight' | 'reflex_dot' | 'red_dot_micro' | 'holo_55
 export type ReticleColor = 'red' | 'green' | 'amber' | 'cyan';
 
 export type ReticleStyle = 'dot' | 'cross' | 'chevron' | 'mildot_circle' | 'holo_ring' | 't_post';
+
+export type LeanDirection = 'none' | 'left' | 'right';
 
 export interface OpticAttachmentConfig {
   id: OpticType;
@@ -102,6 +104,8 @@ export interface PlayerStats {
   reticleColor?: ReticleColor;
   reticleStyle?: ReticleStyle;
   isThermalActive?: boolean;
+  leanState?: LeanDirection;
+  leanFactor?: number; // -1 to +1
   // Free Fire Battle Royale Attributes
   ep?: number;
   maxEp?: number;
@@ -223,6 +227,8 @@ export interface GameSettings {
   mapType?: MapType;
   infiniteAmmo?: boolean;
   realisticShadows?: boolean;
+  leanMode?: 'toggle' | 'hold';
+  minimapShape?: 'circular' | 'square';
 }
 
 export interface ScorestreakItem {
@@ -311,7 +317,18 @@ export interface EliminationAccolade {
 
 export type PickupType = 'ammo' | 'armor' | 'stimpack' | 'tactical' | 'inhaler' | 'medkit';
 
-export type TacticalType = 'smoke' | 'motion_sensor';
+export type TacticalType = 'flashbang' | 'concussion' | 'heartbeat_sensor' | 'smoke' | 'motion_sensor';
+
+export interface TacticalEquipmentConfig {
+  id: TacticalType;
+  name: string;
+  category: string;
+  desc: string;
+  iconName: string;
+  defaultCount: number;
+  maxCount: number;
+  throwCooldownSec: number;
+}
 
 export interface ActiveSmokeCloud {
   id: string;

@@ -187,6 +187,9 @@ export const PauseMenu: React.FC<PauseMenuProps> = ({
                 <div><span className="text-cyan-400 font-bold">F:</span> Tactical Laser</div>
                 <div><span className="text-cyan-400 font-bold">TAB:</span> Scoreboard</div>
                 <div><span className="text-cyan-400 font-bold">1-5:</span> Swap Weapons</div>
+                <div className="col-span-2 text-cyan-300 border-t border-slate-800/80 pt-1">
+                  <span className="text-cyan-400 font-bold">&lt; / &gt; (or , / .):</span> Peek Left / Right & Fire (PUBG/BGMI)
+                </div>
               </div>
             </div>
           </div>

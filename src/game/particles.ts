@@ -45,8 +45,8 @@ export class ParticleSystem {
   constructor(scene: THREE.Scene) {
     this.scene = scene;
 
-    // Real-time dynamic point light for weapons fire
-    this.muzzleFlashLight = new THREE.PointLight(0xffa500, 0, 18, 2.0);
+    // Real-time dynamic point light for weapons fire (photorealistic powder combustion glow)
+    this.muzzleFlashLight = new THREE.PointLight(0xffeedd, 0, 12, 2.0);
     this.scene.add(this.muzzleFlashLight);
 
     // Real-time dynamic point light for grenade blasts
@@ -87,11 +87,11 @@ export class ParticleSystem {
   }
 
   // --- MUZZLE FLASH FX ---
-  public emitMuzzleFlash(pos: THREE.Vector3, dir: THREE.Vector3) {
-    // Light up environment around player weapon
+  public emitMuzzleFlash(pos: THREE.Vector3, dir: THREE.Vector3, isPlayer: boolean = false) {
+    // Light up environment around weapon with photorealistic powder bloom
     this.muzzleFlashLight.position.copy(pos);
-    this.muzzleFlashLight.intensity = 4.2;
-    this.muzzleFlashTimer = 0.065;
+    this.muzzleFlashLight.intensity = isPlayer ? 1.8 : 1.2;
+    this.muzzleFlashTimer = 0.05;
 
     // Muzzle sparks
     for (let i = 0; i < 8; i++) {
@@ -478,7 +478,7 @@ export class ParticleSystem {
       if (this.muzzleFlashTimer <= 0) {
         this.muzzleFlashLight.intensity = 0;
       } else {
-        this.muzzleFlashLight.intensity = (this.muzzleFlashTimer / 0.065) * 4.2;
+        this.muzzleFlashLight.intensity = (this.muzzleFlashTimer / 0.05) * 1.8;
       }
     }
 
