@@ -86,6 +86,29 @@ export class ParticleSystem {
     this.scene.add(this.pointsMesh);
   }
 
+  // --- REAL-TIME POINT LIGHT SHADOWS (SUPER EXTREME RAY-TRACED GRAPHICS) ---
+  public setPointLightShadows(enabled: boolean) {
+    this.muzzleFlashLight.castShadow = enabled;
+    if (enabled) {
+      this.muzzleFlashLight.shadow.mapSize.width = 512;
+      this.muzzleFlashLight.shadow.mapSize.height = 512;
+      this.muzzleFlashLight.shadow.bias = -0.0012;
+      this.muzzleFlashLight.shadow.radius = 1.8;
+      this.muzzleFlashLight.shadow.camera.near = 0.1;
+      this.muzzleFlashLight.shadow.camera.far = 18;
+    }
+
+    this.explosionLight.castShadow = enabled;
+    if (enabled) {
+      this.explosionLight.shadow.mapSize.width = 1024;
+      this.explosionLight.shadow.mapSize.height = 1024;
+      this.explosionLight.shadow.bias = -0.001;
+      this.explosionLight.shadow.radius = 2.4;
+      this.explosionLight.shadow.camera.near = 0.3;
+      this.explosionLight.shadow.camera.far = 50;
+    }
+  }
+
   // --- MUZZLE FLASH FX ---
   public emitMuzzleFlash(pos: THREE.Vector3, dir: THREE.Vector3, isPlayer: boolean = false) {
     // Light up environment around weapon with photorealistic powder bloom

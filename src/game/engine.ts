@@ -130,9 +130,8 @@ export class GameEngine {
       this.particles,
       settings.weatherPreset || 'clear_day'
     );
-    if (this.map.groundMaterial) {
-      this.environment.registerMapMaterial(this.map.groundMaterial);
-    }
+    // Register all initial scene materials (ground, buildings, towers, containers, barriers)
+    this.environment.registerSceneMaterials(this.scene);
     this.environment.setGraphicsMode(settings.graphicsMode || 'standard');
 
     this.streakManager = new ScorestreakManager(this.scene, this.particles);
@@ -1059,20 +1058,35 @@ export class GameEngine {
         this.renderer.shadowMap.enabled = false;
         this.renderer.toneMapping = THREE.LinearToneMapping;
         this.renderer.toneMappingExposure = 1.0;
+        if (this.controller?.playerShadowMesh) {
+          this.controller.playerShadowMesh.visible = false;
+        }
       } else if (mode === 'extreme') {
         this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
         this.renderer.shadowMap.enabled = true;
         this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
         this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-        this.renderer.toneMappingExposure = 1.25;
+        this.renderer.toneMappingExposure = 1.28;
+        if (this.controller?.playerShadowMesh) {
+          this.controller.playerShadowMesh.visible = true;
+        }
       } else {
+        // Standard (balanced default)
         this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
         this.renderer.shadowMap.enabled = true;
-        this.renderer.shadowMap.type = THREE.PCFShadowMap;
+        this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
         this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-        this.renderer.toneMappingExposure = 1.1;
+        this.renderer.toneMappingExposure = 1.15;
+        if (this.controller?.playerShadowMesh) {
+          this.controller.playerShadowMesh.visible = true;
+        }
       }
       this.renderer.shadowMap.needsUpdate = true;
+      // Re-scan scene materials to apply mode changes
+      this.environment.registerSceneMaterials(this.scene);
+      if (this.controller?.viewmodelRig) {
+        this.environment.registerSceneMaterials(this.controller.viewmodelRig);
+      }
     }
     if (newSettings.weatherPreset) {
       this.setWeatherPreset(newSettings.weatherPreset);

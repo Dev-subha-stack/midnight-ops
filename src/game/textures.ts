@@ -1001,5 +1001,200 @@ export class TextureGenerator {
     this.cache.set(key, texture);
     return texture;
   }
+
+  // --- SUPER EXTREME: HIGH-FREQUENCY MICRO-DETAIL TANGENT NORMAL MAP ---
+  // Generates tactile micro-surface perturbations (machining grain, aggregate concrete, metallic scratches)
+  public static createMicroDetailNormalMap(): THREE.Texture {
+    const key = 'micro_detail_normal_map';
+    if (this.cache.has(key)) return this.cache.get(key)!;
+
+    const size = 512;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d')!;
+
+    // Height field synthesis
+    const heights = new Float32Array(size * size);
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const idx = y * size + x;
+        // Fine grain noise
+        const grain = (Math.random() - 0.5) * 0.45;
+        // Brushed mechanical striations
+        const striation = Math.sin(x * 1.2 + Math.cos(y * 0.6) * 3.5) * 0.22;
+        // Periodic subtle pockmarks / concrete pores
+        const pore = ((x * 13) ^ (y * 17)) % 97 < 3 ? -0.4 : 0;
+        heights[idx] = grain + striation + pore;
+      }
+    }
+
+    // Sobel / Central difference tangent normal computation
+    const imgData = ctx.createImageData(size, size);
+    const d = imgData.data;
+    const scale = 2.8;
+
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const left = heights[y * size + ((x - 1 + size) % size)];
+        const right = heights[y * size + ((x + 1) % size)];
+        const up = heights[((y - 1 + size) % size) * size + x];
+        const down = heights[((y + 1) % size) * size + x];
+
+        const dx = (right - left) * scale;
+        const dy = (down - up) * scale;
+        const dz = 1.0;
+        const len = Math.hypot(dx, dy, dz);
+
+        const nx = -dx / len;
+        const ny = -dy / len;
+        const nz = dz / len;
+
+        const pIdx = (y * size + x) * 4;
+        d[pIdx] = Math.round((nx * 0.5 + 0.5) * 255);
+        d[pIdx + 1] = Math.round((ny * 0.5 + 0.5) * 255);
+        d[pIdx + 2] = Math.round((nz * 0.5 + 0.5) * 255);
+        d[pIdx + 3] = 255;
+      }
+    }
+    ctx.putImageData(imgData, 0, 0);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(24, 24);
+    this.cache.set(key, texture);
+    return texture;
+  }
+
+  // --- SUPER EXTREME: RAY-TRACED HDR 360° EQUIRECTANGULAR ENVIRONMENT MAP ---
+  // Provides photorealistic ray-traced reflections on metal weapons, scopes, wet ground, and vehicles
+  public static createHDREquirectangularTexture(
+    timeOfDay: 'day' | 'noon' | 'sunset' | 'night' = 'noon',
+    sunColorHex: number = 0xffedd5,
+    skyColorHex: number = 0x38bdf8
+  ): THREE.Texture {
+    const key = `hdr_env_${timeOfDay}_${sunColorHex.toString(16)}_${skyColorHex.toString(16)}`;
+    if (this.cache.has(key)) return this.cache.get(key)!;
+
+    const w = 1024;
+    const h = 512;
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d')!;
+
+    const horizonY = h * 0.52;
+
+    // 1. SKY DOME GRADIENT (Zenith to Horizon)
+    const skyGrad = ctx.createLinearGradient(0, 0, 0, horizonY);
+    if (timeOfDay === 'sunset') {
+      skyGrad.addColorStop(0.0, '#1e1b4b'); // Deep indigo zenith
+      skyGrad.addColorStop(0.4, '#831843'); // Crimson magenta upper
+      skyGrad.addColorStop(0.7, '#c2410c'); // Radiant amber
+      skyGrad.addColorStop(0.95, '#fbbf24'); // Golden horizon band
+      skyGrad.addColorStop(1.0, '#fed7aa'); // Bright horizon glow
+    } else if (timeOfDay === 'night') {
+      skyGrad.addColorStop(0.0, '#020617'); // Pitch zenith
+      skyGrad.addColorStop(0.5, '#0f172a'); // Midnight navy
+      skyGrad.addColorStop(0.85, '#1e293b'); // Cool slate
+      skyGrad.addColorStop(1.0, '#334155'); // Distant moonlit horizon
+    } else {
+      // Day
+      skyGrad.addColorStop(0.0, '#0369a1'); // Deep cerulean zenith
+      skyGrad.addColorStop(0.45, '#38bdf8'); // Sky blue
+      skyGrad.addColorStop(0.85, '#bae6fd'); // Light atmospheric haze
+      skyGrad.addColorStop(1.0, '#f1f5f9'); // Radiant white-blue horizon
+    }
+    ctx.fillStyle = skyGrad;
+    ctx.fillRect(0, 0, w, horizonY);
+
+    // 2. DIRECTIONAL SUN HIGH-INTENSITY SPECULAR DISC (Simulates direct ray-traced solar glare)
+    const sunX = w * 0.42;
+    const sunY = timeOfDay === 'sunset' ? horizonY - 35 : timeOfDay === 'night' ? horizonY - 140 : horizonY - 130;
+    const sunRadius = timeOfDay === 'sunset' ? 42 : timeOfDay === 'night' ? 24 : 36;
+
+    // Massive bloom corona
+    const coronaGrad = ctx.createRadialGradient(sunX, sunY, 4, sunX, sunY, sunRadius * 4.5);
+    if (timeOfDay === 'night') {
+      coronaGrad.addColorStop(0.0, 'rgba(224, 242, 254, 0.95)');
+      coronaGrad.addColorStop(0.25, 'rgba(186, 230, 253, 0.45)');
+      coronaGrad.addColorStop(0.6, 'rgba(125, 211, 252, 0.12)');
+      coronaGrad.addColorStop(1.0, 'rgba(0, 0, 0, 0)');
+    } else if (timeOfDay === 'sunset') {
+      coronaGrad.addColorStop(0.0, 'rgba(255, 255, 255, 1.0)');
+      coronaGrad.addColorStop(0.15, 'rgba(254, 240, 138, 0.9)');
+      coronaGrad.addColorStop(0.45, 'rgba(249, 115, 22, 0.55)');
+      coronaGrad.addColorStop(0.75, 'rgba(194, 65, 12, 0.2)');
+      coronaGrad.addColorStop(1.0, 'rgba(0, 0, 0, 0)');
+    } else {
+      coronaGrad.addColorStop(0.0, 'rgba(255, 255, 255, 1.0)');
+      coronaGrad.addColorStop(0.18, 'rgba(254, 249, 195, 0.9)');
+      coronaGrad.addColorStop(0.45, 'rgba(217, 119, 6, 0.35)');
+      coronaGrad.addColorStop(0.75, 'rgba(56, 189, 248, 0.15)');
+      coronaGrad.addColorStop(1.0, 'rgba(0, 0, 0, 0)');
+    }
+    ctx.fillStyle = coronaGrad;
+    ctx.beginPath();
+    ctx.arc(sunX, sunY, sunRadius * 4.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Hot specular core
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(sunX, sunY, sunRadius, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 3. HORIZON HAZE & SILHOUETTE PROFILE
+    const horizonBand = ctx.createLinearGradient(0, horizonY - 18, 0, horizonY + 12);
+    horizonBand.addColorStop(0, 'rgba(255, 255, 255, 0)');
+    horizonBand.addColorStop(0.6, timeOfDay === 'sunset' ? 'rgba(251, 146, 60, 0.65)' : 'rgba(224, 242, 254, 0.55)');
+    horizonBand.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = horizonBand;
+    ctx.fillRect(0, horizonY - 18, w, 30);
+
+    // Industrial / Tactical silhouette buildings along horizon
+    ctx.fillStyle = timeOfDay === 'night' ? '#090d16' : timeOfDay === 'sunset' ? '#2e1065' : '#1e293b';
+    ctx.globalAlpha = 0.55;
+    for (let x = 0; x < w; x += 18) {
+      const bldH = ((x * 37) % 31) + 4;
+      ctx.fillRect(x, horizonY - bldH, 15, bldH + 4);
+    }
+    ctx.globalAlpha = 1.0;
+
+    // 4. TERRAIN / GROUND BOUNCE HALF (Horizon to Nadir)
+    const groundGrad = ctx.createLinearGradient(0, horizonY, 0, h);
+    if (timeOfDay === 'sunset') {
+      groundGrad.addColorStop(0.0, '#431407'); // Deep warm brown
+      groundGrad.addColorStop(0.3, '#292524'); // Wet stone
+      groundGrad.addColorStop(1.0, '#1c1917'); // Dark nadir
+    } else if (timeOfDay === 'night') {
+      groundGrad.addColorStop(0.0, '#0f172a');
+      groundGrad.addColorStop(0.4, '#090d16');
+      groundGrad.addColorStop(1.0, '#020617');
+    } else {
+      groundGrad.addColorStop(0.0, '#334155'); // Asphalt slate
+      groundGrad.addColorStop(0.2, '#1e293b');
+      groundGrad.addColorStop(1.0, '#0f172a');
+    }
+    ctx.fillStyle = groundGrad;
+    ctx.fillRect(0, horizonY, w, h - horizonY);
+
+    // Specular ground water puddle glint (simulates ray-traced ground reflection line)
+    const puddleGrad = ctx.createLinearGradient(0, horizonY, 0, h);
+    puddleGrad.addColorStop(0.0, timeOfDay === 'sunset' ? 'rgba(251, 146, 60, 0.45)' : 'rgba(224, 242, 254, 0.35)');
+    puddleGrad.addColorStop(0.35, timeOfDay === 'sunset' ? 'rgba(234, 88, 12, 0.15)' : 'rgba(186, 230, 253, 0.12)');
+    puddleGrad.addColorStop(1.0, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = puddleGrad;
+    ctx.fillRect(sunX - 120, horizonY, 240, h - horizonY);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.mapping = THREE.EquirectangularReflectionMapping;
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.needsUpdate = true;
+
+    this.cache.set(key, texture);
+    return texture;
+  }
 }
 

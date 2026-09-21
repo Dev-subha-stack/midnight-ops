@@ -116,28 +116,35 @@ export const PauseMenu: React.FC<PauseMenuProps> = ({
                   <span className="flex items-center gap-1.5 text-cyan-400">
                     <Sparkles className="w-3.5 h-3.5" /> Graphics Engine Mode
                   </span>
-                  <span className={`text-[9px] px-1.5 py-0.2 rounded border ${
-                    graphicsMode === 'extreme' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40 font-bold' : 'text-slate-400 border-slate-700'
+                  <span className={`text-[9px] px-2 py-0.5 rounded border ${
+                    graphicsMode === 'extreme'
+                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 font-bold animate-pulse'
+                      : graphicsMode === 'smooth'
+                      ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/30'
+                      : 'text-slate-400 border-slate-700'
                   }`}>
-                    {graphicsMode === 'extreme' ? 'RTX ACTIVE' : graphicsMode.toUpperCase()}
+                    {graphicsMode === 'extreme' ? '⚡ SUPER EXTREME RTX' : graphicsMode === 'smooth' ? '🚀 SMOOTH FPS' : '🎯 STANDARD HD'}
                   </span>
                 </div>
                 <div className="grid grid-cols-3 gap-1.5">
                   {[
-                    { id: 'smooth', label: 'Smooth' },
-                    { id: 'standard', label: 'Standard' },
-                    { id: 'extreme', label: 'Extreme (RTX)' },
+                    { id: 'smooth', label: 'Smooth', sub: '120+ FPS' },
+                    { id: 'standard', label: 'Standard', sub: 'Default AAA' },
+                    { id: 'extreme', label: '⚡ Extreme', sub: 'RTX Ray-Trace' },
                   ].map(g => (
                     <button
                       key={g.id}
                       onClick={() => onSelectGraphicsMode(g.id as GraphicsMode)}
-                      className={`py-2 px-1.5 rounded-lg text-[10px] font-bold uppercase transition-all border font-mono cursor-pointer text-center truncate ${
+                      className={`py-2 px-1.5 rounded-lg transition-all border font-mono cursor-pointer flex flex-col items-center justify-center text-center truncate ${
                         graphicsMode === g.id
-                          ? 'bg-cyan-950/70 border-cyan-400 text-cyan-300 shadow-[0_0_8px_rgba(6,182,212,0.3)]'
+                          ? g.id === 'extreme'
+                            ? 'bg-amber-950/70 border-amber-400 text-amber-200 shadow-[0_0_10px_rgba(245,158,11,0.4)]'
+                            : 'bg-cyan-950/70 border-cyan-400 text-cyan-300 shadow-[0_0_8px_rgba(6,182,212,0.3)]'
                           : 'bg-slate-900/80 border-slate-800 text-slate-400 hover:text-white'
                       }`}
                     >
-                      {g.label}
+                      <span className="text-[10px] font-bold uppercase">{g.label}</span>
+                      <span className="text-[8px] opacity-70">{g.sub}</span>
                     </button>
                   ))}
                 </div>

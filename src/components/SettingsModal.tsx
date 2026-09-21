@@ -230,18 +230,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </div>
               <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded border ${
                 (current.graphicsMode || 'standard') === 'extreme'
-                  ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40 animate-pulse'
-                  : 'bg-cyan-500/10 text-cyan-400 border-cyan-500/30'
+                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 shadow-[0_0_10px_rgba(245,158,11,0.25)] animate-pulse'
+                  : (current.graphicsMode || 'standard') === 'smooth'
+                  ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/30'
+                  : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
               }`}>
-                {(current.graphicsMode || 'standard') === 'extreme' ? '⚡ RTX RAY-TRACING ACTIVE' : (current.graphicsMode || 'standard').toUpperCase()}
+                {(current.graphicsMode || 'standard') === 'extreme' ? '⚡ SUPER EXTREME RTX ACTIVE' : (current.graphicsMode || 'standard') === 'smooth' ? '⚡ SMOOTH PERFORMANCE (120+ FPS)' : '🎯 STANDARD DEFAULT (HD)'}
               </span>
             </div>
 
             <div className="grid grid-cols-3 gap-2">
               {[
-                { id: 'smooth', label: 'Smooth', sub: 'High FPS' },
+                { id: 'smooth', label: 'Smooth', sub: 'Pure Performance' },
                 { id: 'standard', label: 'Standard', sub: 'Default AAA' },
-                { id: 'extreme', label: 'Extreme', sub: 'RTX Ray-Trace' },
+                { id: 'extreme', label: '⚡ Super Extreme', sub: 'Ray-Traced RTX' },
               ].map(g => (
                 <button
                   key={g.id}
@@ -251,9 +253,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       graphicsQuality: g.id === 'smooth' ? 'medium' : g.id === 'standard' ? 'high' : 'ultra',
                     });
                   }}
-                  className={`py-2 px-2 rounded-lg text-left transition-all border cursor-pointer flex flex-col items-center justify-center text-center ${
+                  className={`py-2.5 px-2 rounded-lg text-left transition-all border cursor-pointer flex flex-col items-center justify-center text-center ${
                     (current.graphicsMode || 'standard') === g.id
-                      ? 'bg-cyan-950/70 border-cyan-400 text-cyan-300 shadow-[0_0_12px_rgba(6,182,212,0.35)]'
+                      ? g.id === 'extreme'
+                        ? 'bg-amber-950/70 border-amber-400 text-amber-200 shadow-[0_0_16px_rgba(245,158,11,0.4)] ring-1 ring-amber-400/50'
+                        : 'bg-cyan-950/70 border-cyan-400 text-cyan-300 shadow-[0_0_12px_rgba(6,182,212,0.35)]'
                       : 'bg-slate-900/80 border-slate-800 text-slate-400 hover:text-white hover:border-slate-700'
                   }`}
                 >
@@ -262,11 +266,26 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </button>
               ))}
             </div>
-            <p className="text-[10px] text-slate-400 font-mono">
-              {(current.graphicsMode || 'standard') === 'extreme' && '✨ Extreme Mode enables 4K PCF soft shadows, ACES filmic HDR tone mapping, specular gloss, and ray-marched ballistic light glow.'}
-              {(current.graphicsMode || 'standard') === 'standard' && '🎯 Standard Mode provides high-definition balanced graphics with crisp shadows and optimal performance.'}
-              {(current.graphicsMode || 'standard') === 'smooth' && '🚀 Smooth Mode optimizes rendering parameters for ultra-high framerates and competitive response time.'}
-            </p>
+            <div className="text-[10px] text-slate-400 font-mono bg-black/40 p-2.5 rounded border border-slate-800/60 leading-relaxed">
+              {(current.graphicsMode || 'standard') === 'extreme' && (
+                <div className="text-amber-300/90">
+                  <strong className="text-amber-300 font-bold block mb-1">⚡ SUPER EXTREME (RTX RAY-TRACED GRAPHICS):</strong>
+                  Dynamic 4K Cascaded Contact Shadows centered on player (~45 texels/meter), Ray-Traced Global Illumination (RT-GI ground bounce & specular rim lighting), 360° HDR environment reflections, real-time gunshot muzzle flash & grenade blast shadow casting, and high-frequency micro-surface normal relief.
+                </div>
+              )}
+              {(current.graphicsMode || 'standard') === 'standard' && (
+                <div className="text-emerald-300/90">
+                  <strong className="text-emerald-300 font-bold block mb-1">🎯 STANDARD (DEFAULT AAA HIGH-DEF):</strong>
+                  High-definition balanced graphics with 2048x2048 PCF soft shadows, natural HDR reflections, ACES filmic tone mapping, and volumetric godray shafts.
+                </div>
+              )}
+              {(current.graphicsMode || 'standard') === 'smooth' && (
+                <div className="text-cyan-300/90">
+                  <strong className="text-cyan-300 font-bold block mb-1">🚀 SMOOTH (PURE PERFORMANCE):</strong>
+                  Optimized competitive esports parameters: raw 1.0 pixel ratio, shadow compute disabled, flat lighting for maximum visibility, and reduced particle overhead for buttery smooth 120+ FPS.
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Environment */}

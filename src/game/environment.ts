@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { EnvironmentState, TimeOfDay, WeatherType, GraphicsMode } from '../types';
 import { soundManager } from './audio';
 import { ParticleSystem } from './particles';
+import { TextureGenerator } from './textures';
 
 export interface WeatherPresetConfig {
   id: WeatherType;
@@ -144,6 +145,13 @@ export class EnvironmentManager {
   public godraysGroup: THREE.Group;
   private godrayBeams: THREE.Mesh[] = [];
 
+  // Ray-Traced Global Illumination (RT-GI) & Dynamic Contact Lights
+  public giBounceLight: THREE.DirectionalLight;
+  public sunRimLight: THREE.DirectionalLight;
+  public hdrEnvMap: THREE.Texture | null = null;
+  public microDetailNormalMap: THREE.Texture;
+  private activeSunVector: THREE.Vector3 = new THREE.Vector3(20, 75, -20);
+
   // Current State
   public currentWeather: WeatherType = 'clear_day';
   public targetWeather: WeatherType = 'clear_day';
@@ -217,6 +225,21 @@ export class EnvironmentManager {
     this.fillLight.position.set(-35, 30, 45);
     this.scene.add(this.fillLight);
 
+    // Ray-Traced Ground Indirect GI Bounce Light (illuminates shadow undercuts, weapon receiver, boots)
+    this.giBounceLight = new THREE.DirectionalLight(0xecd5b3, 0.4);
+    this.giBounceLight.position.set(0, -20, 0);
+    this.giBounceLight.target.position.set(0, 10, 0);
+    this.scene.add(this.giBounceLight);
+    this.scene.add(this.giBounceLight.target);
+
+    // Dynamic Specular Sun Rim Light (highlights metallic silhouettes, gun barrel edge, railings)
+    this.sunRimLight = new THREE.DirectionalLight(0xffedd5, 0.3);
+    this.sunRimLight.position.set(-20, 15, 20);
+    this.scene.add(this.sunRimLight);
+
+    // Initialize procedural textures for Super Extreme mode
+    this.microDetailNormalMap = TextureGenerator.createMicroDetailNormalMap();
+
     // 2. Initialize Fog
     this.scene.fog = new THREE.FogExp2(0x334155, 0.006);
 
@@ -250,8 +273,8 @@ export class EnvironmentManager {
 
   // Create procedural volumetric sunbeams
   private initGodrayBeams() {
-    const beamCount = 6;
-    const beamGeo = new THREE.CylinderGeometry(0.8, 6.5, 70, 16, 1, true);
+    const beamCount = 14;
+    const beamGeo = new THREE.CylinderGeometry(0.8, 8.0, 85, 16, 1, true);
 
     // Create soft radial alpha texture
     const canvas = document.createElement('canvas');
@@ -259,9 +282,9 @@ export class EnvironmentManager {
     canvas.height = 256;
     const ctx = canvas.getContext('2d')!;
     const grad = ctx.createLinearGradient(0, 0, 0, 256);
-    grad.addColorStop(0, 'rgba(255, 235, 180, 0.45)');
-    grad.addColorStop(0.3, 'rgba(255, 210, 140, 0.28)');
-    grad.addColorStop(0.8, 'rgba(255, 180, 100, 0.08)');
+    grad.addColorStop(0, 'rgba(255, 235, 180, 0.65)');
+    grad.addColorStop(0.25, 'rgba(255, 215, 145, 0.42)');
+    grad.addColorStop(0.7, 'rgba(255, 185, 105, 0.12)');
     grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, 64, 256);
@@ -271,7 +294,7 @@ export class EnvironmentManager {
       const beamMat = new THREE.MeshBasicMaterial({
         map: beamTex,
         transparent: true,
-        opacity: 0.18,
+        opacity: 0.22,
         blending: THREE.AdditiveBlending,
         side: THREE.DoubleSide,
         depthWrite: false,
@@ -280,18 +303,40 @@ export class EnvironmentManager {
 
       const beam = new THREE.Mesh(beamGeo, beamMat);
       const angle = (i / beamCount) * Math.PI * 2;
-      const radius = 6 + (i % 3) * 4;
-      beam.position.set(Math.cos(angle) * radius, 35, Math.sin(angle) * radius);
-      beam.rotation.x = Math.PI * 0.15;
-      beam.rotation.z = Math.sin(angle) * 0.2;
+      const radius = 5 + (i % 4) * 4.5;
+      beam.position.set(Math.cos(angle) * radius, 38, Math.sin(angle) * radius);
+      beam.rotation.x = Math.PI * 0.14 + (i % 3) * 0.04;
+      beam.rotation.z = Math.sin(angle) * 0.22;
+      beam.scale.set(0.9 + (i % 3) * 0.35, 1.0, 0.9 + (i % 3) * 0.35);
       this.godraysGroup.add(beam);
       this.godrayBeams.push(beam);
     }
   }
 
+  // Universal scene traverser: registers all PBR materials in map, props, and viewmodel
+  public registerSceneMaterials(root: THREE.Object3D) {
+    root.traverse(child => {
+      if (child instanceof THREE.Mesh && child.material) {
+        if (Array.isArray(child.material)) {
+          child.material.forEach(m => {
+            if (m instanceof THREE.MeshStandardMaterial) this.registerMapMaterial(m);
+          });
+        } else if (child.material instanceof THREE.MeshStandardMaterial) {
+          this.registerMapMaterial(child.material);
+        }
+      }
+    });
+  }
+
   // Register map materials to receive wetness/reflection changes
   public registerMapMaterial(mat: THREE.MeshStandardMaterial) {
     if (!this.mapMaterials.includes(mat)) {
+      if (mat.userData.baseRoughness === undefined) {
+        mat.userData.baseRoughness = mat.roughness;
+        mat.userData.baseMetalness = mat.metalness;
+        mat.userData.baseNormalMap = mat.normalMap;
+        mat.userData.baseEnvIntensity = mat.envMapIntensity;
+      }
       this.mapMaterials.push(mat);
       this.applyMaterialQuality(mat);
     }
@@ -304,29 +349,74 @@ export class EnvironmentManager {
 
     // 1. Shadows & Lights
     if (isSmooth) {
+      // Performance Mode: Pure competitive high-visibility, zero shadow overhead
       this.sunLight.castShadow = false;
+      this.giBounceLight.visible = false;
+      this.sunRimLight.visible = false;
       this.godraysGroup.visible = false;
-      this.rainCount = 1000;
-      this.dustCount = 600;
+      this.scene.environment = null;
+      this.rainCount = 450;
+      this.dustCount = 250;
+      this.particles.setPointLightShadows(false);
     } else if (isExtreme) {
+      // Super Extreme RTX Mode: Ray-Traced GI, 4K High-Density Contact Shadows, Dynamic Point Light Shadows
       this.sunLight.castShadow = true;
       this.sunLight.shadow.mapSize.set(4096, 4096);
-      this.sunLight.shadow.radius = 2.8;
-      this.sunLight.shadow.bias = -0.0003;
-      this.sunLight.shadow.normalBias = 0.04;
+      this.sunLight.shadow.radius = 3.6; // Photorealistic contact-softened PCF shadow
+      this.sunLight.shadow.bias = -0.00025;
+      this.sunLight.shadow.normalBias = 0.045;
+      this.sunLight.shadow.camera.left = -48;
+      this.sunLight.shadow.camera.right = 48;
+      this.sunLight.shadow.camera.top = 48;
+      this.sunLight.shadow.camera.bottom = -48;
+      this.sunLight.shadow.camera.updateProjectionMatrix();
+
+      // RT-GI Ground Bounce & Sun Rim Light
+      this.giBounceLight.visible = true;
+      this.giBounceLight.intensity = 1.25;
+      this.sunRimLight.visible = true;
+      this.sunRimLight.intensity = 0.95;
+
       this.godraysGroup.visible = true;
-      this.rainCount = 4500;
-      this.dustCount = 2500;
+      this.godrayBeams.forEach(b => {
+        (b.material as THREE.MeshBasicMaterial).opacity = 0.34;
+      });
+
+      if (this.hdrEnvMap) {
+        this.scene.environment = this.hdrEnvMap;
+      }
+      this.rainCount = 6500;
+      this.dustCount = 3500;
+      this.particles.setPointLightShadows(true);
     } else {
-      // Standard
+      // Standard: Default balanced look (former extreme graphics baseline)
       this.sunLight.castShadow = true;
       this.sunLight.shadow.mapSize.set(2048, 2048);
-      this.sunLight.shadow.radius = 1.6;
+      this.sunLight.shadow.radius = 2.0;
       this.sunLight.shadow.bias = -0.0004;
-      this.sunLight.shadow.normalBias = 0.03;
+      this.sunLight.shadow.normalBias = 0.035;
+      this.sunLight.shadow.camera.left = -75;
+      this.sunLight.shadow.camera.right = 75;
+      this.sunLight.shadow.camera.top = 75;
+      this.sunLight.shadow.camera.bottom = -75;
+      this.sunLight.shadow.camera.updateProjectionMatrix();
+
+      this.giBounceLight.visible = true;
+      this.giBounceLight.intensity = 0.38;
+      this.sunRimLight.visible = true;
+      this.sunRimLight.intensity = 0.28;
+
       this.godraysGroup.visible = true;
-      this.rainCount = 3000;
-      this.dustCount = 1500;
+      this.godrayBeams.forEach(b => {
+        (b.material as THREE.MeshBasicMaterial).opacity = 0.16;
+      });
+
+      if (this.hdrEnvMap) {
+        this.scene.environment = this.hdrEnvMap;
+      }
+      this.rainCount = 3200;
+      this.dustCount = 1600;
+      this.particles.setPointLightShadows(false);
     }
 
     if (this.sunLight.shadow.map) {
@@ -334,7 +424,7 @@ export class EnvironmentManager {
       this.sunLight.shadow.map = null as any;
     }
 
-    // 2. Material PBR tuning
+    // 2. Material PBR tuning across all registered surfaces
     this.mapMaterials.forEach(m => this.applyMaterialQuality(m));
   }
 
@@ -342,14 +432,28 @@ export class EnvironmentManager {
     const isExtreme = this.graphicsMode === 'extreme';
     const isSmooth = this.graphicsMode === 'smooth';
 
+    const baseRoughness = mat.userData.baseRoughness !== undefined ? mat.userData.baseRoughness : 0.7;
+    const baseMetalness = mat.userData.baseMetalness !== undefined ? mat.userData.baseMetalness : 0.2;
+
     if (isExtreme) {
-      mat.roughness = Math.max(0.25, mat.roughness * 0.85);
-      mat.metalness = Math.min(0.9, (mat.metalness || 0.1) * 1.35 + 0.1);
-      mat.envMapIntensity = 1.4;
+      // Super Extreme: PBR ray-traced reflections with high specular sheen and tactile micro-relief
+      mat.roughness = Math.max(0.12, baseRoughness * 0.70);
+      mat.metalness = Math.min(0.95, baseMetalness * 1.5 + 0.15);
+      mat.envMapIntensity = 2.4;
+      mat.normalMap = this.microDetailNormalMap;
+      mat.normalScale.set(0.75, 0.75);
     } else if (isSmooth) {
-      mat.envMapIntensity = 0.5;
+      // Performance Mode: Flat diffuse response, no env reflection overhead
+      mat.roughness = 0.95;
+      mat.metalness = 0.05;
+      mat.envMapIntensity = 0.0;
+      mat.normalMap = null;
     } else {
+      // Standard: Balanced realism
+      mat.roughness = baseRoughness;
+      mat.metalness = baseMetalness;
       mat.envMapIntensity = 1.0;
+      mat.normalMap = mat.userData.baseNormalMap || null;
     }
     mat.needsUpdate = true;
   }
@@ -478,6 +582,8 @@ export class EnvironmentManager {
       cfg = WEATHER_PRESETS['clear_day'];
     }
 
+    this.activeSunVector.set(...cfg.sunPos);
+
     this.ambientLight.color.setHex(cfg.ambientColor);
     this.ambientLight.intensity = cfg.ambientIntensity;
 
@@ -488,11 +594,37 @@ export class EnvironmentManager {
     this.fillLight.color.setHex(cfg.fillColor);
     this.fillLight.intensity = cfg.fillIntensity;
 
+    // Dynamic GI Bounce Light (warm ground bounce illuminating shadows from below)
+    let bounceColor = 0xecd5b3;
+    if (cfg.timeOfDay === 'sunset') bounceColor = 0xd97706;
+    else if (cfg.timeOfDay === 'night') bounceColor = 0x334155;
+    this.giBounceLight.color.setHex(bounceColor);
+    this.giBounceLight.intensity = this.graphicsMode === 'extreme' ? 1.25 : this.graphicsMode === 'standard' ? 0.38 : 0;
+    this.giBounceLight.visible = this.graphicsMode !== 'smooth';
+
+    // Specular Rim Light (specular edge glow on weapon, silhouette, foliage)
+    this.sunRimLight.color.setHex(cfg.sunColor);
+    this.sunRimLight.position.set(-cfg.sunPos[0] * 0.75, 18, -cfg.sunPos[2] * 0.75);
+    this.sunRimLight.intensity = this.graphicsMode === 'extreme' ? 0.95 : this.graphicsMode === 'standard' ? 0.28 : 0;
+    this.sunRimLight.visible = this.graphicsMode !== 'smooth';
+
+    // Ray-Traced HDR Equirectangular Environment Map
+    this.hdrEnvMap = TextureGenerator.createHDREquirectangularTexture(
+      cfg.timeOfDay,
+      cfg.sunColor,
+      cfg.ambientColor
+    );
+    if (this.graphicsMode !== 'smooth') {
+      this.scene.environment = this.hdrEnvMap;
+    } else {
+      this.scene.environment = null;
+    }
+
     // Reposition godrays to align with sun
     this.godraysGroup.position.set(cfg.sunPos[0] * 0.4, 0, cfg.sunPos[2] * 0.4);
     const sunDir = new THREE.Vector3(...cfg.sunPos).normalize();
     this.godrayBeams.forEach(b => {
-      (b.material as THREE.MeshBasicMaterial).opacity = cfg.timeOfDay === 'night' ? 0.06 : this.graphicsMode === 'extreme' ? 0.26 : 0.14;
+      (b.material as THREE.MeshBasicMaterial).opacity = cfg.timeOfDay === 'night' ? 0.06 : this.graphicsMode === 'extreme' ? 0.34 : 0.16;
       b.lookAt(this.godraysGroup.position.clone().add(sunDir));
     });
 
@@ -502,12 +634,12 @@ export class EnvironmentManager {
     }
 
     this.rainMaterial.opacity = cfg.rainIntensity * 0.85;
-    this.dustMaterial.opacity = cfg.dustIntensity * (this.graphicsMode === 'extreme' ? 0.9 : 0.7);
+    this.dustMaterial.opacity = cfg.dustIntensity * (this.graphicsMode === 'extreme' ? 0.95 : 0.7);
 
-    // Apply ground wetness & reflection sheen
+    // Apply ground wetness & reflection sheen across all registered surfaces
     this.mapMaterials.forEach(mat => {
-      mat.roughness = cfg.groundRoughness;
-      mat.metalness = cfg.groundMetalness;
+      mat.userData.baseRoughness = cfg.groundRoughness;
+      mat.userData.baseMetalness = cfg.groundMetalness;
       this.applyMaterialQuality(mat);
     });
 
@@ -569,6 +701,25 @@ export class EnvironmentManager {
 
   // --- FRAME UPDATE ---
   public update(dt: number, playerPos: THREE.Vector3) {
+    // 0. Dynamic High-Density Cascaded Shadow Tracker (Super Extreme Mode)
+    if (playerPos) {
+      const sunDir = this.activeSunVector.clone().normalize();
+      if (this.graphicsMode === 'extreme') {
+        const sunDist = 90;
+        this.sunLight.position.set(
+          playerPos.x + sunDir.x * sunDist,
+          playerPos.y + Math.max(50, sunDir.y * sunDist),
+          playerPos.z + sunDir.z * sunDist
+        );
+        this.sunLight.target.position.set(playerPos.x, playerPos.y, playerPos.z);
+        this.sunLight.target.updateMatrixWorld();
+      } else if (this.graphicsMode === 'standard') {
+        this.sunLight.position.set(sunDir.x * 80, 75, sunDir.z * 80);
+        this.sunLight.target.position.set(0, 0, 0);
+        this.sunLight.target.updateMatrixWorld();
+      }
+    }
+
     // 1. Dynamic Time Progression
     if (this.isDynamicCycle) {
       this.cycleTimeSec += dt;
