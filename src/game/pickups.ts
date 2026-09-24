@@ -78,6 +78,37 @@ export class PickupManager {
     });
   }
 
+  public spawnOutpostPickups() {
+    // Clear existing default pickups
+    this.items.forEach(item => this.scene.remove(item.mesh));
+    this.items = [];
+
+    const outpostLocations: { id: string; type: PickupType; pos: [number, number, number] }[] = [
+      // TOC Bunker interior & roof
+      { id: 'o_ammo_toc_in', type: 'ammo', pos: [0, 0.6, -2] },
+      { id: 'o_armor_toc_roof', type: 'armor', pos: [0, 4.3, -2] },
+      { id: 'o_inhaler_toc', type: 'inhaler', pos: [-4, 0.6, -2] },
+
+      // Motor Pool
+      { id: 'o_ammo_motor_1', type: 'ammo', pos: [24, 0.6, -4] },
+      { id: 'o_armor_motor_2', type: 'armor', pos: [28, 0.6, 6] },
+      { id: 'o_stim_motor', type: 'stimpack', pos: [20, 0.6, 12] },
+
+      // West Trenches
+      { id: 'o_ammo_trench_1', type: 'ammo', pos: [-22, 0.6, -8] },
+      { id: 'o_stim_trench_2', type: 'stimpack', pos: [-26, 0.6, -26] },
+      { id: 'o_inhaler_trench', type: 'inhaler', pos: [-20, 0.6, 16] },
+
+      // Radar Station
+      { id: 'o_armor_radar', type: 'armor', pos: [0, 0.6, 26] },
+      { id: 'o_ammo_radar', type: 'ammo', pos: [4, 0.6, 20] },
+    ];
+
+    outpostLocations.forEach(loc => {
+      this.createPickup(loc.id, loc.type, new THREE.Vector3(...loc.pos));
+    });
+  }
+
   private createPickup(id: string, type: PickupType, position: THREE.Vector3) {
     const group = new THREE.Group();
     group.position.copy(position);

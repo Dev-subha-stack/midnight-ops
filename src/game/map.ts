@@ -4,6 +4,7 @@ import { DestructionManager } from './destruction';
 import { ParticleSystem } from './particles';
 import { MapType } from '../types';
 import { BermudaMapBuilder } from './bermuda_builder';
+import { OutpostMapBuilder } from './outpost_builder';
 
 export interface MapObstacle {
   id?: string;
@@ -32,6 +33,7 @@ export interface TacticalCoverPoint {
   obstacleId: string;
   isAvailable: boolean;
   type?: 'high' | 'low';
+  leanSide?: 'left' | 'right' | 'none';
 }
 
 export class TacticalMap {
@@ -78,6 +80,19 @@ export class TacticalMap {
 
     if (this.mapType === 'bermuda') {
       this.groundMaterial = BermudaMapBuilder.build(
+        this.scene,
+        this.obstacles,
+        this.spawnPoints,
+        this.navNodes,
+        this.flankWaypointsLeft,
+        this.flankWaypointsRight,
+        this.coverPoints,
+        this.explosiveBarrels,
+        this.particles,
+        this.destruction
+      );
+    } else if (this.mapType === 'outpost') {
+      this.groundMaterial = OutpostMapBuilder.build(
         this.scene,
         this.obstacles,
         this.spawnPoints,

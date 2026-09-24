@@ -1169,25 +1169,26 @@ export class ModelFactory {
 
     const gloveMat = new THREE.MeshStandardMaterial({
       map: gloveTexture,
-      roughness: 0.7,
-      metalness: 0.15,
+      roughness: 0.68,
+      metalness: 0.12,
     });
 
     const knuckleMat = new THREE.MeshStandardMaterial({
       color: 0x0f172a,
-      roughness: 0.3,
-      metalness: 0.8,
+      roughness: 0.28,
+      metalness: 0.85,
     });
 
     const sleeveMat = new THREE.MeshStandardMaterial({
       map: sleeveTexture,
-      roughness: 0.85,
+      roughness: 0.78,
       metalness: 0.05,
     });
 
-    const skinMat = new THREE.MeshStandardMaterial({
-      color: 0xd4a373,
-      roughness: 0.65,
+    const underlayerMat = new THREE.MeshStandardMaterial({
+      color: 0x27272a,
+      roughness: 0.85,
+      metalness: 0.05,
     });
 
     const strapMat = new THREE.MeshStandardMaterial({
@@ -1207,16 +1208,16 @@ export class ModelFactory {
       handGroup.add(palm);
 
       // Molded Carbon Fiber Knuckle Guard
-      const knuckleGuard = new THREE.Mesh(new THREE.BoxGeometry(0.062, 0.016, 0.032), knuckleMat);
-      knuckleGuard.position.set(0, 0.02, -0.015);
+      const knuckleGuard = new THREE.Mesh(new THREE.BoxGeometry(0.064, 0.016, 0.034), knuckleMat);
+      knuckleGuard.position.set(0, 0.021, -0.015);
       knuckleGuard.rotation.x = -0.15;
       handGroup.add(knuckleGuard);
 
-      // 4 Individual Knuckle Protectors
+      // 4 Individual Molded Knuckle Protectors
       for (let i = -1.5; i <= 1.5; i++) {
-        const kCap = new THREE.Mesh(new THREE.SphereGeometry(0.007, 8, 8), knuckleMat);
-        kCap.scale.set(1, 0.7, 1.2);
-        kCap.position.set(i * 0.016, 0.024, -0.015);
+        const kCap = new THREE.Mesh(new THREE.SphereGeometry(0.0075, 8, 8), knuckleMat);
+        kCap.scale.set(1, 0.75, 1.25);
+        kCap.position.set(i * 0.016, 0.025, -0.015);
         handGroup.add(kCap);
       }
 
@@ -1228,18 +1229,18 @@ export class ModelFactory {
         fingerGroup.position.set(posX, 0.005, -0.04);
 
         // Proximal phalanx (base segment)
-        const seg1 = new THREE.Mesh(new THREE.CylinderGeometry(0.0065, 0.007, 0.028, 8), gloveMat);
+        const seg1 = new THREE.Mesh(new THREE.CylinderGeometry(0.0068, 0.0072, 0.028, 8), gloveMat);
         seg1.rotateX(Math.PI / 2);
         seg1.position.set(0, 0, -0.014);
 
         // Curled gripping angle depending on hand
         if (!isLeft && idx === 0) {
           // Right trigger finger: extended along trigger guard or hooked on trigger
-          seg1.rotation.x = 1.2;
+          seg1.rotation.x = 1.15;
           seg1.position.set(0, -0.008, -0.018);
         } else {
-          // Wrapped around grip / handguard
-          seg1.rotation.x = 1.5;
+          // Wrapped securely around grip / handguard
+          seg1.rotation.x = 1.52;
           seg1.position.set(0, -0.012, -0.012);
         }
 
@@ -1247,24 +1248,27 @@ export class ModelFactory {
         handGroup.add(fingerGroup);
       });
 
-      // Thumb
+      // Thumb with articulated grip
       const thumbGroup = new THREE.Group();
       const thumbX = isLeft ? 0.038 : -0.038;
       thumbGroup.position.set(thumbX, -0.005, 0.01);
       thumbGroup.rotation.y = isLeft ? -0.6 : 0.6;
       thumbGroup.rotation.z = isLeft ? 0.4 : -0.4;
 
-      const thumbSeg = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.0085, 0.034, 8), gloveMat);
+      const thumbSeg = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.0088, 0.034, 8), gloveMat);
       thumbSeg.rotateX(Math.PI / 2);
       thumbSeg.position.set(0, 0, -0.016);
       thumbGroup.add(thumbSeg);
       handGroup.add(thumbGroup);
 
       // Glove Wrist Cuff with Velcro Adjustment Strap
-      const cuff = new THREE.Mesh(new THREE.CylinderGeometry(0.038, 0.042, 0.035, 12), strapMat);
+      const cuff = new THREE.Mesh(new THREE.CylinderGeometry(0.038, 0.042, 0.035, 14), strapMat);
       cuff.position.set(0, 0, 0.05);
       cuff.rotateX(Math.PI / 2);
-      handGroup.add(cuff);
+
+      const pullTab = new THREE.Mesh(new THREE.BoxGeometry(0.018, 0.032, 0.006), knuckleMat);
+      pullTab.position.set(0, -0.04, 0.05);
+      handGroup.add(cuff, pullTab);
 
       return handGroup;
     };
@@ -1280,6 +1284,12 @@ export class ModelFactory {
     rightSleeve.rotation.x = 0.82;
     rightSleeve.rotation.z = -0.08;
     rightArmGroup.add(rightSleeve);
+
+    // Compression sleeve underlayer visible at wrist
+    const rightUnderlayer = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.048, 0.06, 12), underlayerMat);
+    rightUnderlayer.position.set(0, -0.02, 0.03);
+    rightUnderlayer.rotation.x = 0.82;
+    rightArmGroup.add(rightUnderlayer);
 
     // Rolled Sleeve Fabric Cuff Fold
     const rightCuffFold = new THREE.Mesh(new THREE.TorusGeometry(0.06, 0.012, 8, 16), sleeveMat);
@@ -1305,6 +1315,12 @@ export class ModelFactory {
     leftSleeve.rotation.z = 0.12;
     leftArmGroup.add(leftSleeve);
 
+    const leftUnderlayer = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.048, 0.06, 12), underlayerMat);
+    leftUnderlayer.position.set(-0.02, -0.02, 0.04);
+    leftUnderlayer.rotation.x = 0.64;
+    leftUnderlayer.rotation.y = -0.42;
+    leftArmGroup.add(leftUnderlayer);
+
     const leftCuffFold = new THREE.Mesh(new THREE.TorusGeometry(0.06, 0.012, 8, 16), sleeveMat);
     leftCuffFold.position.set(-0.02, -0.04, 0.06);
     leftCuffFold.rotation.x = 0.64;
@@ -1328,7 +1344,7 @@ export class ModelFactory {
     // Bezel housing
     const watchCase = new THREE.Mesh(
       new THREE.CylinderGeometry(0.028, 0.028, 0.012, 20),
-      new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.3, metalness: 0.85 })
+      new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.28, metalness: 0.88 })
     );
     watchGroup.add(watchCase);
 
@@ -1337,10 +1353,10 @@ export class ModelFactory {
       new THREE.CircleGeometry(0.024, 20),
       new THREE.MeshStandardMaterial({
         map: watchTexture,
-        roughness: 0.1,
+        roughness: 0.08,
         metalness: 0.2,
         emissive: 0x0284c7,
-        emissiveIntensity: 0.45,
+        emissiveIntensity: 0.5,
       })
     );
     watchScreen.position.y = 0.007;
@@ -1357,6 +1373,35 @@ export class ModelFactory {
 
     leftArmGroup.add(watchGroup);
 
+    // Tactical CAT Gen 7 Combat Application Tourniquet on Left Forearm
+    const tqBand = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.063, 0.063, 0.038, 14),
+      new THREE.MeshStandardMaterial({ color: 0x18181b, roughness: 0.85 })
+    );
+    tqBand.position.set(-0.04, -0.08, 0.12);
+    tqBand.rotation.x = 0.64;
+    tqBand.rotation.y = -0.42;
+    const tqWindlass = new THREE.Mesh(
+      new THREE.BoxGeometry(0.012, 0.012, 0.065),
+      new THREE.MeshStandardMaterial({ color: 0xd97706, roughness: 0.4 })
+    );
+    tqWindlass.position.set(-0.08, -0.06, 0.12);
+    leftArmGroup.add(tqBand, tqWindlass);
+
+    // Tactical Mil-Spec Paracord Survival Bracelet on Right Wrist
+    const bracelet = new THREE.Mesh(
+      new THREE.TorusGeometry(0.044, 0.007, 8, 18),
+      new THREE.MeshStandardMaterial({ color: 0x3f3f46, roughness: 0.82 })
+    );
+    bracelet.position.set(0, -0.04, 0.07);
+    bracelet.rotation.x = 0.82;
+    const buckle = new THREE.Mesh(
+      new THREE.BoxGeometry(0.018, 0.012, 0.024),
+      knuckleMat
+    );
+    buckle.position.set(0.038, -0.04, 0.07);
+    rightArmGroup.add(bracelet, buckle);
+
     armsGroup.add(rightArmGroup, leftArmGroup);
     return armsGroup;
   }
@@ -1370,7 +1415,7 @@ export class ModelFactory {
     const botGroup = new THREE.Group();
     botGroup.name = `bot_${team}_${archetype}`;
 
-    // PBR Textures
+    // Procedural High-Resolution PBR Textures
     const uniformTexture = TextureGenerator.createOperatorUniformTexture(
       team === 'axis' ? 'axis_shadow' : archetype === 'flanker' ? 'spec_ops' : 'allies_multicam'
     );
@@ -1379,246 +1424,472 @@ export class ModelFactory {
     );
     const gloveTexture = TextureGenerator.createTacticalGloveTexture();
 
+    // Balanced PBR Materials (Realistic specularity without blown-out contrast)
     const uniformMat = new THREE.MeshStandardMaterial({
       map: uniformTexture,
-      roughness: 0.8,
-      metalness: 0.1,
+      roughness: 0.75,
+      metalness: 0.08,
     });
 
     const vestMat = new THREE.MeshStandardMaterial({
       map: plateCarrierTexture,
-      roughness: 0.65,
-      metalness: 0.25,
+      roughness: 0.62,
+      metalness: 0.18,
     });
 
     const gloveMat = new THREE.MeshStandardMaterial({
       map: gloveTexture,
-      roughness: 0.7,
-      metalness: 0.2,
+      roughness: 0.65,
+      metalness: 0.15,
     });
 
     const helmetMat = new THREE.MeshStandardMaterial({
       color: team === 'axis' ? 0x18181b : 0x27272a,
-      roughness: 0.45,
-      metalness: 0.6,
+      roughness: 0.42,
+      metalness: 0.55,
     });
 
-    const visorColor = team === 'axis' ? 0xef4444 : 0x06b6d4;
-    const visorEmissive = team === 'axis' ? 0xb91c1c : 0x0284c7;
+    const armorPlateMat = new THREE.MeshStandardMaterial({
+      color: team === 'axis' ? 0x111827 : 0x1e293b,
+      roughness: 0.38,
+      metalness: 0.65,
+    });
+
+    const visorColor = team === 'axis' ? 0xdc2626 : 0x0284c7;
+    const visorEmissive = team === 'axis' ? 0x991b1b : 0x0369a1;
     const visorMat = new THREE.MeshStandardMaterial({
       color: visorColor,
       emissive: visorEmissive,
-      emissiveIntensity: 0.8,
-      roughness: 0.15,
-      metalness: 0.9,
+      emissiveIntensity: 0.5,
+      roughness: 0.12,
+      metalness: 0.85,
     });
 
-    const steelMat = new THREE.MeshStandardMaterial({
+    const metalHardwareMat = new THREE.MeshStandardMaterial({
       color: 0x3f3f46,
-      roughness: 0.25,
-      metalness: 0.9,
+      roughness: 0.28,
+      metalness: 0.88,
     });
 
-    const brassMat = new THREE.MeshStandardMaterial({
+    const brassAmmoMat = new THREE.MeshStandardMaterial({
       color: 0xd97706,
-      roughness: 0.3,
-      metalness: 0.8,
+      roughness: 0.22,
+      metalness: 0.82,
+    });
+
+    const bootRubberMat = new THREE.MeshStandardMaterial({
+      color: 0x18181b,
+      roughness: 0.82,
+      metalness: 0.12,
+    });
+
+    const teamPatchMat = new THREE.MeshStandardMaterial({
+      color: team === 'axis' ? 0xef4444 : 0x10b981,
+      roughness: 0.5,
+      emissive: team === 'axis' ? 0x7f1d1d : 0x064e3b,
+      emissiveIntensity: 0.3,
     });
 
     const chemLightMat = new THREE.MeshBasicMaterial({
       color: team === 'axis' ? 0xef4444 : 0x10b981,
     });
 
-    // 1. Torso & Ballistic Plate Carrier
-    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.62, 0.28), uniformMat);
-    torso.position.set(0, 1.25, 0);
-    torso.name = 'bot_torso';
-    botGroup.add(torso);
+    // 1. TORSO & BALLISTIC PLATE CARRIER (Hierarchical pivot at waist/hips)
+    const torsoGroup = new THREE.Group();
+    torsoGroup.name = 'bot_torso';
+    torsoGroup.position.set(0, 1.05, 0);
 
-    const plateCarrier = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.52, 0.33), vestMat);
-    plateCarrier.position.set(0, 1.3, 0);
-    plateCarrier.name = 'bot_plate_carrier';
-    botGroup.add(plateCarrier);
+    // Anatomical tapered combat shirt torso
+    const chestGeo = new THREE.BoxGeometry(0.46, 0.48, 0.26);
+    const chestMesh = new THREE.Mesh(chestGeo, uniformMat);
+    chestMesh.position.set(0, 0.24, 0);
+    torsoGroup.add(chestMesh);
 
-    // Front Ceramic Trauma Strike Plate
-    const traumaPlate = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.38, 0.04), vestMat);
-    traumaPlate.position.set(0, 1.32, 0.18);
-    botGroup.add(traumaPlate);
+    // High combat collar
+    const collar = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.14, 0.08, 12), uniformMat);
+    collar.position.set(0, 0.48, 0);
+    torsoGroup.add(collar);
 
-    // 3x Mag Pouches with Brass 5.56 Tips
+    // Crye JPC / CIRAS Tactical Plate Carrier
+    const plateCarrier = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.44, 0.30), vestMat);
+    plateCarrier.position.set(0, 0.25, 0);
+    torsoGroup.add(plateCarrier);
+
+    // Front Ceramic Strike Plate with beveled edges
+    const frontPlate = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.36, 0.04), armorPlateMat);
+    frontPlate.position.set(0, 0.26, 0.16);
+    torsoGroup.add(frontPlate);
+
+    // Rear Ceramic Strike Plate
+    const rearPlate = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.36, 0.04), armorPlateMat);
+    rearPlate.position.set(0, 0.26, -0.16);
+    torsoGroup.add(rearPlate);
+
+    // Team Identification IR Morale Patch on upper chest
+    const moralePatch = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.06, 0.01), teamPatchMat);
+    moralePatch.position.set(0, 0.36, 0.185);
+    torsoGroup.add(moralePatch);
+
+    // Triple Front 5.56 Magazine Pouches with Brass Cartridge Tips
     for (let i = -1; i <= 1; i++) {
-      const pouch = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.16, 0.07), vestMat);
-      pouch.position.set(i * 0.11, 1.22, 0.21);
-      const magTop = new THREE.Mesh(new THREE.BoxGeometry(0.065, 0.05, 0.05), steelMat);
-      magTop.position.set(i * 0.11, 1.31, 0.21);
-      const bulletTip = new THREE.Mesh(new THREE.ConeGeometry(0.008, 0.02, 8), brassMat);
+      const pouch = new THREE.Mesh(new THREE.BoxGeometry(0.085, 0.16, 0.075), vestMat);
+      pouch.position.set(i * 0.105, 0.18, 0.18);
+      
+      const mag = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.08, 0.055), metalHardwareMat);
+      mag.position.set(i * 0.105, 0.26, 0.18);
+      
+      const bulletTip = new THREE.Mesh(new THREE.ConeGeometry(0.009, 0.022, 8), brassAmmoMat);
       bulletTip.rotateX(Math.PI);
-      bulletTip.position.set(i * 0.11, 1.35, 0.21);
-      botGroup.add(pouch, magTop, bulletTip);
+      bulletTip.position.set(i * 0.105, 0.31, 0.18);
+      
+      torsoGroup.add(pouch, mag, bulletTip);
     }
 
-    // Tactical Chem Light (Glow Stick) on Chest
-    const chemLight = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.12, 8), chemLightMat);
-    chemLight.position.set(0.18, 1.38, 0.19);
-    chemLight.rotation.z = 0.3;
-    botGroup.add(chemLight);
+    // Tactical AN/PRC-152 Radio with Whip Antenna on Shoulder
+    const radioPouch = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.14, 0.08), vestMat);
+    radioPouch.position.set(-0.19, 0.32, -0.16);
+    const radioBody = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.18, 0.07), metalHardwareMat);
+    radioBody.position.set(-0.19, 0.38, -0.16);
+    const antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.0025, 0.38, 8), metalHardwareMat);
+    antenna.position.set(-0.19, 0.65, -0.16);
+    antenna.rotation.z = -0.08;
+    torsoGroup.add(radioPouch, radioBody, antenna);
 
-    // Tactical Radio with Whip Antenna on Shoulder
-    const radio = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.18, 0.08), steelMat);
-    radio.position.set(-0.18, 1.42, -0.19);
-    const antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.005, 0.003, 0.35, 8), steelMat);
-    antenna.position.set(-0.18, 1.68, -0.19);
-    botGroup.add(radio, antenna);
+    // Tactical Chem Light (Glow Stick) clipped into MOLLE row
+    const chemLight = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.13, 8), chemLightMat);
+    chemLight.position.set(0.18, 0.32, 0.17);
+    chemLight.rotation.z = 0.25;
+    torsoGroup.add(chemLight);
 
-    // Archetype Specific Torso Armor Additions
+    // Flex Cuffs / Zip-Ties on Rear Carrier
+    const zipTies = new THREE.Mesh(new THREE.TorusGeometry(0.04, 0.008, 6, 12), metalHardwareMat);
+    zipTies.position.set(0, 0.35, -0.18);
+    torsoGroup.add(zipTies);
+
+    // Modular 3-Day Assault Backpack on Rear Plate Carrier
+    const assaultPack = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.38, 0.14), vestMat);
+    assaultPack.position.set(0, 0.22, -0.22);
+    const assaultPackPocket = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.16, 0.06), vestMat);
+    assaultPackPocket.position.set(0, 0.14, -0.31);
+    
+    // Hydration Tube extending over right shoulder with bite valve
+    const hydraTube = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.32, 8), metalHardwareMat);
+    hydraTube.position.set(0.16, 0.36, -0.06);
+    hydraTube.rotation.x = 0.85;
+    const biteValve = new THREE.Mesh(new THREE.BoxGeometry(0.016, 0.024, 0.016), chemLightMat);
+    biteValve.position.set(0.16, 0.24, 0.08);
+    torsoGroup.add(assaultPack, assaultPackPocket, hydraTube, biteValve);
+
+    // Padded Battle War Belt around waist (y = -0.04)
+    const warBelt = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.25, 0.09, 14), vestMat);
+    warBelt.position.set(0, -0.04, 0);
+    
+    // IFAK (Individual First Aid Kit) Trauma Pouch on lower back of belt
+    const ifakPouch = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.11, 0.08), armorPlateMat);
+    ifakPouch.position.set(0, -0.04, -0.25);
+    const ifakCross = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.01), teamPatchMat);
+    ifakCross.position.set(0, -0.04, -0.295);
+    
+    // Sidearms Kydex Holster on Right Hip with Secondary Handgun
+    const holster = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.16, 0.09), armorPlateMat);
+    holster.position.set(0.26, -0.12, 0.02);
+    const pistolGrip = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.08, 0.04), metalHardwareMat);
+    pistolGrip.position.set(0.26, -0.03, 0.02);
+    pistolGrip.rotation.x = 0.2;
+    torsoGroup.add(warBelt, ifakPouch, ifakCross, holster, pistolGrip);
+
+    // Archetype-Specific Torso Accessories
     if (archetype === 'heavy') {
-      // Deltoid Shoulder Armor Plates
-      const shoulderL = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.2, 0.18), vestMat);
-      shoulderL.position.set(-0.32, 1.45, 0);
+      // Deltoid Shoulder Pauldrons (Heavy Armor)
+      const shoulderL = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.22, 0.18), armorPlateMat);
+      shoulderL.position.set(-0.30, 0.38, 0.02);
       const shoulderR = shoulderL.clone();
-      shoulderR.position.x = 0.32;
+      shoulderR.position.x = 0.30;
 
-      // Groin Protection Blast Flap
-      const groinFlap = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.22, 0.04), vestMat);
-      groinFlap.position.set(0, 0.88, 0.15);
-      botGroup.add(shoulderL, shoulderR, groinFlap);
+      // Throat Ballistic Collar
+      const throatGuard = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.18, 0.08, 12, 1, true, -Math.PI / 3, (2 * Math.PI) / 3), armorPlateMat);
+      throatGuard.position.set(0, 0.48, 0.04);
+
+      // Groin Blast Apron Flap
+      const groinFlap = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.24, 0.04), vestMat);
+      groinFlap.position.set(0, -0.06, 0.15);
+      torsoGroup.add(shoulderL, shoulderR, throatGuard, groinFlap);
+    } else if (archetype === 'flanker') {
+      // Tactical Sheathed Karambit Combat Knife on Chest
+      const sheath = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.16, 0.025), armorPlateMat);
+      sheath.position.set(-0.10, 0.36, 0.18);
+      sheath.rotation.z = 0.6;
+      const knifeGrip = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.09, 0.025), metalHardwareMat);
+      knifeGrip.position.set(-0.06, 0.44, 0.18);
+      knifeGrip.rotation.z = 0.6;
+      torsoGroup.add(sheath, knifeGrip);
+    } else if (archetype === 'sniper') {
+      // Ghillie Burlap Scrim Cowl Draped Across Shoulders
+      const scrimCowl = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.14, 0.32), uniformMat);
+      scrimCowl.position.set(0, 0.44, 0);
+      torsoGroup.add(scrimCowl);
+    } else {
+      // Assault: 2x M67 Frag Grenades with Pull Rings
+      for (let i = 0; i < 2; i++) {
+        const grenade = new THREE.Mesh(new THREE.SphereGeometry(0.035, 10, 8), metalHardwareMat);
+        grenade.position.set(-0.16 - i * 0.06, 0.18, 0.17);
+        const pin = new THREE.Mesh(new THREE.TorusGeometry(0.012, 0.003, 6, 8), brassAmmoMat);
+        pin.position.set(-0.16 - i * 0.06, 0.22, 0.17);
+        torsoGroup.add(grenade, pin);
+      }
     }
 
-    // 2. Head, Balaclava, Helmet & NVG Optics
+    botGroup.add(torsoGroup);
+
+    // 2. HEAD, BALACLAVA, HELMET & OPTICS (Pivot at neck base)
     const headGroup = new THREE.Group();
     headGroup.name = 'bot_head';
-    headGroup.position.set(0, 1.72, 0);
+    headGroup.position.set(0, 1.62, 0);
 
-    const balaclava = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.26, 0.24), uniformMat);
-    headGroup.add(balaclava);
+    // Contoured Balaclava Head
+    const headCranium = new THREE.Mesh(new THREE.SphereGeometry(0.13, 14, 12), uniformMat);
+    headCranium.scale.set(1.0, 1.05, 1.15);
+    headCranium.position.set(0, 0.03, 0);
+    headCranium.name = 'head';
 
-    // FAST High-Cut Tactical Helmet
-    const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.165, 16, 12), helmetMat);
-    helmet.scale.set(1, 0.85, 1.12);
-    helmet.position.set(0, 0.06, -0.01);
-    helmet.name = 'bot_helmet';
-    headGroup.add(helmet);
+    const headJaw = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.14, 0.18), uniformMat);
+    headJaw.position.set(0, -0.05, 0.02);
+    headJaw.name = 'head';
+    headGroup.add(headCranium, headJaw);
 
-    // Tactical ARC Rails & ComTac Ear Headsets
-    const railL = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.03, 0.16), steelMat);
-    railL.position.set(-0.16, 0.04, 0);
+    // Ballistic Eye Protection / Tactical Glasses
+    const eyeLens = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.045, 0.04), visorMat);
+    eyeLens.position.set(0, 0.01, 0.11);
+    eyeLens.name = 'head';
+    headGroup.add(eyeLens);
+
+    // Ops-Core FAST High-Cut Tactical Ballistic Helmet
+    const helmetShell = new THREE.Mesh(new THREE.SphereGeometry(0.16, 16, 12), helmetMat);
+    helmetShell.scale.set(1.0, 0.86, 1.14);
+    helmetShell.position.set(0, 0.07, -0.01);
+    helmetShell.name = 'bot_helmet';
+    headGroup.add(helmetShell);
+
+    // Wilcox L4 G24 NVG Shroud on Forehead
+    const nvgShroud = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.06, 0.03), metalHardwareMat);
+    nvgShroud.position.set(0, 0.08, 0.165);
+    headGroup.add(nvgShroud);
+
+    // Left & Right ARC Accessory Rails
+    const railL = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.025, 0.15), metalHardwareMat);
+    railL.position.set(-0.165, 0.04, 0);
     const railR = railL.clone();
-    railR.position.x = 0.16;
+    railR.position.x = 0.165;
+    
+    // Tactical Princeton Tec Task Light on Left Rail
+    const railLight = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.014, 0.06, 8), metalHardwareMat);
+    railLight.rotateX(Math.PI / 2);
+    railLight.position.set(-0.18, 0.05, 0.04);
+    
+    // Top-Mounted Hel-Star 6 IR Tactical Strobe Beacon
+    const irStrobe = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.022, 0.065), armorPlateMat);
+    irStrobe.position.set(0, 0.195, -0.04);
+    const irStrobeLED = new THREE.Mesh(new THREE.SphereGeometry(0.012, 6, 6), chemLightMat);
+    irStrobeLED.position.set(0, 0.208, -0.04);
+    
+    headGroup.add(railL, railR, railLight, irStrobe, irStrobeLED);
 
-    const earcupL = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.03, 12), vestMat);
+    // Rear Counterweight Battery Pack with Elastic Bungees
+    const batteryPack = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.07, 0.045), vestMat);
+    batteryPack.position.set(0, 0.04, -0.17);
+    headGroup.add(batteryPack);
+
+    // ComTac III Tactical Communication Headset with Boom Mic
+    const earcupL = new THREE.Mesh(new THREE.CylinderGeometry(0.042, 0.042, 0.03, 12), vestMat);
     earcupL.rotateZ(Math.PI / 2);
-    earcupL.position.set(-0.14, 0.02, 0);
+    earcupL.position.set(-0.15, 0.01, 0);
     const earcupR = earcupL.clone();
-    earcupR.position.x = 0.14;
+    earcupR.position.x = 0.15;
 
-    const boomMic = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.14, 6), steelMat);
+    const boomMic = new THREE.Mesh(new THREE.CylinderGeometry(0.0035, 0.0035, 0.15, 6), metalHardwareMat);
     boomMic.rotateX(Math.PI / 2);
-    boomMic.rotateZ(0.3);
-    boomMic.position.set(-0.12, -0.04, 0.08);
+    boomMic.rotateZ(0.35);
+    boomMic.position.set(-0.13, -0.05, 0.08);
 
-    headGroup.add(railL, railR, earcupL, earcupR, boomMic);
+    headGroup.add(earcupL, earcupR, boomMic);
 
-    // Headwear variations by archetype
+    // Archetype-Specific Headgear Optics
     if (archetype === 'flanker') {
-      // Quad-Tube Panoramic Night Vision Goggles (GPNVG-18)
-      const nvgBridge = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.04, 0.06), steelMat);
-      nvgBridge.position.set(0, 0.08, 0.18);
+      // GPNVG-18 Quad-Tube Panoramic Night Vision Goggles
+      const nvgMount = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.035, 0.08), metalHardwareMat);
+      nvgMount.position.set(0, 0.07, 0.20);
+      headGroup.add(nvgMount);
       for (let i = -1.5; i <= 1.5; i++) {
-        const nvgTube = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.02, 0.08, 10), steelMat);
-        nvgTube.rotateX(Math.PI / 2);
-        nvgTube.position.set(i * 0.045, 0.06, 0.22);
-        const lens = new THREE.Mesh(new THREE.CircleGeometry(0.018, 12), visorMat);
-        lens.position.set(i * 0.045, 0.06, 0.265);
-        headGroup.add(nvgTube, lens);
+        const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.018, 0.075, 10), metalHardwareMat);
+        tube.rotateX(Math.PI / 2);
+        tube.position.set(i * 0.042, 0.05, 0.23);
+        const lens = new THREE.Mesh(new THREE.CircleGeometry(0.016, 12), visorMat);
+        lens.position.set(i * 0.042, 0.05, 0.27);
+        headGroup.add(tube, lens);
       }
-      headGroup.add(nvgBridge);
     } else if (archetype === 'heavy') {
-      // Heavy Ballistic Visor Face Shield
-      const faceShield = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.16, 0.03), visorMat);
-      faceShield.position.set(0, 0.01, 0.15);
-      headGroup.add(faceShield);
+      // Heavy Ballistic Titanium Face Shield Visor
+      const visorFrame = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.18, 0.035), armorPlateMat);
+      visorFrame.position.set(0, 0.01, 0.16);
+      const visorGlass = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.06, 0.04), visorMat);
+      visorGlass.position.set(0, 0.02, 0.165);
+      headGroup.add(visorFrame, visorGlass);
+    } else if (archetype === 'sniper') {
+      // Camo Scrim Netting Veil Draped Across Rim
+      const veil = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.20, 0.10, 14, 1, true), uniformMat);
+      veil.position.set(0, 0.02, 0);
+      headGroup.add(veil);
     } else {
-      // Tactical Combat Goggles / Visor
-      const visor = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.065, 0.06), visorMat);
-      visor.position.set(0, 0.025, 0.125);
-      const nvgMount = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.04), steelMat);
-      nvgMount.position.set(0, 0.12, 0.16);
-      headGroup.add(visor, nvgMount);
+      // Assault: Tactical ESS Ballistic Goggles
+      const goggleFrame = new THREE.Mesh(new THREE.BoxGeometry(0.19, 0.07, 0.05), armorPlateMat);
+      goggleFrame.position.set(0, 0.015, 0.135);
+      const goggleLens = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.05, 0.052), visorMat);
+      goggleLens.position.set(0, 0.015, 0.136);
+      headGroup.add(goggleFrame, goggleLens);
     }
 
     botGroup.add(headGroup);
 
-    // 3. Arms & Articulated Tactical Hands
-    const leftArm = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.065, 0.6, 12), uniformMat);
-    leftArm.position.set(-0.32, 1.2, 0.12);
-    leftArm.rotation.x = 0.5;
+    // 3. TACTICAL BATTLE BELT & RIGGING
+    const battleBelt = new THREE.Mesh(new THREE.BoxGeometry(0.50, 0.09, 0.32), vestMat);
+    battleBelt.position.set(0, 0.90, 0);
+
+    // Metal Cobra Quick-Release Buckle
+    const cobraBuckle = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.07, 0.03), metalHardwareMat);
+    cobraBuckle.position.set(0, 0.90, 0.17);
+
+    // Drop-Leg Kydex Tactical Holster with Sidearm
+    const dropHolster = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.18, 0.10), armorPlateMat);
+    dropHolster.position.set(0.26, 0.78, 0.04);
+    const sidearmGrip = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.10, 0.04), metalHardwareMat);
+    sidearmGrip.position.set(0.26, 0.88, 0.04);
+    sidearmGrip.rotation.z = -0.28;
+
+    // Tactical Dump Pouch & Tourniquet on Belt
+    const dumpPouch = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.15, 0.10), vestMat);
+    dumpPouch.position.set(-0.24, 0.82, -0.06);
+    const tourniquet = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.08, 0.05), teamPatchMat);
+    tourniquet.position.set(0.12, 0.90, 0.17);
+
+    botGroup.add(battleBelt, cobraBuckle, dropHolster, sidearmGrip, dumpPouch, tourniquet);
+
+    // 4. ARTICULATED ARMS & COMBAT GLOVES
+    // Left Arm (Shoulder socket at -0.28, 1.38, 0.04)
+    const leftArm = new THREE.Group();
     leftArm.name = 'bot_left_arm';
+    leftArm.position.set(-0.28, 1.38, 0.04);
+    leftArm.rotation.x = 0.5;
 
-    const elbowPadL = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.12, 12), vestMat);
-    elbowPadL.position.set(0, 0, 0);
-    leftArm.add(elbowPadL);
+    // Upper arm sleeve
+    const leftUpperArm = new THREE.Mesh(new THREE.CylinderGeometry(0.068, 0.062, 0.24, 12), uniformMat);
+    leftUpperArm.position.set(0, -0.12, 0);
+    leftArm.add(leftUpperArm);
 
-    const leftHand = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.06, 0.12), gloveMat);
-    leftHand.position.set(0, -0.28, 0.02);
-    leftArm.add(leftHand);
+    // Tactical Elbow Pad with molded strike cap
+    const leftElbowPad = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, 0.11, 10), armorPlateMat);
+    leftElbowPad.position.set(0, -0.24, -0.02);
+    leftArm.add(leftElbowPad);
+
+    // Forearm
+    const leftForearm = new THREE.Mesh(new THREE.CylinderGeometry(0.062, 0.055, 0.24, 12), uniformMat);
+    leftForearm.position.set(0, -0.36, 0.02);
+    leftArm.add(leftForearm);
+
+    // Tactical Operator Glove with Carbon Knuckle Protector
+    const leftHand = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.06, 0.11), gloveMat);
+    leftHand.position.set(0, -0.48, 0.03);
+    const leftKnuckle = new THREE.Mesh(new THREE.BoxGeometry(0.068, 0.02, 0.04), armorPlateMat);
+    leftKnuckle.position.set(0, -0.46, 0.08);
+    leftArm.add(leftHand, leftKnuckle);
+
     botGroup.add(leftArm);
 
-    const rightArm = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.065, 0.6, 12), uniformMat);
-    rightArm.position.set(0.32, 1.2, 0.15);
-    rightArm.rotation.x = 0.7;
+    // Right Arm (Shoulder socket at 0.28, 1.38, 0.04)
+    const rightArm = new THREE.Group();
     rightArm.name = 'bot_right_arm';
+    rightArm.position.set(0.28, 1.38, 0.04);
+    rightArm.rotation.x = 0.7;
 
-    const elbowPadR = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.12, 12), vestMat);
-    elbowPadR.position.set(0, 0, 0);
-    rightArm.add(elbowPadR);
+    const rightUpperArm = new THREE.Mesh(new THREE.CylinderGeometry(0.068, 0.062, 0.24, 12), uniformMat);
+    rightUpperArm.position.set(0, -0.12, 0);
+    rightArm.add(rightUpperArm);
 
-    const rightHand = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.06, 0.12), gloveMat);
-    rightHand.position.set(0, -0.28, 0.02);
-    rightArm.add(rightHand);
+    const rightElbowPad = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, 0.11, 10), armorPlateMat);
+    rightElbowPad.position.set(0, -0.24, -0.02);
+    rightArm.add(rightElbowPad);
+
+    const rightForearm = new THREE.Mesh(new THREE.CylinderGeometry(0.062, 0.055, 0.24, 12), uniformMat);
+    rightForearm.position.set(0, -0.36, 0.02);
+    rightArm.add(rightForearm);
+
+    const rightHand = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.06, 0.11), gloveMat);
+    rightHand.position.set(0, -0.48, 0.03);
+    const rightKnuckle = new THREE.Mesh(new THREE.BoxGeometry(0.068, 0.02, 0.04), armorPlateMat);
+    rightKnuckle.position.set(0, -0.46, 0.08);
+    rightArm.add(rightHand, rightKnuckle);
+
     botGroup.add(rightArm);
 
-    // Tactical Battle Belt with Side Holster & Dump Pouch
-    const belt = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.08, 0.32), vestMat);
-    belt.position.set(0, 0.92, 0);
-
-    const sideHolster = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.18, 0.1), steelMat);
-    sideHolster.position.set(0.26, 0.82, 0.04);
-    const sidearmGrip = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.1, 0.04), steelMat);
-    sidearmGrip.position.set(0.26, 0.92, 0.04);
-    sidearmGrip.rotation.z = -0.3;
-
-    const dumpPouch = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.14, 0.1), vestMat);
-    dumpPouch.position.set(-0.24, 0.84, -0.06);
-
-    botGroup.add(belt, sideHolster, sidearmGrip, dumpPouch);
-
-    // 4. Legs, Knee Pads & Rugged Combat Boots
-    const leftLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.085, 0.075, 0.8, 12), uniformMat);
-    leftLeg.position.set(-0.14, 0.5, 0);
+    // 5. ARTICULATED LEGS, AIRFLEX KNEE PADS & COMBAT BOOTS
+    // Left Leg (Hip socket at -0.14, 0.88, 0)
+    const leftLeg = new THREE.Group();
     leftLeg.name = 'bot_left_leg';
+    leftLeg.position.set(-0.14, 0.88, 0);
 
-    const kneePadL = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.14, 0.06), vestMat);
-    kneePadL.position.set(0, 0, 0.07);
-    leftLeg.add(kneePadL);
+    // Upper thigh with combat pants and cargo pocket
+    const leftThigh = new THREE.Mesh(new THREE.CylinderGeometry(0.088, 0.078, 0.42, 12), uniformMat);
+    leftThigh.position.set(0, -0.21, 0);
+    const leftCargoPocket = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.16, 0.12), uniformMat);
+    leftCargoPocket.position.set(-0.08, -0.20, 0);
+    leftLeg.add(leftThigh, leftCargoPocket);
+
+    // Crye AirFlex Tactical Knee Pad with molded cap
+    const leftKneePad = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.14, 0.07), armorPlateMat);
+    leftKneePad.position.set(0, -0.42, 0.07);
+    leftLeg.add(leftKneePad);
+
+    // Lower shin
+    const leftShin = new THREE.Mesh(new THREE.CylinderGeometry(0.076, 0.068, 0.36, 12), uniformMat);
+    leftShin.position.set(0, -0.60, 0.01);
+    leftLeg.add(leftShin);
+
+    // Rugged High-Traction Combat Boot
+    const leftBoot = new THREE.Mesh(new THREE.BoxGeometry(0.135, 0.15, 0.25), bootRubberMat);
+    leftBoot.position.set(0, -0.80, 0.04);
+    const leftSole = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.03, 0.26), metalHardwareMat);
+    leftSole.position.set(0, -0.87, 0.04);
+    leftLeg.add(leftBoot, leftSole);
+
     botGroup.add(leftLeg);
 
-    const rightLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.085, 0.075, 0.8, 12), uniformMat);
-    rightLeg.position.set(0.14, 0.5, 0);
+    // Right Leg (Hip socket at 0.14, 0.88, 0)
+    const rightLeg = new THREE.Group();
     rightLeg.name = 'bot_right_leg';
+    rightLeg.position.set(0.14, 0.88, 0);
 
-    const kneePadR = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.14, 0.06), vestMat);
-    kneePadR.position.set(0, 0, 0.07);
-    rightLeg.add(kneePadR);
+    const rightThigh = new THREE.Mesh(new THREE.CylinderGeometry(0.088, 0.078, 0.42, 12), uniformMat);
+    rightThigh.position.set(0, -0.21, 0);
+    const rightCargoPocket = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.16, 0.12), uniformMat);
+    rightCargoPocket.position.set(0.08, -0.20, 0);
+    rightLeg.add(rightThigh, rightCargoPocket);
+
+    const rightKneePad = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.14, 0.07), armorPlateMat);
+    rightKneePad.position.set(0, -0.42, 0.07);
+    rightLeg.add(rightKneePad);
+
+    const rightShin = new THREE.Mesh(new THREE.CylinderGeometry(0.076, 0.068, 0.36, 12), uniformMat);
+    rightShin.position.set(0, -0.60, 0.01);
+    rightLeg.add(rightShin);
+
+    const rightBoot = new THREE.Mesh(new THREE.BoxGeometry(0.135, 0.15, 0.25), bootRubberMat);
+    rightBoot.position.set(0, -0.80, 0.04);
+    const rightSole = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.03, 0.26), metalHardwareMat);
+    rightSole.position.set(0, -0.87, 0.04);
+    rightLeg.add(rightBoot, rightSole);
+
     botGroup.add(rightLeg);
 
-    // Reinforced Combat Boots
-    const leftBoot = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.15, 0.24), steelMat);
-    leftBoot.position.set(-0.14, 0.08, 0.04);
-    const rightBoot = leftBoot.clone();
-    rightBoot.position.x = 0.14;
-    botGroup.add(leftBoot, rightBoot);
-
-    // 5. Weapon held in hands
+    // 6. EQUIPPED FIREARM IN HANDS
     const botRifle = ModelFactory.createWeaponMesh(weaponType, team === 'axis' ? 'standard' : 'woodland');
     botRifle.scale.set(0.72, 0.72, 0.72);
     botRifle.position.set(0.18, 1.15, 0.35);
@@ -1626,7 +1897,7 @@ export class ModelFactory {
     botRifle.name = 'bot_weapon';
     botGroup.add(botRifle);
 
-    // Enable high-fidelity real-time shadows on all bot body parts and weapons
+    // Real-time PCF Soft Shadow Casting across all bot meshes
     botGroup.traverse(child => {
       if (child instanceof THREE.Mesh) {
         child.castShadow = true;
@@ -1646,7 +1917,37 @@ export class ModelFactory {
     const playerShadow = new THREE.Group();
     playerShadow.name = 'player_shadow_proxy';
 
-    // Invisible to main camera (no color write, no depth write occlusion)
+    // PBR Textures for player's lower body (visible when looking down)
+    const uniformTexture = TextureGenerator.createOperatorUniformTexture('allies_multicam');
+    const plateCarrierTexture = TextureGenerator.createPlateCarrierTexture('multicam');
+
+    const uniformMat = new THREE.MeshStandardMaterial({
+      map: uniformTexture,
+      roughness: 0.75,
+      metalness: 0.08,
+    });
+    const kneePadMat = new THREE.MeshStandardMaterial({
+      color: 0x1e293b,
+      roughness: 0.38,
+      metalness: 0.65,
+    });
+    const bootRubberMat = new THREE.MeshStandardMaterial({
+      color: 0x18181b,
+      roughness: 0.82,
+      metalness: 0.12,
+    });
+    const beltMat = new THREE.MeshStandardMaterial({
+      map: plateCarrierTexture,
+      roughness: 0.62,
+      metalness: 0.18,
+    });
+    const hardwareMat = new THREE.MeshStandardMaterial({
+      color: 0x3f3f46,
+      roughness: 0.28,
+      metalness: 0.88,
+    });
+
+    // Invisible to main camera for upper body (no color write, no depth write occlusion to prevent camera clipping)
     // Three.js shadow maps use customDepthMaterial with RGBADepthPacking for directional sun light!
     const shadowCasterMat = new THREE.MeshBasicMaterial({
       colorWrite: false,
@@ -1656,7 +1957,7 @@ export class ModelFactory {
       depthPacking: THREE.RGBADepthPacking,
     });
 
-    const createMesh = (geo: THREE.BufferGeometry) => {
+    const createShadowOnlyMesh = (geo: THREE.BufferGeometry) => {
       const mesh = new THREE.Mesh(geo, shadowCasterMat);
       mesh.customDepthMaterial = depthMat;
       mesh.castShadow = true;
@@ -1664,25 +1965,43 @@ export class ModelFactory {
       return mesh;
     };
 
+    const createVisibleMesh = (geo: THREE.BufferGeometry, mat: THREE.Material) => {
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.customDepthMaterial = depthMat;
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      return mesh;
+    };
+
     // 1. Pelvis Root (Hips and lower body base at y = 0.88m)
     const pelvis = new THREE.Group();
     pelvis.name = 'shadow_pelvis';
-    pelvis.position.set(0, 0.88, 0);
+    pelvis.position.set(0, 0.88, -0.04);
 
-    const pelvisMesh = createMesh(new THREE.BoxGeometry(0.36, 0.16, 0.22));
+    const pelvisMesh = createVisibleMesh(new THREE.BoxGeometry(0.38, 0.18, 0.24), uniformMat);
     pelvisMesh.position.set(0, 0, 0);
-    pelvis.add(pelvisMesh);
+
+    const tacticalBelt = createVisibleMesh(new THREE.BoxGeometry(0.40, 0.08, 0.26), beltMat);
+    tacticalBelt.position.set(0, 0.06, 0);
+
+    const cobraBuckle = createVisibleMesh(new THREE.BoxGeometry(0.07, 0.06, 0.02), hardwareMat);
+    cobraBuckle.position.set(0, 0.06, 0.135);
+
+    pelvis.add(pelvisMesh, tacticalBelt, cobraBuckle);
 
     // Left Leg Articulated Chain (Hip -> Thigh -> Knee -> Shin -> Boot)
     const leftHip = new THREE.Group();
     leftHip.name = 'shadow_left_hip';
-    leftHip.position.set(-0.13, -0.04, 0);
+    leftHip.position.set(-0.135, -0.04, 0);
 
     // Upper thigh: extends down from hip pivot (0 to -0.42)
-    const leftThighGeo = new THREE.CylinderGeometry(0.085, 0.075, 0.42, 10);
+    const leftThighGeo = new THREE.CylinderGeometry(0.088, 0.078, 0.42, 12);
     leftThighGeo.translate(0, -0.21, 0);
-    const leftThigh = createMesh(leftThighGeo);
-    leftHip.add(leftThigh);
+    const leftThigh = createVisibleMesh(leftThighGeo, uniformMat);
+
+    const leftCargo = createVisibleMesh(new THREE.BoxGeometry(0.05, 0.16, 0.12), uniformMat);
+    leftCargo.position.set(-0.08, -0.20, 0);
+    leftHip.add(leftThigh, leftCargo);
 
     // Knee pivot at bottom of thigh
     const leftKnee = new THREE.Group();
@@ -1690,63 +2009,75 @@ export class ModelFactory {
     leftKnee.position.set(0, -0.42, 0);
 
     // Lower shin: extends down from knee pivot (0 to -0.38)
-    const leftShinGeo = new THREE.CylinderGeometry(0.072, 0.065, 0.38, 10);
+    const leftShinGeo = new THREE.CylinderGeometry(0.076, 0.068, 0.38, 12);
     leftShinGeo.translate(0, -0.19, 0);
-    const leftShin = createMesh(leftShinGeo);
+    const leftShin = createVisibleMesh(leftShinGeo, uniformMat);
 
-    const leftKneePad = createMesh(new THREE.BoxGeometry(0.12, 0.12, 0.06));
-    leftKneePad.position.set(0, 0, 0.06);
+    const leftKneePad = createVisibleMesh(new THREE.BoxGeometry(0.13, 0.14, 0.07), kneePadMat);
+    leftKneePad.position.set(0, 0, 0.065);
 
-    const leftBoot = createMesh(new THREE.BoxGeometry(0.13, 0.14, 0.24));
+    const leftBoot = createVisibleMesh(new THREE.BoxGeometry(0.135, 0.15, 0.25), bootRubberMat);
     leftBoot.position.set(0, -0.38, 0.04);
+    const leftSole = createVisibleMesh(new THREE.BoxGeometry(0.14, 0.03, 0.26), hardwareMat);
+    leftSole.position.set(0, -0.45, 0.04);
 
-    leftKnee.add(leftShin, leftKneePad, leftBoot);
+    leftKnee.add(leftShin, leftKneePad, leftBoot, leftSole);
     leftHip.add(leftKnee);
     pelvis.add(leftHip);
 
     // Right Leg Articulated Chain (Hip -> Thigh -> Knee -> Shin -> Boot)
     const rightHip = new THREE.Group();
     rightHip.name = 'shadow_right_hip';
-    rightHip.position.set(0.13, -0.04, 0);
+    rightHip.position.set(0.135, -0.04, 0);
 
-    const rightThighGeo = new THREE.CylinderGeometry(0.085, 0.075, 0.42, 10);
+    const rightThighGeo = new THREE.CylinderGeometry(0.088, 0.078, 0.42, 12);
     rightThighGeo.translate(0, -0.21, 0);
-    const rightThigh = createMesh(rightThighGeo);
-    rightHip.add(rightThigh);
+    const rightThigh = createVisibleMesh(rightThighGeo, uniformMat);
+
+    const rightCargo = createVisibleMesh(new THREE.BoxGeometry(0.05, 0.16, 0.12), uniformMat);
+    rightCargo.position.set(0.08, -0.20, 0);
+
+    const dropHolster = createVisibleMesh(new THREE.BoxGeometry(0.08, 0.16, 0.09), kneePadMat);
+    dropHolster.position.set(0.08, -0.15, 0.02);
+
+    rightHip.add(rightThigh, rightCargo, dropHolster);
 
     const rightKnee = new THREE.Group();
     rightKnee.name = 'shadow_right_knee';
     rightKnee.position.set(0, -0.42, 0);
 
-    const rightShinGeo = new THREE.CylinderGeometry(0.072, 0.065, 0.38, 10);
+    const rightShinGeo = new THREE.CylinderGeometry(0.076, 0.068, 0.38, 12);
     rightShinGeo.translate(0, -0.19, 0);
-    const rightShin = createMesh(rightShinGeo);
+    const rightShin = createVisibleMesh(rightShinGeo, uniformMat);
 
-    const rightKneePad = createMesh(new THREE.BoxGeometry(0.12, 0.12, 0.06));
-    rightKneePad.position.set(0, 0, 0.06);
+    const rightKneePad = createVisibleMesh(new THREE.BoxGeometry(0.13, 0.14, 0.07), kneePadMat);
+    rightKneePad.position.set(0, 0, 0.065);
 
-    const rightBoot = createMesh(new THREE.BoxGeometry(0.13, 0.14, 0.24));
+    const rightBoot = createVisibleMesh(new THREE.BoxGeometry(0.135, 0.15, 0.25), bootRubberMat);
     rightBoot.position.set(0, -0.38, 0.04);
+    const rightSole = createVisibleMesh(new THREE.BoxGeometry(0.14, 0.03, 0.26), hardwareMat);
+    rightSole.position.set(0, -0.45, 0.04);
 
-    rightKnee.add(rightShin, rightKneePad, rightBoot);
+    rightKnee.add(rightShin, rightKneePad, rightBoot, rightSole);
     rightHip.add(rightKnee);
     pelvis.add(rightHip);
 
     playerShadow.add(pelvis);
 
     // 2. Upper Body (Spine, Torso, Tactical Vest, Head, Arms & Equipped Firearm)
+    // Uses shadowCasterMat so it casts shadows without clipping into the first-person camera!
     const upperBody = new THREE.Group();
     upperBody.name = 'shadow_upper_body';
     upperBody.position.set(0, 0.94, 0);
 
     // Torso & Ballistic Plate Carrier
-    const torsoMesh = createMesh(new THREE.BoxGeometry(0.44, 0.54, 0.26));
+    const torsoMesh = createShadowOnlyMesh(new THREE.BoxGeometry(0.44, 0.54, 0.26));
     torsoMesh.position.set(0, 0.27, 0);
 
-    const plateCarrierMesh = createMesh(new THREE.BoxGeometry(0.48, 0.46, 0.32));
+    const plateCarrierMesh = createShadowOnlyMesh(new THREE.BoxGeometry(0.48, 0.46, 0.32));
     plateCarrierMesh.position.set(0, 0.29, 0);
 
-    const ammoPouchMesh = createMesh(new THREE.BoxGeometry(0.32, 0.16, 0.08));
+    const ammoPouchMesh = createShadowOnlyMesh(new THREE.BoxGeometry(0.32, 0.16, 0.08));
     ammoPouchMesh.position.set(0, 0.22, 0.18);
 
     upperBody.add(torsoMesh, plateCarrierMesh, ammoPouchMesh);
@@ -1756,28 +2087,27 @@ export class ModelFactory {
     headGroup.name = 'shadow_head';
     headGroup.position.set(0, 0.58, 0);
 
-    const headMesh = createMesh(new THREE.SphereGeometry(0.15, 12, 10));
+    const headMesh = createShadowOnlyMesh(new THREE.SphereGeometry(0.15, 12, 10));
     headMesh.scale.set(1, 0.9, 1.1);
 
-    const helmetMesh = createMesh(new THREE.SphereGeometry(0.17, 12, 10));
+    const helmetMesh = createShadowOnlyMesh(new THREE.SphereGeometry(0.17, 12, 10));
     helmetMesh.scale.set(1, 0.85, 1.12);
     helmetMesh.position.set(0, 0.04, -0.01);
 
-    const nvgGoggles = createMesh(new THREE.BoxGeometry(0.18, 0.06, 0.1));
+    const nvgGoggles = createShadowOnlyMesh(new THREE.BoxGeometry(0.18, 0.06, 0.1));
     nvgGoggles.position.set(0, 0.02, 0.16);
 
     headGroup.add(headMesh, helmetMesh, nvgGoggles);
     upperBody.add(headGroup);
 
     // 3. Articulated Arms (Shoulders, Elbows, Forearms & Hands)
-    // Left Arm Chain (Shoulder -> Upper Arm -> Elbow -> Forearm & Hand)
     const leftShoulder = new THREE.Group();
     leftShoulder.name = 'shadow_left_shoulder';
     leftShoulder.position.set(-0.24, 0.46, 0.02);
 
     const leftUpperArmGeo = new THREE.CylinderGeometry(0.065, 0.058, 0.32, 10);
     leftUpperArmGeo.translate(0, -0.16, 0);
-    const leftUpperArm = createMesh(leftUpperArmGeo);
+    const leftUpperArm = createShadowOnlyMesh(leftUpperArmGeo);
     leftShoulder.add(leftUpperArm);
 
     const leftElbow = new THREE.Group();
@@ -1786,22 +2116,21 @@ export class ModelFactory {
 
     const leftForearmGeo = new THREE.CylinderGeometry(0.058, 0.05, 0.32, 10);
     leftForearmGeo.translate(0, -0.16, 0);
-    const leftForearm = createMesh(leftForearmGeo);
-    const leftHand = createMesh(new THREE.BoxGeometry(0.08, 0.06, 0.1));
+    const leftForearm = createShadowOnlyMesh(leftForearmGeo);
+    const leftHand = createShadowOnlyMesh(new THREE.BoxGeometry(0.08, 0.06, 0.1));
     leftHand.position.set(0, -0.32, 0.02);
 
     leftElbow.add(leftForearm, leftHand);
     leftShoulder.add(leftElbow);
     upperBody.add(leftShoulder);
 
-    // Right Arm Chain (Shoulder -> Upper Arm -> Elbow -> Forearm & Hand)
     const rightShoulder = new THREE.Group();
     rightShoulder.name = 'shadow_right_shoulder';
     rightShoulder.position.set(0.24, 0.46, 0.02);
 
     const rightUpperArmGeo = new THREE.CylinderGeometry(0.065, 0.058, 0.32, 10);
     rightUpperArmGeo.translate(0, -0.16, 0);
-    const rightUpperArm = createMesh(rightUpperArmGeo);
+    const rightUpperArm = createShadowOnlyMesh(rightUpperArmGeo);
     rightShoulder.add(rightUpperArm);
 
     const rightElbow = new THREE.Group();
@@ -1810,8 +2139,8 @@ export class ModelFactory {
 
     const rightForearmGeo = new THREE.CylinderGeometry(0.058, 0.05, 0.32, 10);
     rightForearmGeo.translate(0, -0.16, 0);
-    const rightForearm = createMesh(rightForearmGeo);
-    const rightHand = createMesh(new THREE.BoxGeometry(0.08, 0.06, 0.1));
+    const rightForearm = createShadowOnlyMesh(rightForearmGeo);
+    const rightHand = createShadowOnlyMesh(new THREE.BoxGeometry(0.08, 0.06, 0.1));
     rightHand.position.set(0, -0.32, 0.02);
 
     rightElbow.add(rightForearm, rightHand);

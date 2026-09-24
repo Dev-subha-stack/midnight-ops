@@ -514,6 +514,10 @@ export class BotController {
   public isCrouchedInCover: boolean = false;
   public voiceCallout: string = '';
   public coverLeanSide: 'left' | 'right' | 'none' = 'none';
+  public leanSide: 'left' | 'right' | 'none' = 'none';
+  public currentLeanFactor: number = 0; // Smooth normalized lean: -1.0 (left) to +1.0 (right)
+  public targetLeanFactor: number = 0;
+  private combatLeanTimer: number = 0;
   public isBlindFiring: boolean = false;
   public isCoverCompromised: boolean = false;
   public grenadeCooldown: number = 0;
@@ -1270,13 +1274,13 @@ export class BotController {
     // Resolve Obstacle Collision (feet at y=0, eyeHeight=0 so full 1.85m bot cylinder is collision-checked)
     CollisionSystem.resolveEntityCollision(this.position, this.velocity, 0.45, 0.0, this.map.obstacles);
 
-    // Keep bot inside map arena perimeter (Warehouse = [-43, 43], Bermuda = [-105, 105])
+    // Keep bot inside map arena perimeter (Warehouse/Outpost = ~43, Bermuda = 105)
     const maxBound = this.map.mapType === 'bermuda' ? 105 : 43;
     this.position.x = Math.max(-maxBound, Math.min(maxBound, this.position.x));
     this.position.z = Math.max(-maxBound, Math.min(maxBound, this.position.z));
 
-    // STRICT Ground altitude clamping (catwalk platform elevation vs floor)
-    const onCatwalk = this.map.mapType !== 'bermuda' && Math.abs(this.position.x) <= 7.5 && Math.abs(this.position.z) <= 6.5 && this.position.y > 2.0;
+    // STRICT Ground altitude clamping (catwalk platform elevation in warehouse vs floor)
+    const onCatwalk = this.map.mapType === 'warehouse' && Math.abs(this.position.x) <= 7.5 && Math.abs(this.position.z) <= 6.5 && this.position.y > 2.0;
     this.position.y = onCatwalk ? 3.8 : 0.0;
     this.velocity.y = 0;
 
@@ -1305,23 +1309,29 @@ export class BotController {
     const isMoving = speedSq > 0.08;
     const isCombat = this.state === 'attack' || this.state === 'cover' || this.isPeeking;
 
-    // 1. Torso & Spine Kinematics
+    // Update continuous lean factor smoothly (left = -1.0, right = +1.0, none = 0)
+    const targetLean = this.leanSide === 'left' ? -1.0 : this.leanSide === 'right' ? 1.0 : 0.0;
+    this.currentLeanFactor = THREE.MathUtils.lerp(this.currentLeanFactor, targetLean, Math.min(1.0, dt * 9.5));
+
+    // 1. Torso & Spine Kinematics with dynamic lateral lean shift
     if (this.torsoMesh) {
       // Forward tilt during sprint/run, subtle breathing sway when standing
       const forwardLean = isMoving ? Math.min(0.22, moveSpeed * 0.04) : 0;
       const breathingSway = Math.sin(this.animTimer * 1.5) * 0.015;
-      const leanZ = this.coverLeanSide === 'left' ? -0.35 : this.coverLeanSide === 'right' ? 0.35 : 0;
+      const leanZ = this.currentLeanFactor * 0.38; // ~22° tactical combat roll
       this.torsoMesh.rotation.x = forwardLean + breathingSway + this.flinchPitch * 0.7;
       this.torsoMesh.rotation.z = (isMoving ? Math.sin(this.animTimer * 0.5) * 0.03 : 0) + this.flinchRoll * 0.7 + leanZ;
       this.torsoMesh.rotation.y = this.flinchYaw * 0.7;
+      this.torsoMesh.position.x = this.currentLeanFactor * 0.22; // Physical torso lean offset around corner
     }
 
-    // 2. Head Look & Flinch
+    // 2. Head Look & Flinch with matching lean
     if (this.headMesh) {
-      const headLeanZ = this.coverLeanSide === 'left' ? -0.22 : this.coverLeanSide === 'right' ? 0.22 : 0;
+      const headLeanZ = this.currentLeanFactor * 0.22;
       this.headMesh.rotation.x = this.headFlinchPitch;
       this.headMesh.rotation.y = this.headFlinchYaw;
       this.headMesh.rotation.z = this.flinchRoll * 0.4 + headLeanZ;
+      this.headMesh.position.x = this.currentLeanFactor * 0.28; // Head peeks out from cover
     }
 
     // 3. Fluid Leg Locomotion with Natural Stride & Knee Lift + Flinch Stagger
@@ -1371,12 +1381,18 @@ export class BotController {
         this.leftArmMesh.rotation.x = 0.45 - this.flinchArmDisrupt * 0.4;
         this.leftArmMesh.rotation.y = -0.35;
       }
+
+      // Arms tilt smoothly with the tactical lean
+      this.leftArmMesh.rotation.z = this.currentLeanFactor * 0.28;
+      this.rightArmMesh.rotation.z = this.currentLeanFactor * 0.28;
     }
 
-    // 5. Bot Weapon Recoil Kick & Jolt
+    // 5. Bot Weapon Recoil Kick, Jolt & Canted Lean
     if (this.botWeaponMesh) {
       this.botWeaponMesh.position.z = 0.35 - this.weaponRecoilKick * 0.08;
+      this.botWeaponMesh.position.x = 0.18 + this.currentLeanFactor * 0.20;
       this.botWeaponMesh.rotation.x = this.weaponRecoilKick * 0.35;
+      this.botWeaponMesh.rotation.z = this.currentLeanFactor * 0.34;
     }
 
     // Apply world position clamped firmly to ground, factoring crouch elevation
@@ -1503,12 +1519,15 @@ export class BotController {
           const rightDir = new THREE.Vector3(-toThreat.z, 0, toThreat.x);
           const leanLeft = rightDir.dot(this.currentCover.facingDir) < 0;
           this.coverLeanSide = leanLeft ? 'left' : 'right';
+          this.leanSide = this.coverLeanSide;
           this.isPeekingCover = true;
           this.isCrouchedInCover = false;
           this.tacticalAction = 'Corner Slicing & Peeking';
         } else {
-          // Low cover pop-up
-          this.coverLeanSide = 'none';
+          // Low cover pop-up & subtle tactical lean
+          const preferredLean = this.currentCover.leanSide !== 'none' ? this.currentCover.leanSide : (Math.random() < 0.35 ? (Math.random() < 0.5 ? 'left' : 'right') : 'none');
+          this.coverLeanSide = preferredLean;
+          this.leanSide = this.coverLeanSide;
           this.isPeekingCover = true;
           this.isCrouchedInCover = false;
           this.tacticalAction = 'Firing from Low Cover';
@@ -1524,6 +1543,7 @@ export class BotController {
           this.peekTimer = 0;
           this.coverTimer = 0;
           this.coverLeanSide = 'none';
+          this.leanSide = 'none';
           if (this.magAmmo <= 0) this.startReload();
         }
       } else {
@@ -1531,6 +1551,7 @@ export class BotController {
         this.isCrouchedInCover = true;
         this.isPeekingCover = false;
         this.coverLeanSide = 'none';
+        this.leanSide = 'none';
         this.tacticalAction = 'Holding Cover & Scanning';
 
         if (this.coverTimer > (this.archetype === 'sniper' ? 1.4 : 1.8) && !this.isReloading) {
@@ -1608,7 +1629,9 @@ export class BotController {
     this.tacticalAction = 'Engaging Target';
     this.isCrouchedInCover = false;
     this.isPeekingCover = false;
-    this.coverLeanSide = 'none';
+
+    // Tactical combat leaning during firefights & corner-peeking
+    this.updateCombatLean(targetPos, dt);
 
     const hasLoS = this.checkLineOfSight(targetPos);
     if (!hasLoS) {
@@ -1616,6 +1639,8 @@ export class BotController {
       this.targetPos = new THREE.Vector3(targetPos.x, 0, targetPos.z);
       this.velocity.set(0, 0, 0);
       this.burstShotsRemaining = 0;
+      this.leanSide = 'none';
+      this.coverLeanSide = 'none';
       return;
     }
 
@@ -1750,6 +1775,8 @@ export class BotController {
   }
 
   private updateChaseState(dt: number, targetPos: THREE.Vector3) {
+    this.leanSide = 'none';
+    this.coverLeanSide = 'none';
     if (!this.targetPos) this.targetPos = new THREE.Vector3(targetPos.x, 0, targetPos.z);
     this.targetPos.y = 0;
 
@@ -1773,6 +1800,8 @@ export class BotController {
   }
 
   private updatePatrolState(dt: number) {
+    this.leanSide = 'none';
+    this.coverLeanSide = 'none';
     if (!this.targetPos || this.position.distanceTo(this.targetPos) < 2.5) {
       this.pickNextWaypoint();
     }
@@ -1858,9 +1887,80 @@ export class BotController {
     return this.checkLineOfSight(targetPos);
   }
 
+  private updateCombatLean(targetPos: THREE.Vector3, dt: number) {
+    this.combatLeanTimer += dt;
+    if (this.combatLeanTimer < 0.22) return;
+    this.combatLeanTimer = 0;
+
+    const dx = targetPos.x - this.position.x;
+    const dz = targetPos.z - this.position.z;
+    const dist2D = Math.max(0.01, Math.sqrt(dx * dx + dz * dz));
+    const rightX = -dz / dist2D;
+    const rightZ = dx / dist2D;
+    const rightVec = new THREE.Vector3(rightX, 0, rightZ);
+
+    const centerEye = new THREE.Vector3(this.position.x, this.position.y + 1.55, this.position.z);
+    const centerClear = CollisionSystem.checkLineOfSight(centerEye, targetPos, this.map.obstacles).isClear;
+
+    const leftEye = centerEye.clone().addScaledVector(rightVec, -0.45);
+    const rightEye = centerEye.clone().addScaledVector(rightVec, 0.45);
+    const leftClear = CollisionSystem.checkLineOfSight(leftEye, targetPos, this.map.obstacles).isClear;
+    const rightClear = CollisionSystem.checkLineOfSight(rightEye, targetPos, this.map.obstacles).isClear;
+
+    if (!centerClear) {
+      // Body center blocked by wall or obstacle corner: lean out to slice the corner!
+      if (leftClear && !rightClear) {
+        this.leanSide = 'left';
+      } else if (rightClear && !leftClear) {
+        this.leanSide = 'right';
+      } else if (leftClear && rightClear) {
+        this.leanSide = this.leanSide !== 'none' ? this.leanSide : (Math.random() < 0.5 ? 'left' : 'right');
+      } else {
+        this.leanSide = 'none';
+      }
+    } else {
+      // In active firefight with direct line of sight:
+      // Strafe leaning or tactical angle canting
+      const speedSq = this.velocity.x * this.velocity.x + this.velocity.z * this.velocity.z;
+      if (speedSq > 0.25) {
+        const velDotRight = this.velocity.x * rightX + this.velocity.z * rightZ;
+        if (velDotRight < -0.3) {
+          this.leanSide = 'left';
+        } else if (velDotRight > 0.3) {
+          this.leanSide = 'right';
+        } else {
+          this.leanSide = 'none';
+        }
+      } else if (this.archetype === 'sniper' || this.squadRole === 'overwatch' || this.squadRole === 'suppressor') {
+        // Overwatch and sniper bots hold a canted angle around obstacles
+        if (!leftClear && rightClear) {
+          this.leanSide = 'right';
+        } else if (!rightClear && leftClear) {
+          this.leanSide = 'left';
+        } else {
+          this.leanSide = 'none';
+        }
+      } else {
+        this.leanSide = 'none';
+      }
+    }
+    this.coverLeanSide = this.leanSide;
+  }
+
   private checkLineOfSight(targetPos: THREE.Vector3): boolean {
     if (this.isBlind) return false;
-    const eyePos = new THREE.Vector3(this.position.x, this.position.y + 1.55, this.position.z);
+    const dx = targetPos.x - this.position.x;
+    const dz = targetPos.z - this.position.z;
+    const dist2D = Math.max(0.01, Math.sqrt(dx * dx + dz * dz));
+    const rightX = -dz / dist2D;
+    const rightZ = dx / dist2D;
+    const leanOffset = this.currentLeanFactor * 0.35;
+
+    const eyePos = new THREE.Vector3(
+      this.position.x + rightX * leanOffset,
+      this.position.y + 1.55,
+      this.position.z + rightZ * leanOffset
+    );
     
     // Multi-elevation line-of-sight checks with smoke occlusion
     const headTarget = new THREE.Vector3(targetPos.x, targetPos.y + 0.1, targetPos.z);
@@ -1890,7 +1990,18 @@ export class BotController {
   ) {
     const wpnCfg = WEAPON_REGISTRY[this.weapon];
 
-    const origin = new THREE.Vector3(this.position.x, this.position.y + 1.4, this.position.z);
+    const dx = targetPos.x - this.position.x;
+    const dz = targetPos.z - this.position.z;
+    const dist2D = Math.max(0.01, Math.sqrt(dx * dx + dz * dz));
+    const rightX = -dz / dist2D;
+    const rightZ = dx / dist2D;
+    const leanOffset = this.currentLeanFactor * 0.32;
+
+    const origin = new THREE.Vector3(
+      this.position.x + rightX * leanOffset,
+      this.position.y + 1.4,
+      this.position.z + rightZ * leanOffset
+    );
     const chestTarget = new THREE.Vector3(targetPos.x, targetPos.y - 0.4, targetPos.z);
 
     const directCheck = CollisionSystem.checkLineOfSight(origin, chestTarget, this.map.obstacles, this.squad.smokeClouds);

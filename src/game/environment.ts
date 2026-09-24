@@ -42,20 +42,20 @@ export const WEATHER_PRESETS: Record<WeatherType, WeatherPresetConfig> = {
     timeOfDay: 'noon',
     timeString: '12:00 HRS',
     temperatureStr: '28°C (82°F)',
-    ambientColor: 0x94a3b8,
-    ambientIntensity: 0.95,
-    sunColor: 0xffedd5,
-    sunIntensity: 2.8,
+    ambientColor: 0xb0bec5, // Clean, neutral daylight sky ambient
+    ambientIntensity: 0.62,
+    sunColor: 0xfffaf0, // Natural warm sunlight
+    sunIntensity: 1.26, // Perfectly balanced to eliminate washed-out highlights and pitch shadows
     sunPos: [20, 75, -20],
-    fillColor: 0x38bdf8,
-    fillIntensity: 0.85,
-    fogColor: 0x334155,
-    fogDensity: 0.006,
+    fillColor: 0x90caf9,
+    fillIntensity: 0.35,
+    fogColor: 0x94a3b8,
+    fogDensity: 0.0028,
     skyTopColor: '#0369a1',
     skyMidColor: '#38bdf8',
     skyHorizonColor: '#bae6fd',
-    sunFlareColor: 'rgba(255, 255, 240, 0.95)',
-    sunFlareSize: 220,
+    sunFlareColor: 'rgba(255, 255, 240, 0.85)',
+    sunFlareSize: 180,
     hasStars: false,
     rainIntensity: 0,
     dustIntensity: 0.03,
@@ -64,7 +64,7 @@ export const WEATHER_PRESETS: Record<WeatherType, WeatherPresetConfig> = {
     windDirStr: '06 KTS NE',
     visibilityPct: 98,
     groundRoughness: 0.75,
-    groundMetalness: 0.22,
+    groundMetalness: 0.15,
   },
   golden_sunset: {
     id: 'golden_sunset',
@@ -72,20 +72,20 @@ export const WEATHER_PRESETS: Record<WeatherType, WeatherPresetConfig> = {
     timeOfDay: 'sunset',
     timeString: '18:45 HRS',
     temperatureStr: '22°C (71°F)',
-    ambientColor: 0x7c2d12,
-    ambientIntensity: 0.88,
-    sunColor: 0xfb923c,
-    sunIntensity: 3.2,
+    ambientColor: 0xa88d7d, // Soft warm dusk ambient - lifted shadows so models and structures retain crisp detail
+    ambientIntensity: 0.60,
+    sunColor: 0xfcb05c, // Warm golden hour
+    sunIntensity: 1.28,
     sunPos: [55, 24, -45],
-    fillColor: 0x6366f1,
-    fillIntensity: 0.75,
-    fogColor: 0x451a03,
-    fogDensity: 0.011,
+    fillColor: 0x818cf8,
+    fillIntensity: 0.34,
+    fogColor: 0x5c3d2e,
+    fogDensity: 0.0042,
     skyTopColor: '#0f172a',
     skyMidColor: '#431407',
     skyHorizonColor: '#ea580c',
-    sunFlareColor: 'rgba(251, 146, 60, 0.95)',
-    sunFlareSize: 320,
+    sunFlareColor: 'rgba(251, 146, 60, 0.85)',
+    sunFlareSize: 240,
     hasStars: false,
     rainIntensity: 0,
     dustIntensity: 0.06,
@@ -94,7 +94,7 @@ export const WEATHER_PRESETS: Record<WeatherType, WeatherPresetConfig> = {
     windDirStr: '11 KTS WNW',
     visibilityPct: 88,
     groundRoughness: 0.68,
-    groundMetalness: 0.28,
+    groundMetalness: 0.20,
   },
   midnight_fog: {
     id: 'midnight_fog',
@@ -102,29 +102,29 @@ export const WEATHER_PRESETS: Record<WeatherType, WeatherPresetConfig> = {
     timeOfDay: 'night',
     timeString: '01:30 HRS',
     temperatureStr: '13°C (55°F)',
-    ambientColor: 0x0f172a,
-    ambientIntensity: 0.48,
-    sunColor: 0x38bdf8, // Moonlight
-    sunIntensity: 1.5,
+    ambientColor: 0x334155, // Clean moonlit night ambient - clear model silhouette visibility without murky crushed blacks
+    ambientIntensity: 0.55,
+    sunColor: 0x93c5fd, // Soft moonlit blue
+    sunIntensity: 0.76,
     sunPos: [-35, 55, 35],
-    fillColor: 0x1e1b4b,
-    fillIntensity: 0.55,
-    fogColor: 0x020617,
-    fogDensity: 0.017,
-    skyTopColor: '#000000',
-    skyMidColor: '#020617',
-    skyHorizonColor: '#0f172a',
-    sunFlareColor: 'rgba(186, 230, 253, 0.8)',
-    sunFlareSize: 140,
+    fillColor: 0x1e293b,
+    fillIntensity: 0.35,
+    fogColor: 0x0f172a,
+    fogDensity: 0.0068,
+    skyTopColor: '#020617',
+    skyMidColor: '#0f172a',
+    skyHorizonColor: '#1e293b',
+    sunFlareColor: 'rgba(186, 230, 253, 0.5)',
+    sunFlareSize: 110,
     hasStars: true,
     rainIntensity: 0,
     dustIntensity: 0.02,
     windSpeedKts: 8,
     windDir: new THREE.Vector3(0.5, 0, -1).normalize(),
     windDirStr: '08 KTS SSE',
-    visibilityPct: 70,
-    groundRoughness: 0.58,
-    groundMetalness: 0.35,
+    visibilityPct: 75,
+    groundRoughness: 0.62,
+    groundMetalness: 0.25,
   },
 };
 
@@ -144,6 +144,12 @@ export class EnvironmentManager {
   // Volumetric Sun Shafts / Godrays (Extreme Graphics)
   public godraysGroup: THREE.Group;
   private godrayBeams: THREE.Mesh[] = [];
+
+  // 3D Celestial Body (Sun / Moon)
+  public celestialGroup: THREE.Group;
+  private celestialMesh!: THREE.Mesh;
+  private celestialCanvas!: HTMLCanvasElement;
+  private celestialTexture!: THREE.CanvasTexture;
 
   // Ray-Traced Global Illumination (RT-GI) & Dynamic Contact Lights
   public giBounceLight: THREE.DirectionalLight;
@@ -254,6 +260,7 @@ export class EnvironmentManager {
       map: this.skyTexture,
       side: THREE.BackSide,
       fog: false,
+      depthWrite: false,
     });
     this.skyDome = new THREE.Mesh(skyGeo, skyMat);
     this.scene.add(this.skyDome);
@@ -262,6 +269,24 @@ export class EnvironmentManager {
     this.godraysGroup = new THREE.Group();
     this.initGodrayBeams();
     this.scene.add(this.godraysGroup);
+
+    // 4.5. 3D Celestial Body (Physical Sun / Moon Billboard)
+    this.celestialGroup = new THREE.Group();
+    this.celestialCanvas = document.createElement('canvas');
+    this.celestialCanvas.width = 256;
+    this.celestialCanvas.height = 256;
+    this.celestialTexture = new THREE.CanvasTexture(this.celestialCanvas);
+    const celestialMat = new THREE.MeshBasicMaterial({
+      map: this.celestialTexture,
+      transparent: true,
+      depthWrite: false,
+      fog: false,
+      blending: THREE.AdditiveBlending,
+    });
+    const celestialGeo = new THREE.PlaneGeometry(28, 28);
+    this.celestialMesh = new THREE.Mesh(celestialGeo, celestialMat);
+    this.celestialGroup.add(this.celestialMesh);
+    this.scene.add(this.celestialGroup);
 
     // 5. Initialize Volumetric Rain & Dust Particles
     this.initRainParticles();
@@ -313,33 +338,29 @@ export class EnvironmentManager {
     }
   }
 
-  // Universal scene traverser: registers all PBR materials in map, props, and viewmodel
-  public registerSceneMaterials(root: THREE.Object3D) {
-    root.traverse(child => {
-      if (child instanceof THREE.Mesh && child.material) {
-        if (Array.isArray(child.material)) {
-          child.material.forEach(m => {
-            if (m instanceof THREE.MeshStandardMaterial) this.registerMapMaterial(m);
-          });
-        } else if (child.material instanceof THREE.MeshStandardMaterial) {
-          this.registerMapMaterial(child.material);
-        }
-      }
-    });
-  }
-
-  // Register map materials to receive wetness/reflection changes
+  // Register map materials (specifically terrain and ground surfaces)
   public registerMapMaterial(mat: THREE.MeshStandardMaterial) {
     if (!this.mapMaterials.includes(mat)) {
       if (mat.userData.baseRoughness === undefined) {
         mat.userData.baseRoughness = mat.roughness;
         mat.userData.baseMetalness = mat.metalness;
         mat.userData.baseNormalMap = mat.normalMap;
-        mat.userData.baseEnvIntensity = mat.envMapIntensity;
+        mat.userData.baseEnvIntensity = mat.envMapIntensity ?? 1.0;
       }
       this.mapMaterials.push(mat);
       this.applyMaterialQuality(mat);
     }
+  }
+
+  // Backward compatible helper for scene ground registration
+  public registerSceneMaterials(root: THREE.Object3D) {
+    root.traverse(child => {
+      if (child instanceof THREE.Mesh && child.name && child.name.toLowerCase().includes('ground')) {
+        if (child.material instanceof THREE.MeshStandardMaterial) {
+          this.registerMapMaterial(child.material);
+        }
+      }
+    });
   }
 
   public setGraphicsMode(mode: GraphicsMode) {
@@ -362,24 +383,24 @@ export class EnvironmentManager {
       // Super Extreme RTX Mode: Ray-Traced GI, 4K High-Density Contact Shadows, Dynamic Point Light Shadows
       this.sunLight.castShadow = true;
       this.sunLight.shadow.mapSize.set(4096, 4096);
-      this.sunLight.shadow.radius = 3.6; // Photorealistic contact-softened PCF shadow
-      this.sunLight.shadow.bias = -0.00025;
-      this.sunLight.shadow.normalBias = 0.045;
-      this.sunLight.shadow.camera.left = -48;
-      this.sunLight.shadow.camera.right = 48;
-      this.sunLight.shadow.camera.top = 48;
-      this.sunLight.shadow.camera.bottom = -48;
+      this.sunLight.shadow.radius = 2.4; // Soft PCF shadow without light leaking
+      this.sunLight.shadow.bias = -0.00015;
+      this.sunLight.shadow.normalBias = 0.025;
+      this.sunLight.shadow.camera.left = -55;
+      this.sunLight.shadow.camera.right = 55;
+      this.sunLight.shadow.camera.top = 55;
+      this.sunLight.shadow.camera.bottom = -55;
       this.sunLight.shadow.camera.updateProjectionMatrix();
 
-      // RT-GI Ground Bounce & Sun Rim Light
+      // RT-GI Ground Bounce & Sun Rim Light (balanced to provide gentle upward fill)
       this.giBounceLight.visible = true;
-      this.giBounceLight.intensity = 1.25;
+      this.giBounceLight.intensity = 0.28;
       this.sunRimLight.visible = true;
-      this.sunRimLight.intensity = 0.95;
+      this.sunRimLight.intensity = 0.20;
 
       this.godraysGroup.visible = true;
       this.godrayBeams.forEach(b => {
-        (b.material as THREE.MeshBasicMaterial).opacity = 0.34;
+        (b.material as THREE.MeshBasicMaterial).opacity = 0.22;
       });
 
       if (this.hdrEnvMap) {
@@ -389,26 +410,26 @@ export class EnvironmentManager {
       this.dustCount = 3500;
       this.particles.setPointLightShadows(true);
     } else {
-      // Standard: Default balanced look (former extreme graphics baseline)
+      // Standard: Default balanced look
       this.sunLight.castShadow = true;
       this.sunLight.shadow.mapSize.set(2048, 2048);
-      this.sunLight.shadow.radius = 2.0;
-      this.sunLight.shadow.bias = -0.0004;
-      this.sunLight.shadow.normalBias = 0.035;
-      this.sunLight.shadow.camera.left = -75;
-      this.sunLight.shadow.camera.right = 75;
-      this.sunLight.shadow.camera.top = 75;
-      this.sunLight.shadow.camera.bottom = -75;
+      this.sunLight.shadow.radius = 1.8;
+      this.sunLight.shadow.bias = -0.0002;
+      this.sunLight.shadow.normalBias = 0.025;
+      this.sunLight.shadow.camera.left = -65;
+      this.sunLight.shadow.camera.right = 65;
+      this.sunLight.shadow.camera.top = 65;
+      this.sunLight.shadow.camera.bottom = -65;
       this.sunLight.shadow.camera.updateProjectionMatrix();
 
       this.giBounceLight.visible = true;
-      this.giBounceLight.intensity = 0.38;
+      this.giBounceLight.intensity = 0.16;
       this.sunRimLight.visible = true;
-      this.sunRimLight.intensity = 0.28;
+      this.sunRimLight.intensity = 0.10;
 
       this.godraysGroup.visible = true;
       this.godrayBeams.forEach(b => {
-        (b.material as THREE.MeshBasicMaterial).opacity = 0.16;
+        (b.material as THREE.MeshBasicMaterial).opacity = 0.12;
       });
 
       if (this.hdrEnvMap) {
@@ -424,7 +445,7 @@ export class EnvironmentManager {
       this.sunLight.shadow.map = null as any;
     }
 
-    // 2. Material PBR tuning across all registered surfaces
+    // 2. Material PBR tuning across registered ground surfaces
     this.mapMaterials.forEach(m => this.applyMaterialQuality(m));
   }
 
@@ -432,27 +453,26 @@ export class EnvironmentManager {
     const isExtreme = this.graphicsMode === 'extreme';
     const isSmooth = this.graphicsMode === 'smooth';
 
-    const baseRoughness = mat.userData.baseRoughness !== undefined ? mat.userData.baseRoughness : 0.7;
+    const baseRoughness = mat.userData.baseRoughness !== undefined ? mat.userData.baseRoughness : 0.75;
     const baseMetalness = mat.userData.baseMetalness !== undefined ? mat.userData.baseMetalness : 0.2;
 
     if (isExtreme) {
-      // Super Extreme: PBR ray-traced reflections with high specular sheen and tactile micro-relief
-      mat.roughness = Math.max(0.12, baseRoughness * 0.70);
-      mat.metalness = Math.min(0.95, baseMetalness * 1.5 + 0.15);
-      mat.envMapIntensity = 2.4;
-      mat.normalMap = this.microDetailNormalMap;
-      mat.normalScale.set(0.75, 0.75);
+      // Super Extreme: Subtle surface sheen with realistic ground reflection
+      mat.roughness = Math.max(0.35, baseRoughness * 0.88);
+      mat.metalness = Math.min(0.35, baseMetalness * 1.1);
+      mat.envMapIntensity = 0.75;
+      mat.normalMap = mat.userData.baseNormalMap || null;
     } else if (isSmooth) {
-      // Performance Mode: Flat diffuse response, no env reflection overhead
-      mat.roughness = 0.95;
+      // Performance Mode: Flat diffuse response
+      mat.roughness = 0.90;
       mat.metalness = 0.05;
       mat.envMapIntensity = 0.0;
       mat.normalMap = null;
     } else {
-      // Standard: Balanced realism
+      // Standard: Natural terrain response
       mat.roughness = baseRoughness;
       mat.metalness = baseMetalness;
-      mat.envMapIntensity = 1.0;
+      mat.envMapIntensity = 0.45;
       mat.normalMap = mat.userData.baseNormalMap || null;
     }
     mat.needsUpdate = true;
@@ -595,24 +615,25 @@ export class EnvironmentManager {
     this.fillLight.intensity = cfg.fillIntensity;
 
     // Dynamic GI Bounce Light (warm ground bounce illuminating shadows from below)
-    let bounceColor = 0xecd5b3;
-    if (cfg.timeOfDay === 'sunset') bounceColor = 0xd97706;
-    else if (cfg.timeOfDay === 'night') bounceColor = 0x334155;
+    let bounceColor = 0xd4c4b0;
+    if (cfg.timeOfDay === 'sunset') bounceColor = 0x92400e;
+    else if (cfg.timeOfDay === 'night') bounceColor = 0x1e293b;
     this.giBounceLight.color.setHex(bounceColor);
-    this.giBounceLight.intensity = this.graphicsMode === 'extreme' ? 1.25 : this.graphicsMode === 'standard' ? 0.38 : 0;
+    this.giBounceLight.intensity = this.graphicsMode === 'extreme' ? 0.20 : this.graphicsMode === 'standard' ? 0.12 : 0;
     this.giBounceLight.visible = this.graphicsMode !== 'smooth';
 
     // Specular Rim Light (specular edge glow on weapon, silhouette, foliage)
     this.sunRimLight.color.setHex(cfg.sunColor);
     this.sunRimLight.position.set(-cfg.sunPos[0] * 0.75, 18, -cfg.sunPos[2] * 0.75);
-    this.sunRimLight.intensity = this.graphicsMode === 'extreme' ? 0.95 : this.graphicsMode === 'standard' ? 0.28 : 0;
+    this.sunRimLight.intensity = this.graphicsMode === 'extreme' ? 0.15 : this.graphicsMode === 'standard' ? 0.08 : 0;
     this.sunRimLight.visible = this.graphicsMode !== 'smooth';
 
     // Ray-Traced HDR Equirectangular Environment Map
     this.hdrEnvMap = TextureGenerator.createHDREquirectangularTexture(
       cfg.timeOfDay,
       cfg.sunColor,
-      cfg.ambientColor
+      cfg.ambientColor,
+      cfg.sunPos
     );
     if (this.graphicsMode !== 'smooth') {
       this.scene.environment = this.hdrEnvMap;
@@ -644,6 +665,80 @@ export class EnvironmentManager {
     });
 
     this.drawSky(cfg);
+    this.updateCelestialDisc(cfg);
+  }
+
+  private updateCelestialDisc(cfg: WeatherPresetConfig) {
+    if (!this.celestialCanvas || !this.celestialTexture) return;
+    const ctx = this.celestialCanvas.getContext('2d')!;
+    const w = 256;
+    const h = 256;
+    const cx = 128;
+    const cy = 128;
+    ctx.clearRect(0, 0, w, h);
+
+    if (cfg.timeOfDay === 'night') {
+      // Photorealistic Moon with lunar surface and cool cyan halo
+      const haloGrad = ctx.createRadialGradient(cx, cy, 28, cx, cy, 120);
+      haloGrad.addColorStop(0, 'rgba(186, 230, 253, 0.45)');
+      haloGrad.addColorStop(0.3, 'rgba(125, 211, 252, 0.20)');
+      haloGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = haloGrad;
+      ctx.fillRect(0, 0, w, h);
+
+      // Moon body
+      const moonRadius = 38;
+      const moonGrad = ctx.createRadialGradient(cx - 10, cy - 10, 5, cx, cy, moonRadius);
+      moonGrad.addColorStop(0, '#f8fafc');
+      moonGrad.addColorStop(0.65, '#e2e8f0');
+      moonGrad.addColorStop(1, '#94a3b8');
+      ctx.fillStyle = moonGrad;
+      ctx.beginPath();
+      ctx.arc(cx, cy, moonRadius, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Lunar craters & maria topography
+      ctx.fillStyle = 'rgba(71, 85, 105, 0.42)';
+      ctx.beginPath();
+      ctx.arc(cx - 14, cy - 10, 11, 0, Math.PI * 2);
+      ctx.arc(cx + 12, cy + 8, 9, 0, Math.PI * 2);
+      ctx.arc(cx - 6, cy + 16, 7, 0, Math.PI * 2);
+      ctx.arc(cx + 8, cy - 14, 6, 0, Math.PI * 2);
+      ctx.arc(cx - 18, cy + 6, 5, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (cfg.timeOfDay === 'sunset') {
+      // Golden / Crimson Sunset Sun Disc
+      const haloGrad = ctx.createRadialGradient(cx, cy, 32, cx, cy, 126);
+      haloGrad.addColorStop(0, 'rgba(254, 215, 170, 0.95)');
+      haloGrad.addColorStop(0.35, 'rgba(249, 115, 22, 0.55)');
+      haloGrad.addColorStop(0.7, 'rgba(220, 38, 38, 0.25)');
+      haloGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = haloGrad;
+      ctx.fillRect(0, 0, w, h);
+
+      // Sun core
+      ctx.fillStyle = '#fff7ed';
+      ctx.beginPath();
+      ctx.arc(cx, cy, 32, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      // High Noon Radiant Solar Orb
+      const haloGrad = ctx.createRadialGradient(cx, cy, 26, cx, cy, 124);
+      haloGrad.addColorStop(0, 'rgba(255, 255, 255, 0.95)');
+      haloGrad.addColorStop(0.28, 'rgba(254, 240, 138, 0.65)');
+      haloGrad.addColorStop(0.65, 'rgba(56, 189, 248, 0.20)');
+      haloGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = haloGrad;
+      ctx.fillRect(0, 0, w, h);
+
+      // Blazing sun core
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(cx, cy, 28, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    this.celestialTexture.needsUpdate = true;
   }
 
   private drawSky(cfg: WeatherPresetConfig) {
@@ -674,9 +769,15 @@ export class EnvironmentManager {
       ctx.globalAlpha = 1.0;
     }
 
-    // Sun / Moon / Flare
-    const flareX = 512;
-    const flareY = cfg.timeOfDay === 'sunset' ? 380 : cfg.timeOfDay === 'night' ? 140 : 260;
+    // Directional Sun / Moon placement on Sky Dome equirectangular map
+    const sunDir = new THREE.Vector3(...cfg.sunPos).normalize();
+    const azimuth = Math.atan2(sunDir.z, sunDir.x);
+    const u = ((azimuth + Math.PI) / (2 * Math.PI) + 1.0) % 1.0;
+    const flareX = Math.round(u * w);
+    const elevation = Math.asin(Math.max(-0.95, Math.min(0.95, sunDir.y)));
+    const v = 0.5 - (elevation / Math.PI);
+    const flareY = Math.max(25, Math.min(h * 0.48, Math.round(v * h)));
+
     const sunGrad = ctx.createRadialGradient(flareX, flareY, 5, flareX, flareY, cfg.sunFlareSize);
     sunGrad.addColorStop(0, cfg.sunFlareColor);
     sunGrad.addColorStop(0.35, cfg.sunFlareColor.replace('0.9', '0.45').replace('0.95', '0.45'));
@@ -720,6 +821,16 @@ export class EnvironmentManager {
       }
     }
 
+    // Sky Dome & Celestial Body Infinite Horizon Tracking
+    if (this.camera) {
+      this.skyDome.position.copy(this.camera.position);
+      if (this.celestialGroup) {
+        const currentSunDir = this.activeSunVector.clone().normalize();
+        this.celestialGroup.position.copy(this.camera.position).addScaledVector(currentSunDir, 138);
+        this.celestialGroup.lookAt(this.camera.position);
+      }
+    }
+
     // 1. Dynamic Time Progression
     if (this.isDynamicCycle) {
       this.cycleTimeSec += dt;
@@ -754,11 +865,12 @@ export class EnvironmentManager {
       const curSun = new THREE.Color(fromCfg.sunColor).lerp(new THREE.Color(toCfg.sunColor), p);
       this.sunLight.color.copy(curSun);
       this.sunLight.intensity = THREE.MathUtils.lerp(fromCfg.sunIntensity, toCfg.sunIntensity, p);
-      this.sunLight.position.set(
+      this.activeSunVector.set(
         THREE.MathUtils.lerp(fromCfg.sunPos[0], toCfg.sunPos[0], p),
         THREE.MathUtils.lerp(fromCfg.sunPos[1], toCfg.sunPos[1], p),
         THREE.MathUtils.lerp(fromCfg.sunPos[2], toCfg.sunPos[2], p)
       );
+      this.sunLight.position.copy(this.activeSunVector);
 
       // Lerp fill light
       const curFill = new THREE.Color(fromCfg.fillColor).lerp(new THREE.Color(toCfg.fillColor), p);

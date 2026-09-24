@@ -115,8 +115,9 @@ export class GameEngine {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.1;
+    this.renderer.toneMappingExposure = 1.0;
 
     container.appendChild(this.renderer.domElement);
 
@@ -138,6 +139,8 @@ export class GameEngine {
     this.pickupManager = new PickupManager(this.scene, this.particles);
     if (effectiveMapType === 'bermuda') {
       this.pickupManager.spawnBermudaPickups();
+    } else if (effectiveMapType === 'outpost') {
+      this.pickupManager.spawnOutpostPickups();
     }
 
     this.grenadeManager = new GrenadeManager(this.scene, this.particles, this.map.obstacles);
@@ -1066,7 +1069,7 @@ export class GameEngine {
         this.renderer.shadowMap.enabled = true;
         this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
         this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-        this.renderer.toneMappingExposure = 1.28;
+        this.renderer.toneMappingExposure = 1.04; // Natural cinematic filmic balance without blowout
         if (this.controller?.playerShadowMesh) {
           this.controller.playerShadowMesh.visible = true;
         }
@@ -1076,16 +1079,15 @@ export class GameEngine {
         this.renderer.shadowMap.enabled = true;
         this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
         this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-        this.renderer.toneMappingExposure = 1.15;
+        this.renderer.toneMappingExposure = 1.0;
         if (this.controller?.playerShadowMesh) {
           this.controller.playerShadowMesh.visible = true;
         }
       }
       this.renderer.shadowMap.needsUpdate = true;
-      // Re-scan scene materials to apply mode changes
-      this.environment.registerSceneMaterials(this.scene);
-      if (this.controller?.viewmodelRig) {
-        this.environment.registerSceneMaterials(this.controller.viewmodelRig);
+      // Re-register map ground material if available
+      if ((this.map as any)?.groundMaterial) {
+        this.environment.registerMapMaterial((this.map as any).groundMaterial);
       }
     }
     if (newSettings.weatherPreset) {

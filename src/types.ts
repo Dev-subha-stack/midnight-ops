@@ -128,7 +128,7 @@ export interface KillFeedItem {
 
 export type GameMode = 'tdm' | 'ffa' | 'battleroyale' | 'survival' | 'gungame' | 'targetrange' | 'training';
 
-export type MapType = 'warehouse' | 'bermuda';
+export type MapType = 'warehouse' | 'bermuda' | 'outpost';
 
 export interface FreeFireDangerZone {
   x?: number;

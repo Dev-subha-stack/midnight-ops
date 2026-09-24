@@ -22,6 +22,7 @@ import {
   OpticType,
   ReticleColor,
   ReticleStyle,
+  MapType,
 } from './types';
 import { HUD } from './components/HUD';
 import { Scoreboard } from './components/Scoreboard';
@@ -57,6 +58,7 @@ import {
   Activity,
   ShieldCheck,
   Check,
+  MapPin,
 } from 'lucide-react';
 import { soundManager } from './game/audio';
 import { DEFAULT_WEAPON_OPTICS, WEAPON_REGISTRY } from './game/weapons';
@@ -179,6 +181,7 @@ export default function App() {
 
   // Settings & Mode
   const [gameMode, setGameMode] = useState<GameMode>('tdm');
+  const [selectedMap, setSelectedMap] = useState<MapType>('warehouse');
   const [settings, setSettings] = useState<GameSettings>({
     mouseSensitivity: 1.0,
     masterVolume: 0.8,
@@ -193,11 +196,14 @@ export default function App() {
     botDifficulty: 'regular',
     graphicsQuality: 'ultra',
     weatherPreset: 'clear_day',
+    mapType: 'warehouse',
   });
 
   // Start / Init Engine
   const startMission = () => {
     soundManager.init();
+    const effectiveMap = gameMode === 'battleroyale' ? 'bermuda' : selectedMap;
+    setSettings(prev => ({ ...prev, mapType: effectiveMap }));
     setIsPlaying(true);
     setIsGameOver(false);
     setIsPaused(false);
@@ -824,6 +830,71 @@ export default function App() {
                 <span className="text-[10px] font-mono text-slate-400 bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
                   ACTIVE MODE: <b className="text-white uppercase">{gameMode}</b>
                 </span>
+              </div>
+
+              {/* Tactical Combat Map Selection */}
+              <div className="flex flex-col gap-2 bg-slate-900/60 p-3 rounded-xl border border-slate-800/80">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+                    <MapPin className="w-3.5 h-3.5 text-amber-400" /> TACTICAL COMBAT MAP
+                  </span>
+                  <span className="text-[10px] font-mono text-cyan-400 uppercase font-semibold">
+                    {gameMode === 'battleroyale'
+                      ? 'BERMUDA ISLAND (BR RESTRICTED)'
+                      : selectedMap === 'outpost'
+                      ? 'FOB SANDSTORM (DESERT OUTPOST)'
+                      : selectedMap === 'bermuda'
+                      ? 'BERMUDA ISLAND'
+                      : 'CARGO TERMINAL (CQB)'}
+                  </span>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    {
+                      id: 'warehouse',
+                      name: 'Cargo Terminal',
+                      size: '80x80M CQB',
+                      desc: 'Container maze, catwalk & sniper tower',
+                      disabled: gameMode === 'battleroyale',
+                    },
+                    {
+                      id: 'outpost',
+                      name: 'FOB Sandstorm',
+                      size: '100x100M DESERT',
+                      desc: '2-story TOC, motor pool & west trenches',
+                      disabled: gameMode === 'battleroyale',
+                    },
+                    {
+                      id: 'bermuda',
+                      name: 'Bermuda Island',
+                      size: '220x220M OPEN',
+                      desc: 'Clock Tower, Shipyard, Factory & Village',
+                      disabled: false,
+                    },
+                  ].map(m => {
+                    const isCur = (gameMode === 'battleroyale' ? 'bermuda' : selectedMap) === m.id;
+                    return (
+                      <button
+                        key={m.id}
+                        disabled={m.disabled}
+                        onClick={() => setSelectedMap(m.id as MapType)}
+                        className={`p-2.5 rounded-lg border text-left flex flex-col gap-1 transition-all cursor-pointer ${
+                          m.disabled
+                            ? 'opacity-40 cursor-not-allowed bg-slate-950/40 border-slate-800'
+                            : isCur
+                            ? 'bg-amber-950/40 border-amber-400 text-white shadow-sm ring-1 ring-amber-400/40'
+                            : 'bg-slate-950/60 border-slate-800/80 text-slate-400 hover:text-slate-200 hover:border-slate-700'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-mono font-bold text-white uppercase">{m.name}</span>
+                          <span className="text-[9px] font-mono text-amber-400 font-semibold">{m.size}</span>
+                        </div>
+                        <span className="text-[10px] text-slate-400 font-sans line-clamp-1">{m.desc}</span>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
               {/* Tactical Playlist Cards */}

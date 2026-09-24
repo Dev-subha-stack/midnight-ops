@@ -1072,9 +1072,10 @@ export class TextureGenerator {
   public static createHDREquirectangularTexture(
     timeOfDay: 'day' | 'noon' | 'sunset' | 'night' = 'noon',
     sunColorHex: number = 0xffedd5,
-    skyColorHex: number = 0x38bdf8
+    skyColorHex: number = 0x38bdf8,
+    sunPos: [number, number, number] = [20, 75, -20]
   ): THREE.Texture {
-    const key = `hdr_env_${timeOfDay}_${sunColorHex.toString(16)}_${skyColorHex.toString(16)}`;
+    const key = `hdr_env_${timeOfDay}_${sunColorHex.toString(16)}_${skyColorHex.toString(16)}_${sunPos.join('_')}`;
     if (this.cache.has(key)) return this.cache.get(key)!;
 
     const w = 1024;
@@ -1109,84 +1110,101 @@ export class TextureGenerator {
     ctx.fillStyle = skyGrad;
     ctx.fillRect(0, 0, w, horizonY);
 
-    // 2. DIRECTIONAL SUN HIGH-INTENSITY SPECULAR DISC (Simulates direct ray-traced solar glare)
-    const sunX = w * 0.42;
-    const sunY = timeOfDay === 'sunset' ? horizonY - 35 : timeOfDay === 'night' ? horizonY - 140 : horizonY - 130;
-    const sunRadius = timeOfDay === 'sunset' ? 42 : timeOfDay === 'night' ? 24 : 36;
+    // 2. DIRECTIONAL SUN / MOON BALANCED SPECULAR DISC
+    const sunDir = new THREE.Vector3(...sunPos).normalize();
+    const azimuth = Math.atan2(sunDir.z, sunDir.x);
+    const u = ((azimuth + Math.PI) / (2 * Math.PI) + 1.0) % 1.0;
+    const sunX = Math.round(u * w);
+    const elevation = Math.asin(Math.max(-0.95, Math.min(0.95, sunDir.y)));
+    const v = 0.5 - (elevation / Math.PI);
+    const sunY = Math.max(25, Math.min(h * 0.48, Math.round(v * h)));
 
-    // Massive bloom corona
-    const coronaGrad = ctx.createRadialGradient(sunX, sunY, 4, sunX, sunY, sunRadius * 4.5);
+    const sunRadius = timeOfDay === 'sunset' ? 24 : timeOfDay === 'night' ? 16 : 22;
+
+    // Smooth, photorealistic solar corona (controlled radius to prevent contrast blowouts)
+    const coronaGrad = ctx.createRadialGradient(sunX, sunY, 2, sunX, sunY, sunRadius * 2.2);
     if (timeOfDay === 'night') {
-      coronaGrad.addColorStop(0.0, 'rgba(224, 242, 254, 0.95)');
-      coronaGrad.addColorStop(0.25, 'rgba(186, 230, 253, 0.45)');
-      coronaGrad.addColorStop(0.6, 'rgba(125, 211, 252, 0.12)');
+      coronaGrad.addColorStop(0.0, 'rgba(224, 242, 254, 0.85)');
+      coronaGrad.addColorStop(0.35, 'rgba(186, 230, 253, 0.35)');
       coronaGrad.addColorStop(1.0, 'rgba(0, 0, 0, 0)');
     } else if (timeOfDay === 'sunset') {
-      coronaGrad.addColorStop(0.0, 'rgba(255, 255, 255, 1.0)');
-      coronaGrad.addColorStop(0.15, 'rgba(254, 240, 138, 0.9)');
-      coronaGrad.addColorStop(0.45, 'rgba(249, 115, 22, 0.55)');
-      coronaGrad.addColorStop(0.75, 'rgba(194, 65, 12, 0.2)');
+      coronaGrad.addColorStop(0.0, 'rgba(255, 247, 237, 0.85)');
+      coronaGrad.addColorStop(0.25, 'rgba(254, 215, 170, 0.5)');
+      coronaGrad.addColorStop(0.65, 'rgba(249, 115, 22, 0.2)');
       coronaGrad.addColorStop(1.0, 'rgba(0, 0, 0, 0)');
     } else {
-      coronaGrad.addColorStop(0.0, 'rgba(255, 255, 255, 1.0)');
-      coronaGrad.addColorStop(0.18, 'rgba(254, 249, 195, 0.9)');
-      coronaGrad.addColorStop(0.45, 'rgba(217, 119, 6, 0.35)');
-      coronaGrad.addColorStop(0.75, 'rgba(56, 189, 248, 0.15)');
+      coronaGrad.addColorStop(0.0, 'rgba(255, 255, 255, 0.85)');
+      coronaGrad.addColorStop(0.25, 'rgba(254, 240, 138, 0.45)');
+      coronaGrad.addColorStop(0.65, 'rgba(186, 230, 253, 0.15)');
       coronaGrad.addColorStop(1.0, 'rgba(0, 0, 0, 0)');
     }
     ctx.fillStyle = coronaGrad;
     ctx.beginPath();
-    ctx.arc(sunX, sunY, sunRadius * 4.5, 0, Math.PI * 2);
+    ctx.arc(sunX, sunY, sunRadius * 2.2, 0, Math.PI * 2);
     ctx.fill();
 
-    // Hot specular core
-    ctx.fillStyle = '#ffffff';
-    ctx.beginPath();
-    ctx.arc(sunX, sunY, sunRadius, 0, Math.PI * 2);
-    ctx.fill();
+    // Specular core / Moon surface
+    if (timeOfDay === 'night') {
+      ctx.fillStyle = '#e2e8f0';
+      ctx.beginPath();
+      ctx.arc(sunX, sunY, sunRadius * 0.75, 0, Math.PI * 2);
+      ctx.fill();
+      // Lunar crater spots
+      ctx.fillStyle = 'rgba(148, 163, 184, 0.4)';
+      ctx.beginPath();
+      ctx.arc(sunX - sunRadius * 0.25, sunY - sunRadius * 0.2, sunRadius * 0.22, 0, Math.PI * 2);
+      ctx.arc(sunX + sunRadius * 0.2, sunY + sunRadius * 0.15, sunRadius * 0.18, 0, Math.PI * 2);
+      ctx.arc(sunX - sunRadius * 0.1, sunY + sunRadius * 0.28, sunRadius * 0.14, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(sunX, sunY, sunRadius * 0.75, 0, Math.PI * 2);
+      ctx.fill();
+    }
 
     // 3. HORIZON HAZE & SILHOUETTE PROFILE
     const horizonBand = ctx.createLinearGradient(0, horizonY - 18, 0, horizonY + 12);
     horizonBand.addColorStop(0, 'rgba(255, 255, 255, 0)');
-    horizonBand.addColorStop(0.6, timeOfDay === 'sunset' ? 'rgba(251, 146, 60, 0.65)' : 'rgba(224, 242, 254, 0.55)');
+    horizonBand.addColorStop(0.6, timeOfDay === 'sunset' ? 'rgba(251, 146, 60, 0.4)' : 'rgba(224, 242, 254, 0.35)');
     horizonBand.addColorStop(1, 'rgba(0, 0, 0, 0)');
     ctx.fillStyle = horizonBand;
     ctx.fillRect(0, horizonY - 18, w, 30);
 
-    // Industrial / Tactical silhouette buildings along horizon
-    ctx.fillStyle = timeOfDay === 'night' ? '#090d16' : timeOfDay === 'sunset' ? '#2e1065' : '#1e293b';
-    ctx.globalAlpha = 0.55;
+    // Distant tactical terrain silhouette along horizon
+    ctx.fillStyle = timeOfDay === 'night' ? '#1e293b' : timeOfDay === 'sunset' ? '#431407' : '#334155';
+    ctx.globalAlpha = 0.35;
     for (let x = 0; x < w; x += 18) {
-      const bldH = ((x * 37) % 31) + 4;
+      const bldH = ((x * 37) % 25) + 4;
       ctx.fillRect(x, horizonY - bldH, 15, bldH + 4);
     }
     ctx.globalAlpha = 1.0;
 
-    // 4. TERRAIN / GROUND BOUNCE HALF (Horizon to Nadir)
+    // 4. TERRAIN / AMBIENT GROUND BOUNCE HALF (Horizon to Nadir)
+    // Soft, realistic tones prevent pitch-black shadow cutoffs in PBR materials
     const groundGrad = ctx.createLinearGradient(0, horizonY, 0, h);
     if (timeOfDay === 'sunset') {
-      groundGrad.addColorStop(0.0, '#431407'); // Deep warm brown
-      groundGrad.addColorStop(0.3, '#292524'); // Wet stone
-      groundGrad.addColorStop(1.0, '#1c1917'); // Dark nadir
+      groundGrad.addColorStop(0.0, '#582a1d'); // Warm sunset soil
+      groundGrad.addColorStop(0.4, '#431407');
+      groundGrad.addColorStop(1.0, '#2e1208');
     } else if (timeOfDay === 'night') {
-      groundGrad.addColorStop(0.0, '#0f172a');
-      groundGrad.addColorStop(0.4, '#090d16');
-      groundGrad.addColorStop(1.0, '#020617');
-    } else {
-      groundGrad.addColorStop(0.0, '#334155'); // Asphalt slate
-      groundGrad.addColorStop(0.2, '#1e293b');
+      groundGrad.addColorStop(0.0, '#1e293b'); // Cool night ambient
+      groundGrad.addColorStop(0.4, '#151d2c');
       groundGrad.addColorStop(1.0, '#0f172a');
+    } else {
+      groundGrad.addColorStop(0.0, '#525f70'); // Natural soft asphalt / concrete bounce
+      groundGrad.addColorStop(0.3, '#434d5b');
+      groundGrad.addColorStop(1.0, '#333d48');
     }
     ctx.fillStyle = groundGrad;
     ctx.fillRect(0, horizonY, w, h - horizonY);
 
-    // Specular ground water puddle glint (simulates ray-traced ground reflection line)
+    // Subtle specular ground glint
     const puddleGrad = ctx.createLinearGradient(0, horizonY, 0, h);
-    puddleGrad.addColorStop(0.0, timeOfDay === 'sunset' ? 'rgba(251, 146, 60, 0.45)' : 'rgba(224, 242, 254, 0.35)');
-    puddleGrad.addColorStop(0.35, timeOfDay === 'sunset' ? 'rgba(234, 88, 12, 0.15)' : 'rgba(186, 230, 253, 0.12)');
-    puddleGrad.addColorStop(1.0, 'rgba(0, 0, 0, 0)');
+    puddleGrad.addColorStop(0.0, timeOfDay === 'sunset' ? 'rgba(251, 146, 60, 0.25)' : 'rgba(224, 242, 254, 0.2)');
+    puddleGrad.addColorStop(0.4, 'rgba(0, 0, 0, 0)');
     ctx.fillStyle = puddleGrad;
-    ctx.fillRect(sunX - 120, horizonY, 240, h - horizonY);
+    ctx.fillRect(sunX - 100, horizonY, 200, (h - horizonY) * 0.5);
 
     const texture = new THREE.CanvasTexture(canvas);
     texture.mapping = THREE.EquirectangularReflectionMapping;
