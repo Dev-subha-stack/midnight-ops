@@ -70,6 +70,7 @@ export default function App() {
   // Game Life Cycle States
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [isPaused, setIsPaused] = useState<boolean>(false);
+  const [isPointerLocked, setIsPointerLocked] = useState<boolean>(false);
   const [isScoreboardOpen, setIsScoreboardOpen] = useState<boolean>(false);
   const [isGunsmithOpen, setIsGunsmithOpen] = useState<boolean>(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
@@ -154,6 +155,7 @@ export default function App() {
   const [playerYaw, setPlayerYaw] = useState<number>(0);
   const [playerPitch, setPlayerPitch] = useState<number>(0);
   const [uavActive, setUavActive] = useState<boolean>(false);
+  const [radioCallout, setRadioCallout] = useState<{ name: string; team: 'allies' | 'axis'; role?: string; text: string; time: number } | null>(null);
   const [battleRoyaleState, setBattleRoyaleState] = useState<BattleRoyaleState | null>(null);
   const [leanState, setLeanState] = useState<LeanDirection>('none');
   const [leanFactor, setLeanFactor] = useState<number>(0);
@@ -236,6 +238,16 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleLobbyKey);
   }, [isPlaying, isGunsmithOpen, isSettingsOpen]);
 
+  // Support direct auto-deploy via URL parameter (?play=1 or ?autostart=1 or ?deploy=1)
+  useEffect(() => {
+    if (typeof window !== 'undefined' && !isPlaying) {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('play') === '1' || params.get('autostart') === '1' || params.get('deploy') === '1') {
+        startMission();
+      }
+    }
+  }, []);
+
   useEffect(() => {
     if (!isPlaying || !canvasContainerRef.current) return;
 
@@ -258,6 +270,9 @@ export default function App() {
       setAlliesScore(allies);
       setAxisScore(axis);
       setMatchTime(time);
+    };
+    engine.onRadioCallout = (callout) => {
+      setRadioCallout(callout);
     };
     engine.onStreakUpdate = updatedStreaks => setStreaks([...updatedStreaks]);
     engine.onMatchEnd = (victory, finalStats) => {
@@ -399,14 +414,8 @@ export default function App() {
     };
 
     const handlePointerLockChange = () => {
-      const isLocked = document.pointerLockElement === canvasContainerRef.current;
-      if (!isLocked && !isGameOver) {
-        setIsPaused(true);
-        engine.setPaused(true);
-      } else if (isLocked && !isGameOver) {
-        setIsPaused(false);
-        engine.setPaused(false);
-      }
+      const isLocked = document.pointerLockElement === canvasContainerRef.current || document.pointerLockElement === document.body;
+      setIsPointerLocked(isLocked);
     };
 
     window.addEventListener('keydown', handleKeyDown);
@@ -546,14 +555,40 @@ export default function App() {
   const activeWeaponCfg = WEAPON_REGISTRY[currentWeapon];
 
   return (
-    <main id="app-root" className="relative w-screen h-screen bg-black overflow-hidden font-sans select-none">
+    <main id="app-root" className="fixed inset-0 w-full h-full bg-black overflow-hidden font-sans select-none">
       {/* 3D WebGL Canvas Viewport */}
       {isPlaying && (
         <div
           id="webgl-canvas-container"
           ref={canvasContainerRef}
+          onClick={() => {
+            if (!isPointerLocked) {
+              try {
+                canvasContainerRef.current?.requestPointerLock();
+              } catch {
+                // Iframe sandbox restriction
+              }
+            }
+          }}
           className="absolute inset-0 w-full h-full cursor-crosshair z-0"
         />
+      )}
+
+      {/* TACTICAL POINTER LOCK PROMPT (Seamless overlay if not locked in iframe) */}
+      {isPlaying && !isGameOver && !isPaused && !isPointerLocked && !isGunsmithOpen && !isSettingsOpen && (
+        <div
+          onClick={() => {
+            try {
+              canvasContainerRef.current?.requestPointerLock();
+            } catch {
+              // Iframe sandbox restriction
+            }
+          }}
+          className="absolute top-20 left-1/2 -translate-x-1/2 z-30 px-4 py-2 rounded-lg bg-slate-950/85 border border-cyan-500/70 text-cyan-300 font-mono text-xs font-bold tracking-widest uppercase shadow-[0_0_25px_rgba(6,182,212,0.4)] backdrop-blur-md cursor-pointer animate-pulse flex items-center gap-2"
+        >
+          <Crosshair className="w-4 h-4 text-cyan-400" />
+          <span>CLICK SCREEN TO LOCK TARGETING RETICLE // DRAG TO AIM</span>
+        </div>
       )}
 
       {/* TACTICAL HUD */}
@@ -604,6 +639,7 @@ export default function App() {
           playerYaw={playerYaw}
           playerPitch={playerPitch}
           uavActive={uavActive}
+          radioCallout={radioCallout}
           environment={environment}
           trainingTelemetry={trainingTelemetry}
           floatingDamageNumbers={floatingDamageNumbers}

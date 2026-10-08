@@ -265,12 +265,7 @@ export class EnvironmentManager {
     this.skyDome = new THREE.Mesh(skyGeo, skyMat);
     this.scene.add(this.skyDome);
 
-    // 4. Volumetric Godrays Group
-    this.godraysGroup = new THREE.Group();
-    this.initGodrayBeams();
-    this.scene.add(this.godraysGroup);
-
-    // 4.5. 3D Celestial Body (Physical Sun / Moon Billboard)
+    // 4. 3D Unified Celestial Body (Physical Sun / Moon Billboard)
     this.celestialGroup = new THREE.Group();
     this.celestialCanvas = document.createElement('canvas');
     this.celestialCanvas.width = 256;
@@ -286,6 +281,12 @@ export class EnvironmentManager {
     const celestialGeo = new THREE.PlaneGeometry(28, 28);
     this.celestialMesh = new THREE.Mesh(celestialGeo, celestialMat);
     this.celestialGroup.add(this.celestialMesh);
+
+    // Volumetric Radiant Sun Shafts (Parented directly to Celestial Group - strictly ONE unified sun)
+    this.godraysGroup = new THREE.Group();
+    this.initGodrayBeams();
+    this.celestialGroup.add(this.godraysGroup);
+
     this.scene.add(this.celestialGroup);
 
     // 5. Initialize Volumetric Rain & Dust Particles
@@ -296,21 +297,22 @@ export class EnvironmentManager {
     this.setWeather(initialPreset, true);
   }
 
-  // Create procedural volumetric sunbeams
+  // Create procedural volumetric sunbeams radiating gracefully from behind the single solar disc
   private initGodrayBeams() {
-    const beamCount = 14;
-    const beamGeo = new THREE.CylinderGeometry(0.8, 8.0, 85, 16, 1, true);
+    const beamCount = 12;
+    // Radiant planar light shafts emanating outward from behind the solar disc
+    const beamGeo = new THREE.PlaneGeometry(8.5, 52);
 
-    // Create soft radial alpha texture
+    // Create soft radial alpha texture with ZERO opacity at the center/apex to eliminate any duplicate sun core
     const canvas = document.createElement('canvas');
     canvas.width = 64;
     canvas.height = 256;
     const ctx = canvas.getContext('2d')!;
     const grad = ctx.createLinearGradient(0, 0, 0, 256);
-    grad.addColorStop(0, 'rgba(255, 235, 180, 0.65)');
-    grad.addColorStop(0.25, 'rgba(255, 215, 145, 0.42)');
-    grad.addColorStop(0.7, 'rgba(255, 185, 105, 0.12)');
-    grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    grad.addColorStop(0, 'rgba(255, 235, 180, 0)'); // Strictly ZERO opacity at origin: prevents any duplicate sun orb
+    grad.addColorStop(0.2, 'rgba(255, 225, 160, 0.28)'); // Soft bloom along the sunbeam shaft
+    grad.addColorStop(0.65, 'rgba(255, 195, 120, 0.10)');
+    grad.addColorStop(1, 'rgba(255, 255, 255, 0)'); // Smooth feather at ray ends
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, 64, 256);
     const beamTex = new THREE.CanvasTexture(canvas);
@@ -319,7 +321,7 @@ export class EnvironmentManager {
       const beamMat = new THREE.MeshBasicMaterial({
         map: beamTex,
         transparent: true,
-        opacity: 0.22,
+        opacity: 0.18,
         blending: THREE.AdditiveBlending,
         side: THREE.DoubleSide,
         depthWrite: false,
@@ -328,11 +330,11 @@ export class EnvironmentManager {
 
       const beam = new THREE.Mesh(beamGeo, beamMat);
       const angle = (i / beamCount) * Math.PI * 2;
-      const radius = 5 + (i % 4) * 4.5;
-      beam.position.set(Math.cos(angle) * radius, 38, Math.sin(angle) * radius);
-      beam.rotation.x = Math.PI * 0.14 + (i % 3) * 0.04;
-      beam.rotation.z = Math.sin(angle) * 0.22;
-      beam.scale.set(0.9 + (i % 3) * 0.35, 1.0, 0.9 + (i % 3) * 0.35);
+      const rayDist = 20;
+      // Radiate outward from the center of the celestial disc
+      beam.position.set(Math.cos(angle) * rayDist, Math.sin(angle) * rayDist, -0.6);
+      beam.rotation.z = angle - Math.PI / 2;
+      beam.scale.set(0.85 + (i % 3) * 0.25, 1.0 + (i % 2) * 0.2, 1.0);
       this.godraysGroup.add(beam);
       this.godrayBeams.push(beam);
     }
@@ -641,12 +643,15 @@ export class EnvironmentManager {
       this.scene.environment = null;
     }
 
-    // Reposition godrays to align with sun
-    this.godraysGroup.position.set(cfg.sunPos[0] * 0.4, 0, cfg.sunPos[2] * 0.4);
-    const sunDir = new THREE.Vector3(...cfg.sunPos).normalize();
+    // Volumetric sunbeam intensity (aligned perfectly with the single celestial body)
+    this.godraysGroup.position.set(0, 0, 0);
     this.godrayBeams.forEach(b => {
-      (b.material as THREE.MeshBasicMaterial).opacity = cfg.timeOfDay === 'night' ? 0.06 : this.graphicsMode === 'extreme' ? 0.34 : 0.16;
-      b.lookAt(this.godraysGroup.position.clone().add(sunDir));
+      (b.material as THREE.MeshBasicMaterial).opacity =
+        cfg.timeOfDay === 'night'
+          ? 0.0
+          : this.graphicsMode === 'extreme'
+            ? (cfg.timeOfDay === 'sunset' ? 0.30 : 0.20)
+            : (cfg.timeOfDay === 'sunset' ? 0.16 : 0.10);
     });
 
     if (this.scene.fog && this.scene.fog instanceof THREE.FogExp2) {
@@ -708,33 +713,45 @@ export class EnvironmentManager {
       ctx.fill();
     } else if (cfg.timeOfDay === 'sunset') {
       // Golden / Crimson Sunset Sun Disc
-      const haloGrad = ctx.createRadialGradient(cx, cy, 32, cx, cy, 126);
-      haloGrad.addColorStop(0, 'rgba(254, 215, 170, 0.95)');
-      haloGrad.addColorStop(0.35, 'rgba(249, 115, 22, 0.55)');
-      haloGrad.addColorStop(0.7, 'rgba(220, 38, 38, 0.25)');
-      haloGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
-      ctx.fillStyle = haloGrad;
-      ctx.fillRect(0, 0, w, h);
-
-      // Sun core
-      ctx.fillStyle = '#fff7ed';
-      ctx.beginPath();
-      ctx.arc(cx, cy, 32, 0, Math.PI * 2);
-      ctx.fill();
-    } else {
-      // High Noon Radiant Solar Orb
-      const haloGrad = ctx.createRadialGradient(cx, cy, 26, cx, cy, 124);
-      haloGrad.addColorStop(0, 'rgba(255, 255, 255, 0.95)');
-      haloGrad.addColorStop(0.28, 'rgba(254, 240, 138, 0.65)');
-      haloGrad.addColorStop(0.65, 'rgba(56, 189, 248, 0.20)');
+      const haloGrad = ctx.createRadialGradient(cx, cy, 26, cx, cy, 126);
+      haloGrad.addColorStop(0, 'rgba(255, 237, 213, 0.98)');
+      haloGrad.addColorStop(0.25, 'rgba(251, 146, 60, 0.72)');
+      haloGrad.addColorStop(0.55, 'rgba(234, 88, 12, 0.35)');
+      haloGrad.addColorStop(0.85, 'rgba(185, 28, 28, 0.12)');
       haloGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
       ctx.fillStyle = haloGrad;
       ctx.fillRect(0, 0, w, h);
 
       // Blazing sun core
+      ctx.fillStyle = '#fffbeb';
+      ctx.beginPath();
+      ctx.arc(cx, cy, 26, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      // High Noon Radiant Solar Orb with Atmospheric Flare & Corona
+      const haloGrad = ctx.createRadialGradient(cx, cy, 20, cx, cy, 126);
+      haloGrad.addColorStop(0, 'rgba(255, 255, 255, 1.0)');
+      haloGrad.addColorStop(0.18, 'rgba(254, 240, 138, 0.85)');
+      haloGrad.addColorStop(0.42, 'rgba(253, 186, 116, 0.45)');
+      haloGrad.addColorStop(0.72, 'rgba(56, 189, 248, 0.18)');
+      haloGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = haloGrad;
+      ctx.fillRect(0, 0, w, h);
+
+      // Subtle Anamorphic Lens Flare Cross-Spikes
+      ctx.strokeStyle = 'rgba(255, 248, 220, 0.35)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(cx - 95, cy);
+      ctx.lineTo(cx + 95, cy);
+      ctx.moveTo(cx, cy - 95);
+      ctx.lineTo(cx, cy + 95);
+      ctx.stroke();
+
+      // Blazing solar core
       ctx.fillStyle = '#ffffff';
       ctx.beginPath();
-      ctx.arc(cx, cy, 28, 0, Math.PI * 2);
+      ctx.arc(cx, cy, 24, 0, Math.PI * 2);
       ctx.fill();
     }
 
@@ -768,22 +785,6 @@ export class EnvironmentManager {
       }
       ctx.globalAlpha = 1.0;
     }
-
-    // Directional Sun / Moon placement on Sky Dome equirectangular map
-    const sunDir = new THREE.Vector3(...cfg.sunPos).normalize();
-    const azimuth = Math.atan2(sunDir.z, sunDir.x);
-    const u = ((azimuth + Math.PI) / (2 * Math.PI) + 1.0) % 1.0;
-    const flareX = Math.round(u * w);
-    const elevation = Math.asin(Math.max(-0.95, Math.min(0.95, sunDir.y)));
-    const v = 0.5 - (elevation / Math.PI);
-    const flareY = Math.max(25, Math.min(h * 0.48, Math.round(v * h)));
-
-    const sunGrad = ctx.createRadialGradient(flareX, flareY, 5, flareX, flareY, cfg.sunFlareSize);
-    sunGrad.addColorStop(0, cfg.sunFlareColor);
-    sunGrad.addColorStop(0.35, cfg.sunFlareColor.replace('0.9', '0.45').replace('0.95', '0.45'));
-    sunGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
-    ctx.fillStyle = sunGrad;
-    ctx.fillRect(0, 0, w, h);
 
     // Mountain silhouettes on horizon
     ctx.fillStyle = cfg.timeOfDay === 'night' ? '#010409' : '#090d16';
@@ -899,9 +900,9 @@ export class EnvironmentManager {
       }
     }
 
-    // Gentle pulse and subtle rotation on godrays
+    // Gentle rotation of volumetric sunbeams around the single solar center
     if (this.godraysGroup.visible) {
-      this.godraysGroup.rotation.y += dt * 0.02;
+      this.godraysGroup.rotation.z += dt * 0.015;
     }
 
     // 3. Lightning Flash in Tactical Storm
@@ -1041,7 +1042,7 @@ export class EnvironmentManager {
     this.scene.remove(this.sunLight);
     this.scene.remove(this.fillLight);
     this.scene.remove(this.skyDome);
-    this.scene.remove(this.godraysGroup);
+    this.scene.remove(this.celestialGroup);
     this.scene.remove(this.rainPoints);
     this.scene.remove(this.dustPoints);
     this.rainGeometry.dispose();
@@ -1049,6 +1050,7 @@ export class EnvironmentManager {
     this.dustGeometry.dispose();
     this.dustMaterial.dispose();
     this.skyTexture.dispose();
+    if (this.celestialTexture) this.celestialTexture.dispose();
     soundManager.setWeatherAudio('clear_day', 0);
   }
 }

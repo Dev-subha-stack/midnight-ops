@@ -602,11 +602,20 @@ export class FPSController {
       }
     });
 
+    let lastX = 0;
+    let lastY = 0;
+
     this.domElement.addEventListener('mousedown', e => {
+      soundManager.init();
+      lastX = e.clientX;
+      lastY = e.clientY;
+
       if (!this.isLocked) {
-        this.domElement.requestPointerLock();
-        soundManager.init();
-        return;
+        try {
+          this.domElement.requestPointerLock();
+        } catch {
+          // Iframe sandbox or user interaction restriction
+        }
       }
 
       if (e.button === 0) {
@@ -637,26 +646,39 @@ export class FPSController {
     });
 
     window.addEventListener('mousemove', e => {
-      if (!this.isLocked) return;
+      // Support pointer lock or dragging inside studio preview iframe
+      const isDragging = (e.buttons & 1) === 1 || (e.buttons & 2) === 2;
+      if (!this.isLocked && !isDragging) {
+        lastX = e.clientX;
+        lastY = e.clientY;
+        return;
+      }
+
+      const movementX = this.isLocked ? e.movementX : (e.clientX - lastX);
+      const movementY = this.isLocked ? e.movementY : (e.clientY - lastY);
+      lastX = e.clientX;
+      lastY = e.clientY;
+
+      if (!movementX && !movementY) return;
 
       const sens = (this.settings.mouseSensitivity || 1.0) * 0.0022;
       const invert = this.settings.invertY ? -1 : 1;
 
-      this.yaw -= e.movementX * sens;
-      this.pitch -= e.movementY * sens * invert;
+      this.yaw -= movementX * sens;
+      this.pitch -= movementY * sens * invert;
       this.pitch = Math.max(-Math.PI / 2.05, Math.min(Math.PI / 2.05, this.pitch));
 
       // Viewmodel mouse inertia lag (amplified during sprint for realistic physical weapon weight)
       const sprintInertiaBoost = this.isTacSprinting ? 2.4 : this.isSprinting ? 1.7 : 1.0;
       const inertiaMult = (this.isAiming ? 0.0003 : 0.0012) * sprintInertiaBoost;
-      this.swayInertiaX -= e.movementX * inertiaMult;
-      this.swayInertiaY += e.movementY * inertiaMult;
+      this.swayInertiaX -= movementX * inertiaMult;
+      this.swayInertiaY += movementY * inertiaMult;
       this.swayInertiaX = Math.max(-0.08, Math.min(0.08, this.swayInertiaX));
       this.swayInertiaY = Math.max(-0.08, Math.min(0.08, this.swayInertiaY));
     });
 
     document.addEventListener('pointerlockchange', () => {
-      this.isLocked = document.pointerLockElement === this.domElement;
+      this.isLocked = document.pointerLockElement === this.domElement || document.pointerLockElement === this.domElement.parentElement;
     });
   }
 
@@ -939,9 +961,9 @@ export class FPSController {
           const angle = forwardDir.angleTo(dirToBot);
           if (angle < Math.PI / 3) {
             hasHit = true;
-            const isKill = bot.takeDamage(125, true, forwardDir, 'allies');
+            const isKill = bot.takeDamage(125, true, forwardDir, 'allies', 'melee');
             soundManager.playKnifeSlash(true);
-            this.particles.emitBloodSplatter(bot.position.clone().add(new THREE.Vector3(0, 1.2, 0)), forwardDir);
+            this.particles.emitProceduralImpact(bot.position.clone().add(new THREE.Vector3(0, 1.2, 0)), forwardDir, 'melee', false, bot.armor > 0, 125);
             this.onHitmarker({ type: isKill ? 'kill' : 'body', timestamp: Date.now() });
             if (isKill) {
               this.onKill(bot.name, 'melee', false);
@@ -1210,6 +1232,7 @@ export class FPSController {
             hitOccurred = true;
             hitTraining = true;
             finalHitPoint = trainRes.hitPoint;
+            this.particles.emitProceduralImpact(finalHitPoint, segmentDir, this.currentWeapon, trainRes.isHeadshot, false, currentDamage);
             this.onHitmarker({
               type: trainRes.isHeadshot ? 'headshot' : 'body',
               timestamp: Date.now(),
@@ -1242,7 +1265,6 @@ export class FPSController {
           // Bot Hit!
           hitOccurred = true;
           finalHitPoint = currentPos.clone().addScaledVector(segmentDir, botHitDist);
-          this.particles.emitBloodSplatter(finalHitPoint, segmentDir);
 
           totalDistanceTraveled += botHitDist;
           let effectiveDmg = currentDamage;
@@ -1254,7 +1276,8 @@ export class FPSController {
           }
 
           const finalDmg = isHeadshot ? Math.floor(effectiveDmg * wpnCfg.headshotMultiplier) : Math.floor(effectiveDmg);
-          const isKill = hitBot.takeDamage(finalDmg, isHeadshot, segmentDir, 'allies');
+          this.particles.emitProceduralImpact(finalHitPoint, segmentDir, this.currentWeapon, isHeadshot, hitBot.armor > 0, finalDmg);
+          const isKill = hitBot.takeDamage(finalDmg, isHeadshot, segmentDir, 'allies', this.currentWeapon);
 
           soundManager.playHitmarker(isHeadshot, isKill);
           this.onHitmarker({

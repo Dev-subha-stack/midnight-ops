@@ -41,10 +41,35 @@ export class SoundEngine {
   private pubgLoadingStarted: boolean = false;
   private pubgSoundsReady: boolean = false;
   private activePlayerGunshots: { source: AudioBufferSourceNode; gain: GainNode }[] = [];
+  private speechVoices: SpeechSynthesisVoice[] = [];
+  private isVoicesInitialized: boolean = false;
 
   constructor() {
     // Early network prefetch of PUBG and MaterialFoundry audio assets so they are ready before first fire
     this.prefetchPubgAssets();
+    this.initSpeechVoices();
+  }
+
+  private initSpeechVoices() {
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      const updateVoices = () => {
+        try {
+          const v = window.speechSynthesis.getVoices();
+          if (v && v.length > 0) {
+            this.speechVoices = v;
+            this.isVoicesInitialized = true;
+          }
+        } catch {
+          // ignore
+        }
+      };
+      updateVoices();
+      try {
+        window.speechSynthesis.onvoiceschanged = updateVoices;
+      } catch {
+        // ignore
+      }
+    }
   }
 
   private prefetchPubgAssets() {
@@ -1399,11 +1424,62 @@ export class SoundEngine {
     }
   }
 
-  public playFleshImpact() {
+  public playFleshImpact(weapon?: string, isHeadshot?: boolean) {
     if (!this.ctx || !this.sfxGain) return;
     const t = this.ctx.currentTime;
-    this.createGunshotSubBass(t, 160, 45, 0.1, 0.65);
-    this.createGunshotNoiseTransient(t, 0.08, 1200, 250, 0.55);
+
+    // Scale audio frequency and amplitude based on weapon caliber
+    let subFreq = 160;
+    let subEnd = 45;
+    let subGain = 0.65;
+    let noiseFilter = 1200;
+    let noiseGain = 0.55;
+
+    if (weapon === 'sniper' || weapon === 'shotgun') {
+      subFreq = 220;
+      subEnd = 30;
+      subGain = 0.95;
+      noiseFilter = 2200;
+      noiseGain = 0.85;
+    } else if (weapon === 'deagle' || weapon === 'scar' || weapon === 'ak47') {
+      subFreq = 180;
+      subEnd = 38;
+      subGain = 0.80;
+      noiseFilter = 1600;
+      noiseGain = 0.70;
+    } else if (weapon === 'melee') {
+      subFreq = 140;
+      subEnd = 50;
+      subGain = 0.55;
+      noiseFilter = 1900;
+      noiseGain = 0.75;
+    } else if (weapon === 'grenade' || weapon === 'airstrike') {
+      subFreq = 240;
+      subEnd = 25;
+      subGain = 1.0;
+      noiseFilter = 2500;
+      noiseGain = 0.9;
+    }
+
+    if (isHeadshot) {
+      subGain *= 1.2;
+      noiseGain *= 1.25;
+      // High-frequency bone snap / crack transient on headshot
+      const crackOsc = this.ctx.createOscillator();
+      const crackGain = this.ctx.createGain();
+      crackOsc.type = 'triangle';
+      crackOsc.frequency.setValueAtTime(3200, t);
+      crackOsc.frequency.exponentialRampToValueAtTime(800, t + 0.035);
+      crackGain.gain.setValueAtTime(0.35, t);
+      crackGain.gain.exponentialRampToValueAtTime(0.001, t + 0.035);
+      crackOsc.connect(crackGain);
+      crackGain.connect(this.sfxGain);
+      crackOsc.start(t);
+      crackOsc.stop(t + 0.035);
+    }
+
+    this.createGunshotSubBass(t, subFreq, subEnd, 0.12, subGain);
+    this.createGunshotNoiseTransient(t, 0.09, noiseFilter, 250, noiseGain);
   }
 
   public playBotPain(isSevere: boolean = false) {
@@ -1850,23 +1926,561 @@ export class SoundEngine {
     }
   }
 
+  public getBestTacticalVoice(): SpeechSynthesisVoice | null {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return null;
+    if (this.speechVoices.length === 0) {
+      try {
+        this.speechVoices = window.speechSynthesis.getVoices();
+      } catch {
+        // ignore
+      }
+    }
+    const voices = this.speechVoices;
+    if (!voices || voices.length === 0) return null;
+
+    // 1. Authoritative English male/natural military voices
+    const preferredNames = [
+      'Google US English',
+      'Microsoft David',
+      'Microsoft Mark',
+      'Daniel',
+      'Alex',
+      'Fred',
+      'Oliver',
+      'Arthur',
+      'Natural',
+      'Male',
+    ];
+    for (const name of preferredNames) {
+      const match = voices.find(v => v.lang.startsWith('en') && v.name.includes(name));
+      if (match) return match;
+    }
+
+    // 2. Any en-US voice
+    const usVoice = voices.find(v => v.lang === 'en-US' || v.lang === 'en_US');
+    if (usVoice) return usVoice;
+
+    // 3. Any English voice
+    const anyEn = voices.find(v => v.lang.startsWith('en'));
+    if (anyEn) return anyEn;
+
+    return voices[0] || null;
+  }
+
+  public playRadioRogerBeep(destNode?: AudioNode) {
+    if (!this.ctx || !this.sfxGain) return;
+    const t = this.ctx.currentTime;
+    const dest = destNode || this.sfxGain;
+
+    // High-to-low dual chirp roger beep (1760Hz -> 880Hz)
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(1760, t);
+    osc.frequency.setValueAtTime(880, t + 0.045);
+    gain.gain.setValueAtTime(0.14, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.08);
+
+    osc.connect(gain);
+    gain.connect(dest);
+    osc.start(t);
+    osc.stop(t + 0.08);
+
+    // Closing mic squelch release
+    const bufferSize = Math.floor(this.ctx.sampleRate * 0.05);
+    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.35));
+    }
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = buffer;
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(2400, t + 0.04);
+    filter.Q.setValueAtTime(2.2, t + 0.04);
+    const noiseGain = this.ctx.createGain();
+    noiseGain.gain.setValueAtTime(0.12, t + 0.04);
+    noiseGain.gain.exponentialRampToValueAtTime(0.001, t + 0.09);
+
+    noise.connect(filter);
+    filter.connect(noiseGain);
+    noiseGain.connect(dest);
+    noise.start(t + 0.04);
+    noise.stop(t + 0.09);
+  }
+
+  public playRadioTransmissionCarrier(durationSec: number) {
+    if (!this.ctx || !this.voiceGain) return;
+    const t = this.ctx.currentTime;
+    const dur = Math.max(0.5, durationSec);
+    const bufSize = Math.floor(this.ctx.sampleRate * dur);
+    const buffer = this.ctx.createBuffer(1, bufSize, this.ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufSize; i++) {
+      const timeSec = i / this.ctx.sampleRate;
+      const hum = Math.sin(2 * Math.PI * 60 * timeSec) * 0.15;
+      data[i] = (Math.random() * 2 - 1) * 0.25 + hum;
+    }
+    const carrier = this.ctx.createBufferSource();
+    carrier.buffer = buffer;
+
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(1600, t);
+    filter.Q.setValueAtTime(1.4, t);
+
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0.001, t);
+    gain.gain.linearRampToValueAtTime(0.045, t + 0.05);
+    gain.gain.setValueAtTime(0.045, t + dur - 0.06);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+
+    carrier.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.voiceGain);
+
+    carrier.start(t);
+    carrier.stop(t + dur);
+  }
+
+  // --- SCORESTREAK ACTIVATION ACOUSTIC CUES ---
+  public playUavActivationFX() {
+    if (!this.ctx || !this.sfxGain) return;
+    const t = this.ctx.currentTime;
+    
+    // Satellite orbital uplink chirp: dual ascending sweeps
+    const osc1 = this.ctx.createOscillator();
+    const osc2 = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+
+    osc1.type = 'sawtooth';
+    osc1.frequency.setValueAtTime(620, t);
+    osc1.frequency.exponentialRampToValueAtTime(1880, t + 0.32);
+
+    osc2.type = 'sine';
+    osc2.frequency.setValueAtTime(1240, t);
+    osc2.frequency.exponentialRampToValueAtTime(3760, t + 0.32);
+
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(2200, t);
+    filter.Q.setValueAtTime(2.0, t);
+
+    gain.gain.setValueAtTime(0.25, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.38);
+
+    osc1.connect(filter);
+    osc2.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.sfxGain);
+
+    osc1.start(t);
+    osc2.start(t);
+    osc1.stop(t + 0.38);
+    osc2.stop(t + 0.38);
+
+    // Follow-up triple radar ping sequence
+    [0.12, 0.24, 0.36].forEach((dt, idx) => {
+      if (!this.ctx || !this.sfxGain) return;
+      const pingT = t + dt;
+      const pingOsc = this.ctx.createOscillator();
+      const pingGain = this.ctx.createGain();
+      pingOsc.type = 'sine';
+      pingOsc.frequency.setValueAtTime(2400 + idx * 400, pingT);
+      pingGain.gain.setValueAtTime(0.18, pingT);
+      pingGain.gain.exponentialRampToValueAtTime(0.0001, pingT + 0.08);
+      pingOsc.connect(pingGain);
+      pingGain.connect(this.sfxGain);
+      pingOsc.start(pingT);
+      pingOsc.stop(pingT + 0.08);
+    });
+  }
+
+  public playAirstrikeActivationFX() {
+    if (!this.ctx || !this.sfxGain) return;
+    const t = this.ctx.currentTime;
+    
+    // Low jet turbine intake whoosh & air-to-ground target lock tone
+    this.createGunshotSubBass(t, 120, 35, 1.2, 0.75);
+    this.playDangerAirstrike();
+
+    // High tech laser designate lock beeps
+    [0, 0.08, 0.16, 0.24].forEach((dt) => {
+      if (!this.ctx || !this.sfxGain) return;
+      const beepT = t + dt;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(3200, beepT);
+      gain.gain.setValueAtTime(0.15, beepT);
+      gain.gain.exponentialRampToValueAtTime(0.001, beepT + 0.04);
+      osc.connect(gain);
+      gain.connect(this.sfxGain);
+      osc.start(beepT);
+      osc.stop(beepT + 0.04);
+    });
+  }
+
+  public playSentryActivationFX() {
+    if (!this.ctx || !this.sfxGain) return;
+    const t = this.ctx.currentTime;
+
+    // Heavy servo motor spin-up
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(140, t);
+    osc.frequency.exponentialRampToValueAtTime(680, t + 0.28);
+    
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(800, t);
+    filter.frequency.linearRampToValueAtTime(1600, t + 0.28);
+
+    gain.gain.setValueAtTime(0.24, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.32);
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.sfxGain);
+
+    osc.start(t);
+    osc.stop(t + 0.32);
+
+    // Dual heavy mechanical latch clicks
+    this.createMechanicalClick(t + 0.28, 0.04, 3400, 0.85);
+    this.createMechanicalClick(t + 0.34, 0.05, 2600, 0.95);
+  }
+
+  public playNukeAlarmFX() {
+    if (!this.ctx || !this.sfxGain) return;
+    const t = this.ctx.currentTime;
+
+    // Sub-bass dread sweep
+    this.createGunshotSubBass(t, 60, 20, 2.5, 1.0);
+
+    // Tactical klaxon nuclear alert siren (3 cycles)
+    for (let cycle = 0; cycle < 3; cycle++) {
+      const cycleT = t + cycle * 0.45;
+      const siren = this.ctx.createOscillator();
+      const sirenGain = this.ctx.createGain();
+      siren.type = 'sawtooth';
+      siren.frequency.setValueAtTime(640, cycleT);
+      siren.frequency.linearRampToValueAtTime(960, cycleT + 0.22);
+      siren.frequency.linearRampToValueAtTime(640, cycleT + 0.42);
+
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = 'bandpass';
+      filter.frequency.setValueAtTime(800, cycleT);
+      filter.Q.setValueAtTime(3.0, cycleT);
+
+      sirenGain.gain.setValueAtTime(0.28, cycleT);
+      sirenGain.gain.exponentialRampToValueAtTime(0.001, cycleT + 0.44);
+
+      siren.connect(filter);
+      filter.connect(sirenGain);
+      sirenGain.connect(this.sfxGain);
+
+      siren.start(cycleT);
+      siren.stop(cycleT + 0.44);
+    }
+  }
+
+  /**
+   * Procedural Web Audio military radio formant voice synthesizer.
+   * Synthesizes tactical military radio phoneme sequences through F1/F2 acoustic formant bandpass filters,
+   * telephone radio bandpass (300-3400Hz), and subtle carrier wave saturation.
+   */
+  public synthesizeProceduralCallout(streakId: 'uav' | 'airstrike' | 'sentry' | 'nuke'): number {
+    if (!this.ctx || !this.voiceGain) return 1.8;
+    const t = this.ctx.currentTime + 0.08;
+
+    interface SyllableDef {
+      baseFreq: number;
+      f1: number;
+      f2: number;
+      dur: number;
+      pause: number;
+      frictionNoise?: boolean;
+    }
+
+    let syllables: SyllableDef[] = [];
+
+    switch (streakId) {
+      case 'uav':
+        // Phonetics: "U - A - V - ON - LINE"
+        syllables = [
+          { baseFreq: 132, f1: 340, f2: 860, dur: 0.16, pause: 0.03 }, // "U"
+          { baseFreq: 136, f1: 720, f2: 1680, dur: 0.18, pause: 0.03 }, // "A"
+          { baseFreq: 126, f1: 320, f2: 2150, dur: 0.18, pause: 0.09, frictionNoise: true }, // "V"
+          { baseFreq: 122, f1: 580, f2: 1100, dur: 0.18, pause: 0.02 }, // "ON"
+          { baseFreq: 114, f1: 420, f2: 1880, dur: 0.28, pause: 0.06 }, // "LINE"
+        ];
+        break;
+      case 'airstrike':
+        // Phonetics: "AIR - STRIKE - ON - LINE"
+        syllables = [
+          { baseFreq: 130, f1: 620, f2: 1720, dur: 0.20, pause: 0.03 }, // "AIR"
+          { baseFreq: 122, f1: 380, f2: 1980, dur: 0.22, pause: 0.09, frictionNoise: true }, // "STRIKE"
+          { baseFreq: 120, f1: 580, f2: 1100, dur: 0.18, pause: 0.02 }, // "ON"
+          { baseFreq: 112, f1: 420, f2: 1880, dur: 0.28, pause: 0.06 }, // "LINE"
+        ];
+        break;
+      case 'sentry':
+        // Phonetics: "SEN - TRY - ON - LINE"
+        syllables = [
+          { baseFreq: 128, f1: 520, f2: 1680, dur: 0.18, pause: 0.03, frictionNoise: true }, // "SEN"
+          { baseFreq: 120, f1: 360, f2: 1840, dur: 0.20, pause: 0.09 }, // "TRY"
+          { baseFreq: 120, f1: 580, f2: 1100, dur: 0.18, pause: 0.02 }, // "ON"
+          { baseFreq: 112, f1: 420, f2: 1880, dur: 0.28, pause: 0.06 }, // "LINE"
+        ];
+        break;
+      case 'nuke':
+        // Phonetics: "TAC - TI - CAL - NUKE - ON - LINE"
+        syllables = [
+          { baseFreq: 134, f1: 650, f2: 1560, dur: 0.15, pause: 0.02 }, // "TAC"
+          { baseFreq: 130, f1: 340, f2: 2100, dur: 0.14, pause: 0.02 }, // "TI"
+          { baseFreq: 124, f1: 540, f2: 1200, dur: 0.16, pause: 0.04 }, // "CAL"
+          { baseFreq: 118, f1: 350, f2: 960, dur: 0.22, pause: 0.08 }, // "NUKE"
+          { baseFreq: 116, f1: 580, f2: 1100, dur: 0.18, pause: 0.02 }, // "ON"
+          { baseFreq: 108, f1: 420, f2: 1880, dur: 0.30, pause: 0.06 }, // "LINE"
+        ];
+        break;
+    }
+
+    // Master radio bus for this vocal transmission
+    const radioFilter = this.ctx.createBiquadFilter();
+    radioFilter.type = 'bandpass';
+    radioFilter.frequency.setValueAtTime(1750, t);
+    radioFilter.Q.setValueAtTime(1.8, t);
+
+    const masterSyllableGain = this.ctx.createGain();
+    masterSyllableGain.gain.setValueAtTime(0.28, t);
+
+    radioFilter.connect(masterSyllableGain);
+    masterSyllableGain.connect(this.voiceGain);
+
+    let currentT = t;
+    syllables.forEach((syl) => {
+      if (!this.ctx) return;
+      const startSyl = currentT;
+      const dur = syl.dur;
+
+      // 1. Vocal fold glottal oscillator (rich harmonic sawtooth pulse)
+      const glottal = this.ctx.createOscillator();
+      glottal.type = 'sawtooth';
+      glottal.frequency.setValueAtTime(syl.baseFreq, startSyl);
+      glottal.frequency.linearRampToValueAtTime(syl.baseFreq * 0.94, startSyl + dur);
+
+      // Syllable amplitude envelope (attack, sustain, decay)
+      const sylGain = this.ctx.createGain();
+      sylGain.gain.setValueAtTime(0.0001, startSyl);
+      sylGain.gain.linearRampToValueAtTime(0.35, startSyl + 0.025);
+      sylGain.gain.setValueAtTime(0.35, startSyl + dur * 0.7);
+      sylGain.gain.exponentialRampToValueAtTime(0.0001, startSyl + dur);
+
+      // 2. Dual Formant Filter Cavities (F1 and F2)
+      const f1Filter = this.ctx.createBiquadFilter();
+      f1Filter.type = 'bandpass';
+      f1Filter.frequency.setValueAtTime(syl.f1, startSyl);
+      f1Filter.Q.setValueAtTime(5.0, startSyl);
+
+      const f2Filter = this.ctx.createBiquadFilter();
+      f2Filter.type = 'bandpass';
+      f2Filter.frequency.setValueAtTime(syl.f2, startSyl);
+      f2Filter.Q.setValueAtTime(6.0, startSyl);
+
+      glottal.connect(sylGain);
+      sylGain.connect(f1Filter);
+      sylGain.connect(f2Filter);
+      f1Filter.connect(radioFilter);
+      f2Filter.connect(radioFilter);
+
+      glottal.start(startSyl);
+      glottal.stop(startSyl + dur);
+
+      // Optional consonant fricative noise (for 'V', 'S', etc.)
+      if (syl.frictionNoise) {
+        const bufSize = Math.floor(this.ctx.sampleRate * 0.06);
+        const noiseBuf = this.ctx.createBuffer(1, bufSize, this.ctx.sampleRate);
+        const data = noiseBuf.getChannelData(0);
+        for (let i = 0; i < bufSize; i++) data[i] = (Math.random() * 2 - 1) * 0.3;
+        const noiseNode = this.ctx.createBufferSource();
+        noiseNode.buffer = noiseBuf;
+
+        const noiseFilter = this.ctx.createBiquadFilter();
+        noiseFilter.type = 'highpass';
+        noiseFilter.frequency.setValueAtTime(3200, startSyl);
+
+        const noiseGain = this.ctx.createGain();
+        noiseGain.gain.setValueAtTime(0.12, startSyl);
+        noiseGain.gain.exponentialRampToValueAtTime(0.001, startSyl + 0.06);
+
+        noiseNode.connect(noiseFilter);
+        noiseFilter.connect(noiseGain);
+        noiseGain.connect(radioFilter);
+
+        noiseNode.start(startSyl);
+        noiseNode.stop(startSyl + 0.06);
+      }
+
+      currentT += syl.dur + syl.pause;
+    });
+
+    return currentT - t;
+  }
+
+  /**
+   * Main scorestreak voice-over audio callout dispatcher.
+   * Triggers when a player successfully activates a reward in the game engine.
+   * Plays radio PTT chirp, dedicated tactical acoustic activation cue,
+   * background radio transmission carrier, and the voice-over audio callout
+   * (e.g. 'UAV online, radar sweep active').
+   */
+  public playScorestreakVoiceCallout(id: 'uav' | 'airstrike' | 'sentry' | 'nuke', customCallout?: string) {
+    if (this.ctx && this.ctx.state === 'suspended') {
+      this.ctx.resume().catch(() => {});
+    }
+
+    const calloutMap: Record<string, { voiceText: string; displayTitle: string }> = {
+      uav: {
+        voiceText: 'UAV online, radar sweep active.',
+        displayTitle: 'UAV ONLINE — RADAR SWEEP ACTIVE',
+      },
+      airstrike: {
+        voiceText: 'Airstrike online! Coordinates confirmed, strike inbound.',
+        displayTitle: 'AIRSTRIKE ONLINE — STRIKE INBOUND',
+      },
+      sentry: {
+        voiceText: 'Sentry gun online! Automated perimeter defense active.',
+        displayTitle: 'SENTRY GUN ONLINE — PERIMETER SECURED',
+      },
+      nuke: {
+        voiceText: 'Tactical Nuke online! Strike sequence initiated, all units seek cover!',
+        displayTitle: 'TACTICAL NUKE ONLINE — COUNTDOWN INITIATED',
+      },
+    };
+
+    const config = calloutMap[id] || {
+      voiceText: customCallout || `${id.toUpperCase()} online.`,
+      displayTitle: `${id.toUpperCase()} ONLINE`,
+    };
+    const voiceText = customCallout || config.voiceText;
+
+    // 1. Play streak-specific acoustic cue (satellite telemetry / jet wash / servo / siren)
+    switch (id) {
+      case 'uav':
+        this.playUavActivationFX();
+        break;
+      case 'airstrike':
+        this.playAirstrikeActivationFX();
+        break;
+      case 'sentry':
+        this.playSentryActivationFX();
+        break;
+      case 'nuke':
+        this.playNukeAlarmFX();
+        break;
+    }
+
+    // 2. Play opening radio PTT key click + squelch chirp
+    this.playRadioChirp();
+
+    // 3. Estimate duration and run procedural formant synthesizer + carrier in Web Audio
+    const procDuration = this.synthesizeProceduralCallout(id) || 1.8;
+    const estDuration = Math.max(2.0, procDuration + 0.4);
+    this.playRadioTransmissionCarrier(estDuration);
+
+    // 4. SpeechSynthesis Voice-Over Audio Callout
+    let speechSucceeded = false;
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      try {
+        // Clear any stuck utterances
+        window.speechSynthesis.cancel();
+
+        const utter = new SpeechSynthesisUtterance(voiceText);
+        utter.rate = 1.06; // Crisp, professional tactical radio cadence
+        utter.pitch = 0.85; // Deep, commanding military overwatch tone
+        utter.volume = 1.0;
+
+        // Pick preferred military announcer voice
+        const bestVoice = this.getBestTacticalVoice();
+        if (bestVoice) {
+          utter.voice = bestVoice;
+        }
+
+        utter.onend = () => {
+          this.playRadioRogerBeep();
+        };
+        utter.onerror = () => {
+          setTimeout(() => this.playRadioRogerBeep(), Math.floor(estDuration * 1000));
+        };
+
+        // Small delay after radio chirp opening
+        setTimeout(() => {
+          try {
+            window.speechSynthesis.speak(utter);
+          } catch {
+            setTimeout(() => this.playRadioRogerBeep(), Math.floor(estDuration * 1000));
+          }
+        }, 80);
+
+        speechSucceeded = true;
+      } catch (e) {
+        console.warn('[Audio] Speech synthesis callout fallback to procedural audio:', e);
+      }
+    }
+
+    // 5. If speech synthesis was not available, schedule closing roger beep after procedural synthesis
+    if (!speechSucceeded) {
+      setTimeout(() => {
+        this.playRadioRogerBeep();
+      }, Math.floor(estDuration * 1000));
+    }
+  }
+
+  public playScorestreakReady(streakName: string, id?: 'uav' | 'airstrike' | 'sentry' | 'nuke') {
+    const readyPhrases: Record<string, string> = {
+      uav: 'UAV standing by, ready for deployment.',
+      airstrike: 'Precision airstrike ready for coordinates.',
+      sentry: 'Automated sentry gun ready for placement.',
+      nuke: 'Tactical Nuke authorized, awaiting command.',
+    };
+    const phrase = (id && readyPhrases[id]) || `${streakName} ready for deployment!`;
+    this.playVoiceCallout(phrase);
+  }
+
+  public playScorestreakExpired(id: 'uav' | 'airstrike' | 'sentry' | 'nuke' | string) {
+    if (id === 'uav') {
+      this.playVoiceCallout('Friendly UAV is bingo fuel, leaving the airspace.');
+    }
+  }
+
   public playVoiceCallout(text: string) {
-    if ('speechSynthesis' in window) {
-      this.playRadioChirp();
+    if (this.ctx && this.ctx.state === 'suspended') {
+      this.ctx.resume().catch(() => {});
+    }
+    this.playRadioChirp();
+
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       setTimeout(() => {
         try {
+          window.speechSynthesis.cancel();
           const utter = new SpeechSynthesisUtterance(text);
-          utter.rate = 1.15;
-          utter.pitch = 0.85;
+          utter.rate = 1.10;
+          utter.pitch = 0.88;
           utter.volume = 0.95;
-          const voices = window.speechSynthesis.getVoices();
-          const usVoice = voices.find(v => v.lang.includes('en') && (v.name.includes('Male') || v.name.includes('Natural')));
-          if (usVoice) utter.voice = usVoice;
+          const bestVoice = this.getBestTacticalVoice();
+          if (bestVoice) utter.voice = bestVoice;
+          utter.onend = () => {
+            this.playRadioRogerBeep();
+          };
           window.speechSynthesis.speak(utter);
         } catch {
           // Fallback
         }
-      }, 120);
+      }, 100);
     }
   }
 

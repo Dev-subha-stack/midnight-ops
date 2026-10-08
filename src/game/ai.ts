@@ -816,7 +816,7 @@ export class BotController {
     }, this.reloadTotalTime * 500);
   }
 
-  public takeDamage(damage: number, isHeadshot: boolean = false, hitDir?: THREE.Vector3, attackerTeam?: 'allies' | 'axis'): boolean {
+  public takeDamage(damage: number, isHeadshot: boolean = false, hitDir?: THREE.Vector3, attackerTeam?: 'allies' | 'axis', weapon: WeaponType | string = 'm4'): boolean {
     if (this.isDead) return false;
     // Friendly Fire Protection: Teammates cannot damage each other!
     if (attackerTeam && attackerTeam === this.team) {
@@ -903,9 +903,9 @@ export class BotController {
       this.state = 'attack';
     }
 
-    // Blood emission
+    // Procedural blood & debris impact emission scaled by weapon caliber
     const hitPos = this.position.clone().add(new THREE.Vector3(0, isHeadshot ? 1.7 : 1.2, 0));
-    this.particles.emitBloodSplatter(hitPos, hitDir || new THREE.Vector3(0, 1, 0), isHeadshot);
+    this.particles.emitProceduralImpact(hitPos, hitDir || new THREE.Vector3(0, 1, 0), weapon, isHeadshot, this.armor > 0, damage);
 
     if (this.health <= 0) {
       this.die(impactDir, isHeadshot, damage);
@@ -2089,7 +2089,7 @@ export class BotController {
       if (onPlayerDamage) {
         onPlayerDamage(finalDmg, this.name, this.weapon, this.position);
       } else if (targetBot && !targetBot.isDead) {
-        const isKill = targetBot.takeDamage(finalDmg, false, dir);
+        const isKill = targetBot.takeDamage(finalDmg, false, dir, this.team, this.weapon);
         if (isKill) {
           this.kills++;
           this.squad.onBotKillBot?.(this.team, this.name, targetBot.name, this.weapon);

@@ -87,6 +87,7 @@ export class GameEngine {
   public onFloatingNumbersUpdate: (items: FloatingDamageNumberItem[]) => void = () => {};
   public onPlayerEliminated: (info: PlayerEliminatedInfo | null) => void = () => {};
   public onLeanUpdate?: (direction: LeanDirection, factor: number) => void;
+  public onRadioCallout: (item: { name: string; team: 'allies' | 'axis'; role?: string; text: string; time: number }) => void = () => {};
 
   // Player Elimination State
   public isPlayerDead: boolean = false;
@@ -96,6 +97,7 @@ export class GameEngine {
   private lastFrameTime: number = performance.now();
   private animationFrameId: number | null = null;
   private isDestroyed: boolean = false;
+  private resizeObserver: ResizeObserver | null = null;
 
   constructor(container: HTMLElement, settings: GameSettings, mode: GameMode = 'tdm') {
     this.container = container;
@@ -104,22 +106,38 @@ export class GameEngine {
 
     // 1. Scene & Renderer setup
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(settings.fieldOfView || 85, window.innerWidth / window.innerHeight, 0.01, 500);
+    const width = Math.max(container.clientWidth || 0, window.innerWidth || 0, 800);
+    const height = Math.max(container.clientHeight || 0, window.innerHeight || 0, 600);
+    this.camera = new THREE.PerspectiveCamera(settings.fieldOfView || 85, width / height, 0.01, 500);
     this.scene.add(this.camera);
 
     this.renderer = new THREE.WebGLRenderer({
       antialias: true,
       powerPreference: 'high-performance',
     });
-    this.renderer.setSize(container.clientWidth, container.clientHeight);
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setSize(width, height, false);
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.0;
 
+    // Ensure canvas expands to fill container seamlessly in all iframe viewports
+    this.renderer.domElement.style.width = '100%';
+    this.renderer.domElement.style.height = '100%';
+    this.renderer.domElement.style.display = 'block';
+    this.renderer.domElement.style.position = 'absolute';
+    this.renderer.domElement.style.inset = '0';
+
     container.appendChild(this.renderer.domElement);
+
+    if (typeof ResizeObserver !== 'undefined' && container) {
+      this.resizeObserver = new ResizeObserver(() => {
+        this.onResize();
+      });
+      this.resizeObserver.observe(container);
+    }
 
     // 2. Sub-systems
     const effectiveMapType: MapType = this.gameMode === 'battleroyale' ? (settings.mapType || 'bermuda') : (settings.mapType || 'warehouse');
@@ -522,6 +540,13 @@ export class GameEngine {
 
     this.stats.health = Math.max(0, this.stats.health - damage);
 
+    // Procedural blood spatter and armor debris impact on player
+    const hitDir = botPos
+      ? new THREE.Vector3().subVectors(this.controller.position, botPos).normalize()
+      : new THREE.Vector3(0, 0, -1);
+    const hitPos = this.controller.position.clone().add(new THREE.Vector3(0, 1.2, 0));
+    this.particles.emitProceduralImpact(hitPos, hitDir, weapon, false, this.stats.armor > 0, damage);
+
     // Audio & Red Vignette / Directional Indicator
     soundManager.playHitmarker(false, false, true);
 
@@ -615,7 +640,7 @@ export class GameEngine {
     this.onStatsUpdate({ ...this.stats });
   }
 
-  public activateScorestreak(id: 'uav' | 'airstrike' | 'sentry' | 'nuke') {
+  public activateScorestreak(id: 'uav' | 'airstrike' | 'sentry' | 'nuke'): boolean {
     const success = this.streakManager.activateStreak(id, this.controller.position, undefined, (strikeImpact) => {
       // Eliminate bots caught in blast radius
       this.botManager.bots.forEach(bot => {
@@ -626,11 +651,33 @@ export class GameEngine {
       });
     });
 
-    if (success && id === 'nuke') {
-      setTimeout(() => this.endMatch(true), 3500);
+    if (success) {
+      const calloutMap: Record<string, { callsign: string; text: string }> = {
+        uav: { callsign: 'HQ OVERWATCH', text: 'UAV ONLINE — RADAR SWEEP ACTIVE' },
+        airstrike: { callsign: 'TACTICAL DISPATCH', text: 'AIRSTRIKE ONLINE — STRIKE INBOUND' },
+        sentry: { callsign: 'DEFENSE COMMAND', text: 'SENTRY GUN ONLINE — PERIMETER SECURED' },
+        nuke: { callsign: 'STRATEGIC COMMAND', text: 'TACTICAL NUKE ONLINE — COUNTDOWN INITIATED' },
+      };
+      const info = calloutMap[id];
+      if (info) {
+        this.onRadioCallout({
+          name: info.callsign,
+          team: 'allies',
+          role: 'OVERWATCH',
+          text: info.text,
+          time: Date.now(),
+        });
+      }
+
+      if (id === 'nuke') {
+        setTimeout(() => this.endMatch(true), 3500);
+      }
+    } else {
+      soundManager.playUIClick();
     }
 
     this.onStreakUpdate(this.streakManager.streaks);
+    return success;
   }
 
   public changeWeaponCamo(camo: WeaponCamo) {
@@ -673,16 +720,22 @@ export class GameEngine {
 
   private onResize = () => {
     if (!this.container || this.isDestroyed) return;
-    const w = this.container.clientWidth;
-    const h = this.container.clientHeight;
+    const w = this.container.clientWidth || window.innerWidth || 800;
+    const h = this.container.clientHeight || window.innerHeight || 600;
+    if (w <= 0 || h <= 0) return;
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
-    this.renderer.setSize(w, h);
+    this.renderer.setSize(w, h, false);
   };
 
   private startLoop() {
+    let initialSyncFrames = 0;
     const loop = (now: number) => {
       if (this.isDestroyed) return;
+      if (initialSyncFrames < 5) {
+        this.onResize();
+        initialSyncFrames++;
+      }
       const dt = Math.min(0.1, (now - this.lastFrameTime) / 1000);
       this.lastFrameTime = now;
 
@@ -804,8 +857,7 @@ export class GameEngine {
       this.onFloatingNumbersUpdate(mappedNumbers);
     }
 
-    const uavStreak = this.streakManager.streaks.find(s => s.id === 'uav');
-    const isUavActive = uavStreak ? !uavStreak.ready && this.streakManager['activeStreaks']?.has('uav') : false;
+    const isUavActive = this.streakManager.uavActive;
 
     this.botManager.update(
       dt,
@@ -1179,6 +1231,10 @@ export class GameEngine {
     this.isDestroyed = true;
     if (this.animationFrameId !== null) {
       cancelAnimationFrame(this.animationFrameId);
+    }
+    if (this.resizeObserver) {
+      this.resizeObserver.disconnect();
+      this.resizeObserver = null;
     }
     this.environment.destroy();
     soundManager.stopHeartbeat();

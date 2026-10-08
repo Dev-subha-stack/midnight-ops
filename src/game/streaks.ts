@@ -55,7 +55,7 @@ export class ScorestreakManager {
     this.streaks.forEach(s => {
       if (currentStreak >= s.cost && !s.ready) {
         s.ready = true;
-        soundManager.playVoiceCallout(`${s.name} ready for deployment!`);
+        soundManager.playScorestreakReady(s.name, s.id as 'uav' | 'airstrike' | 'sentry' | 'nuke');
       }
     });
   }
@@ -71,15 +71,16 @@ export class ScorestreakManager {
 
     streak.ready = false;
 
+    // Trigger voice-over audio callout specifically for scorestreak activation (e.g. 'UAV online')
+    soundManager.playScorestreakVoiceCallout(id);
+
     switch (id) {
       case 'uav': {
         this.uavActive = true;
         this.uavTimer = this.uavDuration;
-        soundManager.playVoiceCallout('Friendly UAV in the air, scanning for targets.');
         break;
       }
       case 'airstrike': {
-        soundManager.playVoiceCallout('Precision strike inbound on designated coordinates.');
         const strikePos = targetPos || playerPos.clone().add(new THREE.Vector3(0, 0, -25));
         
         // Spawn airstrike jet sequence
@@ -89,11 +90,9 @@ export class ScorestreakManager {
         break;
       }
       case 'sentry': {
-        soundManager.playVoiceCallout('Sentry gun deployed and guarding sector.');
         break;
       }
       case 'nuke': {
-        soundManager.playVoiceCallout('Tactical Nuke ready, countdown initiated!');
         soundManager.playExplosion();
         break;
       }
@@ -118,7 +117,7 @@ export class ScorestreakManager {
       this.uavTimer -= dt;
       if (this.uavTimer <= 0) {
         this.uavActive = false;
-        soundManager.playVoiceCallout('Friendly UAV is bingo fuel, leaving the airspace.');
+        soundManager.playScorestreakExpired('uav');
       }
     }
   }

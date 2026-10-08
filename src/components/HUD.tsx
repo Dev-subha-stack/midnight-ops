@@ -87,6 +87,7 @@ interface HUDProps {
   playerYaw: number;
   playerPitch?: number;
   uavActive: boolean;
+  radioCallout?: { name: string; team: 'allies' | 'axis'; role?: string; text: string; time: number } | null;
   environment?: EnvironmentState;
   trainingTelemetry?: TrainingTelemetryData;
   floatingDamageNumbers?: FloatingDamageNumberItem[];
@@ -149,6 +150,7 @@ export const HUD: React.FC<HUDProps> = ({
   playerYaw,
   playerPitch = 0,
   uavActive,
+  radioCallout,
   environment,
   trainingTelemetry,
   floatingDamageNumbers = [],
@@ -185,6 +187,12 @@ export const HUD: React.FC<HUDProps> = ({
       });
     }
   }, [bots]);
+
+  useEffect(() => {
+    if (radioCallout) {
+      setActiveRadioBark(radioCallout);
+    }
+  }, [radioCallout]);
 
   useEffect(() => {
     if (!activeRadioBark) return;
@@ -580,16 +588,16 @@ export const HUD: React.FC<HUDProps> = ({
 
         {/* AAA TACTICAL SQUAD RADIO COMMS WIDGET (Call of Duty style) */}
         {activeRadioBark && (
-          <div className="flex items-start gap-2 max-w-[250px] bg-black/85 backdrop-blur-md px-2.5 py-1.5 rounded-lg border border-cyan-500/50 shadow-2xl text-[9.5px] font-mono animate-in fade-in slide-in-from-left duration-150 pointer-events-none">
-            <Radio className="w-3.5 h-3.5 text-cyan-400 mt-0.5 animate-pulse shrink-0" />
+          <div className="flex items-start gap-2.5 max-w-[280px] bg-black/90 backdrop-blur-md px-3 py-2 rounded-lg border border-cyan-500/60 shadow-2xl text-[10px] font-mono animate-in fade-in slide-in-from-left duration-150 pointer-events-none">
+            <Radio className="w-4 h-4 text-cyan-400 mt-0.5 animate-pulse shrink-0" />
             <div className="flex flex-col overflow-hidden">
               <div className="flex items-center gap-1.5">
-                <span className={`font-black text-[9px] uppercase truncate ${activeRadioBark.team === 'allies' ? 'text-sky-400' : 'text-red-400'}`}>
+                <span className={`font-black text-[9.5px] uppercase truncate ${activeRadioBark.team === 'allies' ? 'text-sky-400' : 'text-red-400'}`}>
                   {activeRadioBark.name} {activeRadioBark.role ? `[${activeRadioBark.role.toUpperCase()}]` : ''}
                 </span>
-                <span className="text-[7.5px] text-slate-500 font-bold">COMMS</span>
+                <span className="text-[7.5px] px-1 py-0.2 rounded bg-cyan-950/80 text-cyan-300 font-bold border border-cyan-500/40">RADIO COMMS</span>
               </div>
-              <span className="text-slate-200 italic font-medium leading-tight mt-0.5">
+              <span className="text-slate-100 italic font-medium leading-tight mt-0.5 tracking-wide">
                 "{activeRadioBark.text}"
               </span>
             </div>
@@ -738,37 +746,37 @@ export const HUD: React.FC<HUDProps> = ({
       {!isAiming && (
         <div
           id="hud-crosshair-center"
-          className="absolute top-1/2 left-1/2 flex items-center justify-center pointer-events-none transition-transform duration-75"
+          className="absolute top-1/2 left-1/2 flex items-center justify-center pointer-events-none transition-transform duration-75 filter drop-shadow-[0_0_1.5px_rgba(0,0,0,0.95)]"
           style={{
             transform: `translate(-50%, -50%) rotate(${-(leanFactor || 0) * 15.5}deg)`,
           }}
         >
           <div
-            className={`w-1 h-1 rounded-full ${targetLockedBot ? 'bg-red-500' : 'bg-white/90'}`}
+            className={`w-1 h-1 rounded-full shadow-[0_0_2px_#000] ${targetLockedBot ? 'bg-red-500 ring-1 ring-red-400' : 'bg-white/95 ring-1 ring-black/40'}`}
           />
           <div
-            className={`absolute w-[1px] ${targetLockedBot ? 'bg-red-500' : 'bg-white/80'}`}
+            className={`absolute w-[1.5px] shadow-[0_0_2px_#000] ${targetLockedBot ? 'bg-red-500' : 'bg-white/90'}`}
             style={{
               height: isSprinting ? '12px' : '7px',
               top: isSprinting ? '-18px' : '-13px',
             }}
           />
           <div
-            className={`absolute w-[1px] ${targetLockedBot ? 'bg-red-500' : 'bg-white/80'}`}
+            className={`absolute w-[1.5px] shadow-[0_0_2px_#000] ${targetLockedBot ? 'bg-red-500' : 'bg-white/90'}`}
             style={{
               height: isSprinting ? '12px' : '7px',
               bottom: isSprinting ? '-18px' : '-13px',
             }}
           />
           <div
-            className={`absolute h-[1px] ${targetLockedBot ? 'bg-red-500' : 'bg-white/80'}`}
+            className={`absolute h-[1.5px] shadow-[0_0_2px_#000] ${targetLockedBot ? 'bg-red-500' : 'bg-white/90'}`}
             style={{
               width: isSprinting ? '12px' : '7px',
               left: isSprinting ? '-18px' : '-13px',
             }}
           />
           <div
-            className={`absolute h-[1px] ${targetLockedBot ? 'bg-red-500' : 'bg-white/80'}`}
+            className={`absolute h-[1.5px] shadow-[0_0_2px_#000] ${targetLockedBot ? 'bg-red-500' : 'bg-white/90'}`}
             style={{
               width: isSprinting ? '12px' : '7px',
               right: isSprinting ? '-18px' : '-13px',
@@ -1240,17 +1248,22 @@ export const HUD: React.FC<HUDProps> = ({
           {streaks.map((s, idx) => (
             <div
               key={s.id}
-              onClick={() => s.ready && onActivateStreak(s.id)}
-              className={`flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-mono tracking-wider transition-all border ${
+              onClick={() => onActivateStreak(s.id)}
+              className={`flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-mono tracking-wider transition-all border pointer-events-auto cursor-pointer ${
                 s.ready
-                  ? 'bg-amber-500/20 border-amber-400 text-amber-300 shadow animate-pulse pointer-events-auto cursor-pointer'
-                  : 'bg-black/60 border-slate-850 text-slate-500'
+                  ? 'bg-amber-500/25 border-amber-400 text-amber-300 shadow-lg shadow-amber-500/20 ring-1 ring-amber-400/40 animate-pulse hover:bg-amber-500/35'
+                  : 'bg-black/60 border-slate-850 text-slate-500 hover:border-slate-700'
               }`}
             >
-              <span className="bg-slate-800 text-amber-400 px-1 py-0.2 rounded text-[8px] font-bold">
+              <span className={`px-1 py-0.2 rounded text-[8px] font-bold ${s.ready ? 'bg-amber-400 text-black' : 'bg-slate-800 text-amber-400'}`}>
                 {idx + 6}
               </span>
               <span className="font-bold uppercase text-[9px]">{s.name}</span>
+              {s.ready && (
+                <span className="text-[7.5px] font-black uppercase text-amber-200 bg-amber-950/80 border border-amber-500/50 px-1 rounded ml-0.5">
+                  READY
+                </span>
+              )}
             </div>
           ))}
         </div>

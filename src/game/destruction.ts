@@ -134,12 +134,62 @@ export class DestructionManager {
       metalness: 0.1,
     });
 
+    const steelCornerMat = new THREE.MeshStandardMaterial({
+      color: 0x181e26,
+      roughness: 0.42,
+      metalness: 0.88,
+    });
+    const subMeshes: THREE.Mesh[] = [];
+
     const crateGeo = new THREE.BoxGeometry(size, size, size);
     const crateMesh = new THREE.Mesh(crateGeo, woodMat);
     crateMesh.castShadow = true;
     crateMesh.receiveShadow = true;
     crateMesh.name = `${id}_mesh`;
     group.add(crateMesh);
+    subMeshes.push(crateMesh);
+
+    // 8 Heavy-Duty Steel Corner Reinforcement Brackets with Rivets
+    const cornerSize = size * 0.18;
+    const cornerThick = 0.012;
+    for (let x = -1; x <= 1; x += 2) {
+      for (let y = -1; y <= 1; y += 2) {
+        for (let z = -1; z <= 1; z += 2) {
+          const corner = new THREE.Mesh(new THREE.BoxGeometry(cornerSize, cornerSize, cornerSize), steelCornerMat);
+          corner.position.set(
+            x * (size / 2 - cornerSize / 2 + cornerThick),
+            y * (size / 2 - cornerSize / 2 + cornerThick),
+            z * (size / 2 - cornerSize / 2 + cornerThick)
+          );
+          corner.castShadow = true;
+          group.add(corner);
+          subMeshes.push(corner);
+        }
+      }
+    }
+
+    // Outer Framing Battens (top, bottom, and vertical edges)
+    const battenWidth = size * 0.11;
+    const battenDepth = 0.018;
+    [-1, 1].forEach(yDir => {
+      const topFrameFront = new THREE.Mesh(new THREE.BoxGeometry(size * 0.94, battenWidth, battenDepth), woodMat);
+      topFrameFront.position.set(0, yDir * (size / 2 - battenWidth / 2), size / 2 + battenDepth / 2);
+      const topFrameBack = topFrameFront.clone();
+      topFrameBack.position.z = -(size / 2 + battenDepth / 2);
+      group.add(topFrameFront, topFrameBack);
+      subMeshes.push(topFrameFront, topFrameBack);
+    });
+
+    // Side Recessed Steel Carry Handles
+    [-1, 1].forEach(xDir => {
+      const handlePlate = new THREE.Mesh(new THREE.BoxGeometry(0.016, size * 0.22, size * 0.34), steelCornerMat);
+      handlePlate.position.set(xDir * (size / 2 + 0.008), 0, 0);
+      const handleRing = new THREE.Mesh(new THREE.TorusGeometry(size * 0.09, 0.014, 6, 12), steelCornerMat);
+      handleRing.rotation.y = Math.PI / 2;
+      handleRing.position.set(xDir * (size / 2 + 0.024), 0, 0);
+      group.add(handlePlate, handleRing);
+      subMeshes.push(handlePlate, handleRing);
+    });
 
     this.scene.add(group);
 
@@ -154,7 +204,7 @@ export class DestructionManager {
       stage: 'intact',
       isDestroyed: false,
       position: pos.clone(),
-      subMeshes: [crateMesh],
+      subMeshes,
     };
 
     this.props.push(item);
@@ -178,12 +228,53 @@ export class DestructionManager {
       metalness: 0.6,
     });
 
-    const geo = new THREE.CylinderGeometry(0.44, 0.44, 1.5, 16);
+    const steelRimMat = new THREE.MeshStandardMaterial({
+      color: 0x1a212d,
+      roughness: 0.35,
+      metalness: 0.88,
+    });
+    const subMeshes: THREE.Mesh[] = [];
+
+    // Main Drum Body
+    const geo = new THREE.CylinderGeometry(0.44, 0.44, 1.5, 24);
     const mesh = new THREE.Mesh(geo, barrelMat);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     mesh.name = `${id}_mesh`;
     group.add(mesh);
+    subMeshes.push(mesh);
+
+    // Top & Bottom Heavy Rolled Steel Chime Rims
+    [-1, 1].forEach(yDir => {
+      const chimeRim = new THREE.Mesh(new THREE.CylinderGeometry(0.462, 0.462, 0.058, 24), steelRimMat);
+      chimeRim.position.set(0, yDir * 0.725, 0);
+      chimeRim.castShadow = true;
+      group.add(chimeRim);
+      subMeshes.push(chimeRim);
+    });
+
+    // Dual Central Swaged Rolling Hoops
+    [-0.26, 0.26].forEach(yPos => {
+      const hoop = new THREE.Mesh(new THREE.CylinderGeometry(0.456, 0.456, 0.042, 24), steelRimMat);
+      hoop.position.set(0, yPos, 0);
+      hoop.castShadow = true;
+      group.add(hoop);
+      subMeshes.push(hoop);
+    });
+
+    // Recessed Top Drum Lid
+    const topLid = new THREE.Mesh(new THREE.CylinderGeometry(0.426, 0.426, 0.02, 24), steelRimMat);
+    topLid.position.set(0, 0.74, 0);
+    group.add(topLid);
+    subMeshes.push(topLid);
+
+    // 2-Inch Hexagonal Steel Bung Plug Screw Cap & Vent Cap
+    const bungCap = new THREE.Mesh(new THREE.CylinderGeometry(0.042, 0.042, 0.025, 6), steelRimMat);
+    bungCap.position.set(0.24, 0.755, 0.08);
+    const ventCap = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.024, 0.022, 6), steelRimMat);
+    ventCap.position.set(-0.24, 0.755, -0.08);
+    group.add(bungCap, ventCap);
+    subMeshes.push(bungCap, ventCap);
 
     this.scene.add(group);
 
@@ -198,7 +289,7 @@ export class DestructionManager {
       stage: 'intact',
       isDestroyed: false,
       position: pos.clone(),
-      subMeshes: [mesh],
+      subMeshes,
     };
 
     this.props.push(item);
@@ -332,29 +423,68 @@ export class DestructionManager {
     group.rotation.y = rotY;
 
     const metalMat = new THREE.MeshStandardMaterial({
-      color: 0x1e3a2b, // Olive military green
-      roughness: 0.5,
-      metalness: 0.7,
+      color: 0x223828, // NATO Olive Drab
+      roughness: 0.52,
+      metalness: 0.65,
     });
-    const latchMat = new THREE.MeshStandardMaterial({
+    const blackSteelMat = new THREE.MeshStandardMaterial({
+      color: 0x14181f,
+      roughness: 0.35,
+      metalness: 0.88,
+    });
+    const yellowStencilMat = new THREE.MeshBasicMaterial({
       color: 0xf59e0b,
-      roughness: 0.3,
-      metalness: 0.9,
     });
+    const subMeshes: THREE.Mesh[] = [];
 
-    const chestGeo = new THREE.BoxGeometry(1.4, 0.8, 0.9);
+    // Main Steel Ammo Container Body
+    const chestGeo = new THREE.BoxGeometry(1.4, 0.72, 0.84);
     const chest = new THREE.Mesh(chestGeo, metalMat);
-    chest.position.set(0, 0.4, 0);
+    chest.position.set(0, 0.36, 0);
     chest.castShadow = true;
     chest.receiveShadow = true;
     group.add(chest);
+    subMeshes.push(chest);
 
-    // Stencil decal / latch
-    const latchL = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.2, 0.05), latchMat);
-    latchL.position.set(-0.35, 0.45, 0.46);
-    const latchR = latchL.clone();
-    latchR.position.x = 0.35;
-    group.add(latchL, latchR);
+    // Weatherproof Overhanging Steel Lid
+    const lid = new THREE.Mesh(new THREE.BoxGeometry(1.44, 0.12, 0.88), metalMat);
+    lid.position.set(0, 0.76, 0);
+    lid.castShadow = true;
+    group.add(lid);
+    subMeshes.push(lid);
+
+    // Embossed Stiffening Ribs on Front Face
+    [-0.42, 0, 0.42].forEach(xOffset => {
+      const rib = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.52, 0.024), blackSteelMat);
+      rib.position.set(xOffset, 0.36, 0.43);
+      group.add(rib);
+      subMeshes.push(rib);
+    });
+
+    // Heavy Cam-Lock Draw Latches
+    [-0.38, 0.38].forEach(xOffset => {
+      const latch = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.22, 0.04), blackSteelMat);
+      latch.position.set(xOffset, 0.48, 0.44);
+      group.add(latch);
+      subMeshes.push(latch);
+    });
+
+    // Top Folding Wire Carry Handle
+    const handleBar = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.56, 8), blackSteelMat);
+    handleBar.rotateZ(Math.PI / 2);
+    handleBar.position.set(0, 0.85, 0);
+    const handleMountL = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.06, 0.06), blackSteelMat);
+    handleMountL.position.set(-0.28, 0.82, 0);
+    const handleMountR = handleMountL.clone();
+    handleMountR.position.x = 0.28;
+    group.add(handleBar, handleMountL, handleMountR);
+    subMeshes.push(handleBar, handleMountL, handleMountR);
+
+    // Ordnance Stencil Label Band
+    const stencilBand = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.14, 0.01), yellowStencilMat);
+    stencilBand.position.set(0, 0.32, 0.425);
+    group.add(stencilBand);
+    subMeshes.push(stencilBand);
 
     this.scene.add(group);
 
@@ -369,7 +499,7 @@ export class DestructionManager {
       stage: 'intact',
       isDestroyed: false,
       position: pos.clone(),
-      subMeshes: [chest],
+      subMeshes,
     };
 
     this.props.push(item);

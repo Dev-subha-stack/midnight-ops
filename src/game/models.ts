@@ -1104,6 +1104,14 @@ export class ModelFactory {
         sideRailR.position.x = 0.038;
         weaponGroup.add(sideRailL, sideRailR);
 
+        // Tactical AN/PEQ-15 Laser / IR Aiming Module on Right Rail
+        const scarPeq = new THREE.Mesh(new THREE.BoxGeometry(0.046, 0.028, 0.11), blackSteelMat);
+        scarPeq.position.set(0.054, 0.038, -0.22);
+        const scarPeqLens = new THREE.Mesh(new THREE.CircleGeometry(0.007, 10), new THREE.MeshBasicMaterial({ color: 0xef4444 }));
+        scarPeqLens.position.set(0.054, 0.038, -0.276);
+        scarPeqLens.rotateY(Math.PI);
+        weaponGroup.add(scarPeq, scarPeqLens);
+
         // Heavy 16" Free-Floating Barrel with Gas Regulator & 3-Prong Flash Hider
         const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.016, 0.44, 12), blackSteelMat);
         barrel.rotateX(Math.PI / 2);
@@ -1555,6 +1563,17 @@ export class ModelFactory {
     antenna.rotation.z = -0.08;
     torsoGroup.add(radioPouch, radioBody, antenna);
 
+    // Push-To-Talk (PTT) Comms Switch on Chest Webbing with Coiled Headset Cable
+    const pttSwitch = new THREE.Mesh(new THREE.BoxGeometry(0.042, 0.052, 0.024), metalHardwareMat);
+    pttSwitch.position.set(-0.13, 0.36, 0.17);
+    const pttButton = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.01, 8), chemLightMat);
+    pttButton.rotateX(Math.PI / 2);
+    pttButton.position.set(-0.13, 0.36, 0.184);
+    const commsCable = new THREE.Mesh(new THREE.CylinderGeometry(0.003, 0.003, 0.22, 6), metalHardwareMat);
+    commsCable.position.set(-0.14, 0.46, 0.12);
+    commsCable.rotation.x = -0.35;
+    torsoGroup.add(pttSwitch, pttButton, commsCable);
+
     // Tactical Chem Light (Glow Stick) clipped into MOLLE row
     const chemLight = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.13, 8), chemLightMat);
     chemLight.position.set(0.18, 0.32, 0.17);
@@ -1853,12 +1872,22 @@ export class ModelFactory {
     leftShin.position.set(0, -0.60, 0.01);
     leftLeg.add(leftShin);
 
-    // Rugged High-Traction Combat Boot
+    // Rugged High-Traction Combat Boot with Lug Cleats & Bloused Trouser Cuff
+    const leftTrouserCuff = new THREE.Mesh(new THREE.CylinderGeometry(0.084, 0.088, 0.065, 12), uniformMat);
+    leftTrouserCuff.position.set(0, -0.73, 0.02);
+
     const leftBoot = new THREE.Mesh(new THREE.BoxGeometry(0.135, 0.15, 0.25), bootRubberMat);
     leftBoot.position.set(0, -0.80, 0.04);
     const leftSole = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.03, 0.26), metalHardwareMat);
     leftSole.position.set(0, -0.87, 0.04);
-    leftLeg.add(leftBoot, leftSole);
+
+    // Deep Lug Cleats underneath sole
+    for (let c = -2; c <= 2; c++) {
+      const lug = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.014, 0.032), bootRubberMat);
+      lug.position.set(0, -0.89, 0.04 + c * 0.05);
+      leftLeg.add(lug);
+    }
+    leftLeg.add(leftTrouserCuff, leftBoot, leftSole);
 
     botGroup.add(leftLeg);
 
@@ -1881,11 +1910,20 @@ export class ModelFactory {
     rightShin.position.set(0, -0.60, 0.01);
     rightLeg.add(rightShin);
 
+    const rightTrouserCuff = new THREE.Mesh(new THREE.CylinderGeometry(0.084, 0.088, 0.065, 12), uniformMat);
+    rightTrouserCuff.position.set(0, -0.73, 0.02);
+
     const rightBoot = new THREE.Mesh(new THREE.BoxGeometry(0.135, 0.15, 0.25), bootRubberMat);
     rightBoot.position.set(0, -0.80, 0.04);
     const rightSole = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.03, 0.26), metalHardwareMat);
     rightSole.position.set(0, -0.87, 0.04);
-    rightLeg.add(rightBoot, rightSole);
+
+    for (let c = -2; c <= 2; c++) {
+      const lug = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.014, 0.032), bootRubberMat);
+      lug.position.set(0, -0.89, 0.04 + c * 0.05);
+      rightLeg.add(lug);
+    }
+    rightLeg.add(rightTrouserCuff, rightBoot, rightSole);
 
     botGroup.add(rightLeg);
 
