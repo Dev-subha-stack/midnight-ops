@@ -2987,6 +2987,378 @@ export class SoundEngine {
       }
     }, Math.floor(duration * 1000));
   }
+
+  // ==========================================
+  // SECRET EASTER EGG PROCEDURAL AUDIO EFFECTS
+  // ==========================================
+
+  // 1. Solar Hit Cosmic Resonance (Scales with 1..30 hit count)
+  public playSolarHit(hitCount: number) {
+    if (!this.ctx || !this.sfxGain) return;
+    const t = this.ctx.currentTime;
+    const progress = Math.min(1.0, hitCount / 30);
+
+    // Root frequency rises from 240Hz up to 920Hz as sun nears critical collapse
+    const baseFreq = 240 + progress * 680;
+    const osc1 = this.ctx.createOscillator();
+    const osc2 = this.ctx.createOscillator();
+    const subOsc = this.ctx.createOscillator();
+
+    const gainNode = this.ctx.createGain();
+    const subGain = this.ctx.createGain();
+
+    osc1.type = 'sine';
+    osc1.frequency.setValueAtTime(baseFreq, t);
+    osc1.frequency.exponentialRampToValueAtTime(baseFreq * 1.08, t + 0.35);
+
+    // Perfect fifth harmonic overtone
+    osc2.type = 'triangle';
+    osc2.frequency.setValueAtTime(baseFreq * 1.5, t);
+    osc2.frequency.exponentialRampToValueAtTime(baseFreq * 1.5 * 1.05, t + 0.35);
+
+    // Sub-bass thump
+    subOsc.type = 'sine';
+    subOsc.frequency.setValueAtTime(65, t);
+    subOsc.frequency.exponentialRampToValueAtTime(32, t + 0.25);
+
+    const masterVol = 0.22 + progress * 0.18;
+    gainNode.gain.setValueAtTime(masterVol, t);
+    gainNode.gain.exponentialRampToValueAtTime(0.001, t + 0.45);
+
+    subGain.gain.setValueAtTime(0.28 + progress * 0.22, t);
+    subGain.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
+
+    osc1.connect(gainNode);
+    osc2.connect(gainNode);
+    subOsc.connect(subGain);
+
+    gainNode.connect(this.sfxGain);
+    subGain.connect(this.sfxGain);
+
+    osc1.start(t);
+    osc2.start(t);
+    subOsc.start(t);
+
+    osc1.stop(t + 0.5);
+    osc2.stop(t + 0.5);
+    subOsc.stop(t + 0.35);
+  }
+
+  // 2. Solar Supernova Cataclysmic Detonation
+  public playSupernovaExplosion() {
+    if (!this.ctx || !this.sfxGain) return;
+    const t = this.ctx.currentTime;
+
+    // A. Pre-detonation charged energy swell (0.35s build)
+    const chargeOsc = this.ctx.createOscillator();
+    const chargeGain = this.ctx.createGain();
+    chargeOsc.type = 'sawtooth';
+    chargeOsc.frequency.setValueAtTime(110, t);
+    chargeOsc.frequency.exponentialRampToValueAtTime(1400, t + 0.35);
+    chargeGain.gain.setValueAtTime(0.01, t);
+    chargeGain.gain.linearRampToValueAtTime(0.35, t + 0.32);
+    chargeGain.gain.exponentialRampToValueAtTime(0.001, t + 0.38);
+
+    chargeOsc.connect(chargeGain);
+    chargeGain.connect(this.sfxGain);
+    chargeOsc.start(t);
+    chargeOsc.stop(t + 0.4);
+
+    // B. Super-massive seismic detonation (at t + 0.35s)
+    const boomTime = t + 0.35;
+
+    // Sub-harmonic shockwave
+    const subOsc = this.ctx.createOscillator();
+    const subGain = this.ctx.createGain();
+    subOsc.type = 'sine';
+    subOsc.frequency.setValueAtTime(80, boomTime);
+    subOsc.frequency.exponentialRampToValueAtTime(22, boomTime + 2.2);
+    subGain.gain.setValueAtTime(0.85, boomTime);
+    subGain.gain.exponentialRampToValueAtTime(0.001, boomTime + 2.4);
+
+    subOsc.connect(subGain);
+    subGain.connect(this.sfxGain);
+    subOsc.start(boomTime);
+    subOsc.stop(boomTime + 2.5);
+
+    // Filtered white noise plasma explosion
+    const bufferSize = Math.floor(this.ctx.sampleRate * 2.8);
+    const noiseBuffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const output = noiseBuffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      output[i] = Math.random() * 2 - 1;
+    }
+
+    const whiteNoise = this.ctx.createBufferSource();
+    whiteNoise.buffer = noiseBuffer;
+
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(3200, boomTime);
+    filter.frequency.exponentialRampToValueAtTime(90, boomTime + 2.5);
+
+    const noiseGain = this.ctx.createGain();
+    noiseGain.gain.setValueAtTime(0.9, boomTime);
+    noiseGain.gain.exponentialRampToValueAtTime(0.001, boomTime + 2.8);
+
+    whiteNoise.connect(filter);
+    filter.connect(noiseGain);
+    noiseGain.connect(this.sfxGain);
+
+    whiteNoise.start(boomTime);
+    whiteNoise.stop(boomTime + 2.8);
+  }
+
+  // 3. Minecraft EXP Orb Ding & Block Break
+  public playMinecraftDing() {
+    if (!this.ctx || !this.sfxGain) return;
+    const t = this.ctx.currentTime;
+
+    // The iconic dual-pitch chime: C6 (1046.5Hz) -> E6 (1318.5Hz)
+    const tones = [1046.5, 1318.5];
+    tones.forEach((freq, idx) => {
+      const startTime = t + idx * 0.08;
+      const osc = this.ctx!.createOscillator();
+      const gain = this.ctx!.createGain();
+
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, startTime);
+      gain.gain.setValueAtTime(0.28, startTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.35);
+
+      osc.connect(gain);
+      gain.connect(this.sfxGain!);
+      osc.start(startTime);
+      osc.stop(startTime + 0.4);
+    });
+  }
+
+  public playMinecraftBlockBreak() {
+    if (!this.ctx || !this.sfxGain) return;
+    const t = this.ctx.currentTime;
+
+    // 3 rapid crunchy block fracture thuds
+    for (let i = 0; i < 3; i++) {
+      const burstTime = t + i * 0.06;
+      const bufferSize = Math.floor(this.ctx.sampleRate * 0.08);
+      const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let j = 0; j < bufferSize; j++) {
+        data[j] = (Math.random() * 2 - 1) * Math.exp(-j / (bufferSize * 0.25));
+      }
+      const source = this.ctx.createBufferSource();
+      source.buffer = buffer;
+
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = 'bandpass';
+      filter.frequency.setValueAtTime(500 + i * 200, burstTime);
+      filter.Q.setValueAtTime(1.5, burstTime);
+
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(0.35, burstTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, burstTime + 0.08);
+
+      source.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.sfxGain);
+      source.start(burstTime);
+      source.stop(burstTime + 0.09);
+    }
+  }
+
+  // 4. Call of Duty Mystery Box Jingle & Nuke Siren
+  public playMysteryBoxJingle() {
+    if (!this.ctx || !this.sfxGain) return;
+    const t = this.ctx.currentTime;
+
+    // Iconic eerie music box 8-tone progression
+    const notes = [830.6, 880.0, 739.99, 783.99, 659.25, 622.25, 587.33, 554.37];
+    notes.forEach((freq, idx) => {
+      const startTime = t + idx * 0.14;
+      const osc = this.ctx!.createOscillator();
+      const gain = this.ctx!.createGain();
+
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, startTime);
+      gain.gain.setValueAtTime(0.24, startTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.22);
+
+      osc.connect(gain);
+      gain.connect(this.sfxGain!);
+      osc.start(startTime);
+      osc.stop(startTime + 0.25);
+    });
+
+    // Mystery box lid slam at end
+    const slamTime = t + notes.length * 0.14 + 0.05;
+    const slamOsc = this.ctx.createOscillator();
+    const slamGain = this.ctx.createGain();
+    slamOsc.type = 'triangle';
+    slamOsc.frequency.setValueAtTime(140, slamTime);
+    slamOsc.frequency.exponentialRampToValueAtTime(40, slamTime + 0.25);
+    slamGain.gain.setValueAtTime(0.4, slamTime);
+    slamGain.gain.exponentialRampToValueAtTime(0.001, slamTime + 0.3);
+
+    slamOsc.connect(slamGain);
+    slamGain.connect(this.sfxGain);
+    slamOsc.start(slamTime);
+    slamOsc.stop(slamTime + 0.32);
+  }
+
+  public playNukeSiren() {
+    if (!this.ctx || !this.sfxGain) return;
+    const t = this.ctx.currentTime;
+
+    // CoD Tactical Nuke 2-cycle warning siren
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sawtooth';
+
+    // 2 siren sweeps
+    osc.frequency.setValueAtTime(480, t);
+    osc.frequency.linearRampToValueAtTime(820, t + 0.6);
+    osc.frequency.linearRampToValueAtTime(480, t + 1.2);
+    osc.frequency.linearRampToValueAtTime(820, t + 1.8);
+    osc.frequency.linearRampToValueAtTime(480, t + 2.4);
+
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(1200, t);
+
+    gain.gain.setValueAtTime(0.22, t);
+    gain.gain.setValueAtTime(0.22, t + 2.2);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 2.5);
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.sfxGain);
+
+    osc.start(t);
+    osc.stop(t + 2.5);
+  }
+
+  // 5. Temple Run Demon Monkey Screech & Jungle War Drums
+  public playTempleRunScreech() {
+    if (!this.ctx || !this.sfxGain) return;
+    const t = this.ctx.currentTime;
+
+    // Frequency modulated harsh screech
+    const carrier = this.ctx.createOscillator();
+    const mod = this.ctx.createOscillator();
+    const modGain = this.ctx.createGain();
+    const gain = this.ctx.createGain();
+
+    carrier.type = 'sawtooth';
+    carrier.frequency.setValueAtTime(950, t);
+    carrier.frequency.linearRampToValueAtTime(1450, t + 0.18);
+    carrier.frequency.exponentialRampToValueAtTime(420, t + 0.65);
+
+    mod.type = 'square';
+    mod.frequency.setValueAtTime(45, t);
+    modGain.gain.setValueAtTime(320, t);
+
+    mod.connect(carrier.frequency);
+
+    gain.gain.setValueAtTime(0.26, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.7);
+
+    carrier.connect(gain);
+    gain.connect(this.sfxGain);
+
+    carrier.start(t);
+    mod.start(t);
+    carrier.stop(t + 0.75);
+    mod.stop(t + 0.75);
+
+    // Tribal double-drum thud
+    [0.15, 0.42].forEach(dtThud => {
+      const drumTime = t + dtThud;
+      const drumOsc = this.ctx!.createOscillator();
+      const drumGain = this.ctx!.createGain();
+      drumOsc.type = 'sine';
+      drumOsc.frequency.setValueAtTime(95, drumTime);
+      drumOsc.frequency.exponentialRampToValueAtTime(38, drumTime + 0.22);
+      drumGain.gain.setValueAtTime(0.35, drumTime);
+      drumGain.gain.exponentialRampToValueAtTime(0.001, drumTime + 0.25);
+
+      drumOsc.connect(drumGain);
+      drumGain.connect(this.sfxGain!);
+      drumOsc.start(drumTime);
+      drumOsc.stop(drumTime + 0.28);
+    });
+  }
+
+  // 6. Halo Gregorian Monk Choir & Grunt Birthday Party Celebration
+  public playHaloChantAndParty() {
+    if (!this.ctx || !this.sfxGain) return;
+    const t = this.ctx.currentTime;
+
+    // A. Halo Monk Chord: D3, A3, D4, F4
+    const chordFrequencies = [146.83, 220.0, 293.66, 349.23];
+    chordFrequencies.forEach(freq => {
+      const osc = this.ctx!.createOscillator();
+      const gain = this.ctx!.createGain();
+      const filter = this.ctx!.createBiquadFilter();
+
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(freq, t);
+
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(550, t);
+      filter.Q.setValueAtTime(3.0, t);
+
+      gain.gain.setValueAtTime(0.001, t);
+      gain.gain.linearRampToValueAtTime(0.12, t + 0.35); // Slow choral swell
+      gain.gain.setValueAtTime(0.12, t + 1.2);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 2.0);
+
+      osc.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.sfxGain!);
+
+      osc.start(t);
+      osc.stop(t + 2.1);
+    });
+
+    // B. Grunt Birthday Party: "POP!" + "YAAAAAY!" confetti cheer at t + 1.2s
+    const partyTime = t + 1.2;
+
+    // Pop sound
+    const popOsc = this.ctx.createOscillator();
+    const popGain = this.ctx.createGain();
+    popOsc.type = 'sine';
+    popOsc.frequency.setValueAtTime(800, partyTime);
+    popOsc.frequency.exponentialRampToValueAtTime(120, partyTime + 0.08);
+    popGain.gain.setValueAtTime(0.38, partyTime);
+    popGain.gain.exponentialRampToValueAtTime(0.001, partyTime + 0.09);
+
+    popOsc.connect(popGain);
+    popGain.connect(this.sfxGain);
+    popOsc.start(partyTime);
+    popOsc.stop(partyTime + 0.1);
+
+    // Cheerful Synthesized Children "YAAAY" shout
+    const cheerTones = [523.25, 659.25, 783.99, 1046.5]; // C major chord cheer
+    cheerTones.forEach((freq, i) => {
+      const cheerOsc = this.ctx!.createOscillator();
+      const cheerGain = this.ctx!.createGain();
+
+      cheerOsc.type = 'triangle';
+      cheerOsc.frequency.setValueAtTime(freq * 0.95, partyTime + 0.06);
+      cheerOsc.frequency.linearRampToValueAtTime(freq * 1.05, partyTime + 0.45);
+      cheerOsc.frequency.linearRampToValueAtTime(freq, partyTime + 0.9);
+
+      cheerGain.gain.setValueAtTime(0.001, partyTime + 0.06);
+      cheerGain.gain.linearRampToValueAtTime(0.16, partyTime + 0.15);
+      cheerGain.gain.setValueAtTime(0.16, partyTime + 0.65);
+      cheerGain.gain.exponentialRampToValueAtTime(0.001, partyTime + 1.0);
+
+      cheerOsc.connect(cheerGain);
+      cheerGain.connect(this.sfxGain!);
+      cheerOsc.start(partyTime + 0.06);
+      cheerOsc.stop(partyTime + 1.05);
+    });
+  }
 }
 
 export const soundManager = new SoundEngine();

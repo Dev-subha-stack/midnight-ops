@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { BattleRoyaleState, EnvironmentState, FloatingDamageNumberItem, GameMode, GameSettings, HitmarkerEvent, KillFeedItem, LeanDirection, MapType, PlayerEliminatedInfo, PlayerStats, TacticalType, TrainingTelemetryData, WeaponCamo, WeaponType, WeatherType } from '../types';
+import { BattleRoyaleState, EliminationAccolade, EnvironmentState, FloatingDamageNumberItem, GameMode, GameSettings, HitmarkerEvent, KillFeedItem, LeanDirection, MapType, PlayerEliminatedInfo, PlayerStats, TacticalType, TrainingTelemetryData, WeaponCamo, WeaponType, WeatherType } from '../types';
 import { TacticalMap } from './map';
 import { ParticleSystem } from './particles';
 import { BotManager } from './ai';
@@ -9,6 +9,7 @@ import { PickupManager } from './pickups';
 import { GrenadeManager } from './grenades';
 import { EnvironmentManager } from './environment';
 import { TrainingManager } from './training';
+import { EasterEggManager } from './easter_eggs';
 import { soundManager } from './audio';
 import { WEAPON_REGISTRY } from './weapons';
 
@@ -21,6 +22,7 @@ export class GameEngine {
   public map: TacticalMap;
   public particles: ParticleSystem;
   public environment: EnvironmentManager;
+  public easterEggs: EasterEggManager;
   public botManager: BotManager;
   public controller: FPSController;
   public streakManager: ScorestreakManager;
@@ -74,8 +76,8 @@ export class GameEngine {
   public onStatsUpdate: (stats: PlayerStats) => void = () => {};
   public onKillfeedEvent: (item: KillFeedItem) => void = () => {};
   public onHitmarkerEvent: (event: HitmarkerEvent) => void = () => {};
-  public onAccoladeEvent: (accolade: { id: string; title: string; points: number; subtext?: string; icon?: 'kill' | 'headshot' | 'streak' | 'revenge' | 'longshot' | 'one_shot'; timestamp: number }) => void = () => {};
-  public onMatchEnd: (victory: boolean, stats: PlayerStats) => void = () => {};
+  public onAccoladeEvent: (accolade: EliminationAccolade) => void = () => {};
+  public onMatchEnd: (victory: boolean, stats: PlayerStats, easterEgg?: string | null) => void = () => {};
   public onScoreUpdate: (allies: number, axis: number, time: number) => void = () => {};
   public onStreakUpdate: (streaks: ScorestreakManager['streaks']) => void = () => {};
   public onDamageTaken: (angle: number) => void = () => {};
@@ -141,8 +143,8 @@ export class GameEngine {
 
     // 2. Sub-systems
     const effectiveMapType: MapType = this.gameMode === 'battleroyale' ? (settings.mapType || 'bermuda') : (settings.mapType || 'warehouse');
-    this.map = new TacticalMap(this.scene, undefined, effectiveMapType);
-    this.particles = new ParticleSystem(this.scene);
+    this.particles = new ParticleSystem(this.scene, this.camera);
+    this.map = new TacticalMap(this.scene, this.particles, effectiveMapType);
     this.environment = new EnvironmentManager(
       this.scene,
       this.camera,
@@ -161,6 +163,26 @@ export class GameEngine {
       this.pickupManager.spawnOutpostPickups();
     }
 
+    // Secret Easter Egg Manager (30-shot sun Supernova & classic game tributes)
+    this.easterEggs = new EasterEggManager(this.scene, this.particles, this.environment);
+    this.easterEggs.buildMapEasterEggs(effectiveMapType === 'outpost' ? 'outpost' : 'bermuda');
+    this.easterEggs.onSupernovaVictory = () => {
+      this.endMatch(true, 'solar_supernova');
+    };
+    this.easterEggs.onAccoladeEvent = (acc) => {
+      this.onAccoladeEvent(acc);
+    };
+    this.easterEggs.onNotification = (text, type) => {
+      this.onPickupNotice(text, type);
+    };
+    this.easterEggs.onSpeedBoost = (dur, mult) => {
+      this.controller.applyAdrenalineBoost(dur, mult);
+    };
+    this.environment.onSupernovaFlash = (alpha) => {
+      this.controller.flashWhiteoutAlpha = Math.max(this.controller.flashWhiteoutAlpha, alpha);
+      this.controller.onFlashbangEffect?.(this.controller.flashWhiteoutAlpha);
+    };
+
     this.grenadeManager = new GrenadeManager(this.scene, this.particles, this.map.obstacles);
 
     this.controller = new FPSController(this.camera, container, this.map, this.particles, this.settings);
@@ -168,6 +190,8 @@ export class GameEngine {
     this.botManager = new BotManager(this.scene, this.map, this.particles);
     this.controller.botManager = this.botManager;
     this.controller.grenadeManager = this.grenadeManager;
+    this.controller.easterEggManager = this.easterEggs;
+    this.controller.environmentManager = this.environment;
 
     // Initialize Training Range if Training Mode or Target Range
     if (this.gameMode === 'training' || this.gameMode === 'targetrange') {
@@ -707,15 +731,17 @@ export class GameEngine {
     return true;
   }
 
-  public endMatch(victory: boolean) {
+  public endMatch(victory: boolean, reason: string | null = null) {
     this.isMatchOver = true;
     this.winner = victory ? 'allies' : 'axis';
-    if (this.gameMode === 'battleroyale' && victory) {
+    if (reason === 'solar_supernova') {
+      soundManager.playVoiceCallout('Tactical command: Solar detonation confirmed! Stellar victory achieved.');
+    } else if (this.gameMode === 'battleroyale' && victory) {
       soundManager.playBooyah();
     } else {
       soundManager.playVoiceCallout(victory ? 'Mission accomplished, outstanding work!' : 'Defeat. Regroup and prepare for next op.');
     }
-    this.onMatchEnd(victory, this.stats);
+    this.onMatchEnd(victory, this.stats, reason);
   }
 
   private onResize = () => {
@@ -1237,6 +1263,8 @@ export class GameEngine {
       this.resizeObserver = null;
     }
     this.environment.destroy();
+    this.particles.destroy();
+    this.easterEggs.destroy();
     soundManager.stopHeartbeat();
     window.removeEventListener('resize', this.onResize);
     if (this.renderer.domElement.parentElement) {

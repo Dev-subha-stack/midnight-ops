@@ -75,6 +75,51 @@ export interface GroundScorchDecal {
   initialOpacity: number;
 }
 
+export interface FireballMesh {
+  mesh: THREE.Mesh;
+  velocity: THREE.Vector3;
+  rotSpeed: number;
+  rotation: number;
+  life: number;
+  maxLife: number;
+  startScale: number;
+  targetScale: number;
+  initialOpacity: number;
+  buoyancy: number;
+}
+
+export interface SmokeMesh {
+  mesh: THREE.Mesh;
+  velocity: THREE.Vector3;
+  rotSpeed: number;
+  rotation: number;
+  life: number;
+  maxLife: number;
+  startScale: number;
+  targetScale: number;
+  initialOpacity: number;
+  buoyancy: number;
+}
+
+export interface PropDustMesh {
+  mesh: THREE.Mesh;
+  velocity: THREE.Vector3;
+  rotSpeed: number;
+  rotation: number;
+  life: number;
+  maxLife: number;
+  startScale: number;
+  targetScale: number;
+  initialOpacity: number;
+}
+
+export interface GroundFirePatch {
+  mesh: THREE.Mesh;
+  life: number;
+  maxLife: number;
+  baseScale: number;
+}
+
 export interface CaliberImpactProfile {
   caliberName: string;
   intensityScale: number;
@@ -89,6 +134,450 @@ export interface CaliberImpactProfile {
   dropletSize: number;
   decalChance: number;
   decalRadius: number;
+}
+
+// --- PROCEDURAL TEXTURE GENERATORS ---
+
+// 1. Turbulent Multi-Lobe Combustion Fireball (Non-Circular, Realistic Fire Tongue Plume)
+function generateCombustionFireballTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 128;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d')!;
+
+  ctx.save();
+  ctx.translate(64, 64);
+
+  // Irregular outer flame perimeter with licking tendrils
+  const numLobes = 16;
+  ctx.beginPath();
+  for (let i = 0; i <= numLobes; i++) {
+    const a = (i / numLobes) * Math.PI * 2;
+    const r = 44 + Math.sin(a * 4.2) * 12 + Math.cos(a * 7.1) * 8 + (Math.sin(a * 2.3) * 6);
+    const x = Math.cos(a) * r;
+    const y = Math.sin(a) * r;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+
+  // Multi-gradient radial plasma burn
+  const outerGrad = ctx.createRadialGradient(0, 0, 4, 0, 0, 60);
+  outerGrad.addColorStop(0, 'rgba(255, 253, 240, 1.0)'); // Blinding white-hot core
+  outerGrad.addColorStop(0.22, 'rgba(254, 215, 110, 0.95)'); // Incandescent solar gold
+  outerGrad.addColorStop(0.55, 'rgba(249, 115, 22, 0.85)'); // Radiant roaring flame orange
+  outerGrad.addColorStop(0.82, 'rgba(220, 38, 38, 0.55)'); // Combustion crimson rim
+  outerGrad.addColorStop(1.0, 'rgba(153, 27, 27, 0)'); // Fading fiery wisp
+  ctx.fillStyle = outerGrad;
+  ctx.fill();
+
+  // Secondary turbulent flame eddies & micro-wisps
+  for (let i = 0; i < 9; i++) {
+    const a = (i / 9) * Math.PI * 2 + 0.3;
+    const dist = 18 + Math.random() * 22;
+    const ex = Math.cos(a) * dist;
+    const ey = Math.sin(a) * dist;
+    const er = 10 + Math.random() * 8;
+    const eddyGrad = ctx.createRadialGradient(ex, ey, 2, ex, ey, er);
+    eddyGrad.addColorStop(0, 'rgba(255, 240, 180, 0.9)');
+    eddyGrad.addColorStop(0.6, 'rgba(234, 88, 12, 0.5)');
+    eddyGrad.addColorStop(1, 'rgba(185, 28, 28, 0)');
+    ctx.fillStyle = eddyGrad;
+    ctx.beginPath();
+    ctx.arc(ex, ey, er, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Blinding plasma center spot
+  const coreGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, 18);
+  coreGrad.addColorStop(0, 'rgba(255, 255, 255, 1.0)');
+  coreGrad.addColorStop(0.6, 'rgba(254, 243, 199, 0.85)');
+  coreGrad.addColorStop(1, 'rgba(251, 191, 36, 0)');
+  ctx.fillStyle = coreGrad;
+  ctx.beginPath();
+  ctx.arc(0, 0, 18, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.needsUpdate = true;
+  return tex;
+}
+
+// 2. Dense Volumetric Billowing Smoke Plume (Ragged fractal puffy lobes, NOT a circle)
+function generateVolumetricSmokeTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 128;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d')!;
+
+  ctx.save();
+  ctx.translate(64, 64);
+
+  // 7 overlapping puffy cloud lobes forming realistic cumulus smoke silhouette
+  const puffCenters = [
+    { x: -14, y: -12, r: 28, c: 'rgba(38, 38, 42, 0.92)' },
+    { x: 16, y: -15, r: 26, c: 'rgba(45, 45, 52, 0.90)' },
+    { x: -18, y: 14, r: 24, c: 'rgba(30, 30, 34, 0.88)' },
+    { x: 14, y: 16, r: 27, c: 'rgba(50, 50, 58, 0.86)' },
+    { x: 0, y: -26, r: 22, c: 'rgba(60, 60, 68, 0.82)' },
+    { x: 26, y: 2, r: 20, c: 'rgba(40, 40, 46, 0.85)' },
+    { x: -25, y: -2, r: 22, c: 'rgba(35, 35, 40, 0.85)' },
+  ];
+
+  puffCenters.forEach(p => {
+    const pGrad = ctx.createRadialGradient(p.x - 4, p.y - 4, p.r * 0.15, p.x, p.y, p.r);
+    pGrad.addColorStop(0, p.c);
+    pGrad.addColorStop(0.65, 'rgba(32, 32, 36, 0.72)');
+    pGrad.addColorStop(0.9, 'rgba(24, 24, 27, 0.35)');
+    pGrad.addColorStop(1.0, 'rgba(20, 20, 24, 0)');
+    ctx.fillStyle = pGrad;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  // Soft overall density core
+  const coreGrad = ctx.createRadialGradient(0, 0, 4, 0, 0, 56);
+  coreGrad.addColorStop(0, 'rgba(28, 28, 32, 0.88)');
+  coreGrad.addColorStop(0.6, 'rgba(39, 39, 42, 0.65)');
+  coreGrad.addColorStop(1.0, 'rgba(24, 24, 27, 0)');
+  ctx.fillStyle = coreGrad;
+  ctx.beginPath();
+  ctx.arc(0, 0, 56, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.needsUpdate = true;
+  return tex;
+}
+
+// 3. Incandescent Starburst Spark & Ember (Sharp directional glare spikes)
+function generateIncandescentSparkTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 64;
+  canvas.height = 64;
+  const ctx = canvas.getContext('2d')!;
+
+  ctx.save();
+  ctx.translate(32, 32);
+
+  // Diamond / starburst glare spikes
+  ctx.fillStyle = 'rgba(255, 237, 213, 0.85)';
+  ctx.beginPath();
+  ctx.moveTo(0, -28);
+  ctx.lineTo(3, -4);
+  ctx.lineTo(28, 0);
+  ctx.lineTo(3, 4);
+  ctx.lineTo(0, 28);
+  ctx.lineTo(-3, 4);
+  ctx.lineTo(-28, 0);
+  ctx.lineTo(-3, -4);
+  ctx.closePath();
+  ctx.fill();
+
+  // White-hot incandescent core
+  const coreGrad = ctx.createRadialGradient(0, 0, 1, 0, 0, 14);
+  coreGrad.addColorStop(0, 'rgba(255, 255, 255, 1.0)');
+  coreGrad.addColorStop(0.4, 'rgba(254, 240, 138, 0.9)');
+  coreGrad.addColorStop(0.8, 'rgba(249, 115, 22, 0.4)');
+  coreGrad.addColorStop(1, 'rgba(234, 88, 12, 0)');
+  ctx.fillStyle = coreGrad;
+  ctx.beginPath();
+  ctx.arc(0, 0, 14, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.needsUpdate = true;
+  return tex;
+}
+
+// 4. Burning Liquid Fuel Droplet Spray (Volatile petroleum liquid globules)
+function generateBurningFuelDropletTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 64;
+  canvas.height = 64;
+  const ctx = canvas.getContext('2d')!;
+
+  ctx.save();
+  ctx.translate(32, 32);
+
+  // Molten fiery teardrop splash
+  const fuelGrad = ctx.createRadialGradient(0, 0, 2, 0, 0, 22);
+  fuelGrad.addColorStop(0, 'rgba(255, 255, 255, 1.0)');
+  fuelGrad.addColorStop(0.3, 'rgba(254, 215, 110, 0.95)');
+  fuelGrad.addColorStop(0.65, 'rgba(239, 68, 68, 0.85)');
+  fuelGrad.addColorStop(1.0, 'rgba(185, 28, 28, 0)');
+  ctx.fillStyle = fuelGrad;
+
+  ctx.beginPath();
+  ctx.arc(0, 0, 14, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Sputtering micro-droplets
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2;
+    const dist = 18 + Math.random() * 8;
+    ctx.fillStyle = 'rgba(251, 146, 60, 0.8)';
+    ctx.beginPath();
+    ctx.arc(Math.cos(a) * dist, Math.sin(a) * dist, 2.2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.restore();
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.needsUpdate = true;
+  return tex;
+}
+
+// 5. Torn Red Drum Steel Shrapnel Plate (Industrial Red Paint with Scorched Metal Edges)
+function generateBarrelShrapnelTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 128;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d')!;
+
+  ctx.save();
+
+  // Torn jagged steel polygon
+  ctx.beginPath();
+  ctx.moveTo(22, 14);
+  ctx.lineTo(108, 18);
+  ctx.lineTo(116, 78);
+  ctx.lineTo(92, 114);
+  ctx.lineTo(34, 110);
+  ctx.lineTo(14, 62);
+  ctx.closePath();
+
+  // Red industrial hazard coating
+  const redGrad = ctx.createLinearGradient(20, 14, 110, 110);
+  redGrad.addColorStop(0, '#ef4444');
+  redGrad.addColorStop(0.5, '#dc2626');
+  redGrad.addColorStop(1, '#b91c1c');
+  ctx.fillStyle = redGrad;
+  ctx.fill();
+
+  // Scorched blackened combustion soot on tear margins
+  ctx.strokeStyle = '#18181b';
+  ctx.lineWidth = 5.5;
+  ctx.stroke();
+
+  // Sheared raw steel bevel edge highlight
+  ctx.strokeStyle = '#e2e8f0';
+  ctx.lineWidth = 1.75;
+  ctx.stroke();
+
+  // Drum rib / swaged hoop line
+  ctx.strokeStyle = 'rgba(15, 15, 18, 0.8)';
+  ctx.lineWidth = 3.5;
+  ctx.beginPath();
+  ctx.moveTo(16, 62);
+  ctx.lineTo(116, 68);
+  ctx.stroke();
+
+  // Small rivet / fastener spots
+  ctx.fillStyle = '#0f172a';
+  ctx.beginPath();
+  ctx.arc(42, 34, 2.5, 0, Math.PI * 2);
+  ctx.arc(88, 38, 2.5, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.needsUpdate = true;
+  return tex;
+}
+
+// 6. Jagged Wood Splinter & Sawdust Chip Texture (Realistic lumber shards)
+function generateSawdustWoodChipTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 128;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d')!;
+
+  ctx.save();
+  ctx.translate(64, 64);
+
+  // Soft billowing pulverized wood powder cloud puff (warm golden cedar/pine tones)
+  const cloudGrad = ctx.createRadialGradient(0, 0, 4, 0, 0, 56);
+  cloudGrad.addColorStop(0, 'rgba(245, 158, 11, 0.95)'); // warm golden amber core
+  cloudGrad.addColorStop(0.35, 'rgba(180, 83, 9, 0.85)'); // rich cedar/pine sawdust
+  cloudGrad.addColorStop(0.7, 'rgba(146, 64, 14, 0.45)');
+  cloudGrad.addColorStop(1.0, 'rgba(120, 53, 15, 0)');
+  ctx.fillStyle = cloudGrad;
+
+  // Irregular jagged fibrous cloud perimeter
+  ctx.beginPath();
+  for (let i = 0; i <= 16; i++) {
+    const a = (i / 16) * Math.PI * 2;
+    const r = 46 + Math.sin(a * 4.2) * 10 + Math.cos(a * 6.5) * 7;
+    const x = Math.cos(a) * r;
+    const y = Math.sin(a) * r;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+  ctx.fill();
+
+  // Suspended sharp wood splinters and lumber shards
+  for (let i = 0; i < 18; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const dist = Math.random() * 40;
+    const sx = Math.cos(a) * dist;
+    const sy = Math.sin(a) * dist;
+    const ang = Math.random() * Math.PI;
+    const len = Math.random() * 14 + 6;
+
+    ctx.save();
+    ctx.translate(sx, sy);
+    ctx.rotate(ang);
+    ctx.fillStyle = i % 2 === 0 ? '#78350f' : '#fef3c7';
+    ctx.fillRect(-len / 2, -1, len, 2.2);
+    ctx.restore();
+  }
+
+  ctx.restore();
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.needsUpdate = true;
+  return tex;
+}
+
+// 7. Pulverized Concrete Dust & Mortar Puff Texture (Fine chalky particulate)
+function generateConcreteDustTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 128;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d')!;
+
+  ctx.save();
+  ctx.translate(64, 64);
+
+  // 6 soft irregular chalky lobes
+  const dustGrad = ctx.createRadialGradient(0, 0, 6, 0, 0, 54);
+  dustGrad.addColorStop(0, 'rgba(203, 213, 225, 0.92)');
+  dustGrad.addColorStop(0.45, 'rgba(148, 163, 184, 0.75)');
+  dustGrad.addColorStop(0.8, 'rgba(100, 116, 139, 0.35)');
+  dustGrad.addColorStop(1.0, 'rgba(71, 85, 105, 0)');
+  ctx.fillStyle = dustGrad;
+
+  // Perturbed boundary
+  ctx.beginPath();
+  for (let i = 0; i <= 14; i++) {
+    const a = (i / 14) * Math.PI * 2;
+    const r = 48 + Math.sin(a * 3.8) * 9 + Math.cos(a * 5.4) * 6;
+    const x = Math.cos(a) * r;
+    const y = Math.sin(a) * r;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+  ctx.fill();
+
+  // Suspended stone particulate specks
+  for (let i = 0; i < 28; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const dist = Math.random() * 44;
+    ctx.fillStyle = Math.random() < 0.5 ? 'rgba(241, 245, 249, 0.8)' : 'rgba(71, 85, 105, 0.8)';
+    ctx.beginPath();
+    ctx.arc(Math.cos(a) * dist, Math.sin(a) * dist, Math.random() * 1.5 + 0.6, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.restore();
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.needsUpdate = true;
+  return tex;
+}
+
+// 8. Shredded Burlap Sack Fabric Texture (Fraying jute threads)
+function generateBurlapFiberTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 64;
+  canvas.height = 64;
+  const ctx = canvas.getContext('2d')!;
+
+  ctx.save();
+  ctx.fillStyle = '#a8a29e';
+  ctx.beginPath();
+  ctx.moveTo(10, 8);
+  ctx.lineTo(54, 12);
+  ctx.lineTo(58, 52);
+  ctx.lineTo(16, 56);
+  ctx.closePath();
+  ctx.fill();
+
+  // Jute burlap cross-hatch weave
+  ctx.strokeStyle = '#78716c';
+  ctx.lineWidth = 1.5;
+  for (let x = 12; x < 56; x += 6) {
+    ctx.beginPath();
+    ctx.moveTo(x, 8);
+    ctx.lineTo(x + 2, 56);
+    ctx.stroke();
+  }
+  for (let y = 12; y < 56; y += 6) {
+    ctx.beginPath();
+    ctx.moveTo(10, y);
+    ctx.lineTo(58, y + 2);
+    ctx.stroke();
+  }
+
+  // Fraying thread wisps
+  ctx.strokeStyle = '#d6d3d1';
+  ctx.lineWidth = 0.9;
+  for (let i = 0; i < 8; i++) {
+    ctx.beginPath();
+    ctx.moveTo(12 + i * 5, 8);
+    ctx.lineTo(10 + i * 5, 2);
+    ctx.moveTo(16 + i * 5, 56);
+    ctx.lineTo(18 + i * 5, 62);
+    ctx.stroke();
+  }
+
+  ctx.restore();
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.needsUpdate = true;
+  return tex;
+}
+
+// 9. Burning Ground Fire Patch (Charred decal with persistent flickering flames)
+function generateGroundFirePatchTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 128;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d')!;
+
+  ctx.save();
+  ctx.translate(64, 64);
+
+  // Charred black ground base
+  const charGrad = ctx.createRadialGradient(0, 0, 4, 0, 0, 52);
+  charGrad.addColorStop(0, 'rgba(15, 12, 10, 0.95)');
+  charGrad.addColorStop(0.55, 'rgba(28, 25, 23, 0.85)');
+  charGrad.addColorStop(0.85, 'rgba(41, 37, 36, 0.4)');
+  charGrad.addColorStop(1.0, 'rgba(20, 18, 16, 0)');
+  ctx.fillStyle = charGrad;
+  ctx.beginPath();
+  ctx.arc(0, 0, 52, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Glowing red heat embers in center
+  const emberGrad = ctx.createRadialGradient(0, 0, 1, 0, 0, 24);
+  emberGrad.addColorStop(0, 'rgba(254, 240, 138, 0.95)');
+  emberGrad.addColorStop(0.4, 'rgba(249, 115, 22, 0.85)');
+  emberGrad.addColorStop(0.75, 'rgba(220, 38, 38, 0.6)');
+  emberGrad.addColorStop(1.0, 'rgba(185, 28, 28, 0)');
+  ctx.fillStyle = emberGrad;
+  ctx.beginPath();
+  ctx.arc(0, 0, 24, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.needsUpdate = true;
+  return tex;
 }
 
 // --- PROCEDURAL TEXTURE GENERATORS ---
@@ -514,7 +1003,7 @@ export class ParticleSystem {
   private mistPointsMesh: THREE.Points;
 
   // Debris & Decal Pools
-  private debrisParticles: DebrisParticle[] = [];
+  public debrisParticles: DebrisParticle[] = [];
   private maxDebrisMeshes: number = 75;
   private bloodDecals: BloodDecal[] = [];
   private maxBloodDecals: number = 40;
@@ -527,8 +1016,33 @@ export class ParticleSystem {
   private scorchCraterTex: THREE.CanvasTexture;
   private shrapnelTex: THREE.CanvasTexture;
 
-  constructor(scene: THREE.Scene) {
+  // Camera reference for billboard orientation
+  public camera?: THREE.Camera;
+
+  // High-Fidelity Explosion & Destruction Textures
+  private combustionFireballTex: THREE.CanvasTexture;
+  private volumetricSmokeTex: THREE.CanvasTexture;
+  private incandescentSparkTex: THREE.CanvasTexture;
+  private burningFuelDropletTex: THREE.CanvasTexture;
+  private barrelShrapnelTex: THREE.CanvasTexture;
+  private sawdustWoodChipTex: THREE.CanvasTexture;
+  private concreteDustTex: THREE.CanvasTexture;
+  private burlapFiberTex: THREE.CanvasTexture;
+  private groundFirePatchTex: THREE.CanvasTexture;
+
+  // Volumetric Billboard Mesh Pools
+  private fireballMeshes: FireballMesh[] = [];
+  private maxFireballMeshes: number = 65;
+  private smokeMeshes: SmokeMesh[] = [];
+  private maxSmokeMeshes: number = 75;
+  private propDustMeshes: PropDustMesh[] = [];
+  private maxPropDustMeshes: number = 80;
+  private groundFirePatches: GroundFirePatch[] = [];
+  private maxGroundFirePatches: number = 30;
+
+  constructor(scene: THREE.Scene, camera?: THREE.Camera) {
     this.scene = scene;
+    this.camera = camera;
 
     // 1. Generate Procedural Textures
     this.bloodBurstTex = generateBloodBurstTexture();
@@ -539,6 +1053,17 @@ export class ParticleSystem {
     this.groundDecalTex = generateGroundSplatterDecalTexture();
     this.scorchCraterTex = generateScorchCraterDecalTexture();
     this.shrapnelTex = generateShrapnelTexture();
+
+    // High-Fidelity Explosion & Prop Shatter Textures
+    this.combustionFireballTex = generateCombustionFireballTexture();
+    this.volumetricSmokeTex = generateVolumetricSmokeTexture();
+    this.incandescentSparkTex = generateIncandescentSparkTexture();
+    this.burningFuelDropletTex = generateBurningFuelDropletTexture();
+    this.barrelShrapnelTex = generateBarrelShrapnelTexture();
+    this.sawdustWoodChipTex = generateSawdustWoodChipTexture();
+    this.concreteDustTex = generateConcreteDustTexture();
+    this.burlapFiberTex = generateBurlapFiberTexture();
+    this.groundFirePatchTex = generateGroundFirePatchTexture();
 
     // Real-time dynamic point light for weapons fire (photorealistic powder combustion glow)
     this.muzzleFlashLight = new THREE.PointLight(0xffeedd, 0, 12, 2.0);
@@ -556,23 +1081,11 @@ export class ParticleSystem {
     this.pointsGeo.setAttribute('position', new THREE.BufferAttribute(this.posArray, 3));
     this.pointsGeo.setAttribute('color', new THREE.BufferAttribute(this.colorArray, 3));
 
-    const canvas = document.createElement('canvas');
-    canvas.width = 64;
-    canvas.height = 64;
-    const ctx = canvas.getContext('2d')!;
-    const grad = ctx.createRadialGradient(32, 32, 2, 32, 32, 30);
-    grad.addColorStop(0, 'rgba(255,255,255,1)');
-    grad.addColorStop(0.4, 'rgba(255,200,100,0.8)');
-    grad.addColorStop(1, 'rgba(255,100,50,0)');
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, 64, 64);
-    const pTex = new THREE.CanvasTexture(canvas);
-
     this.pointsMat = new THREE.PointsMaterial({
       size: 0.28,
       vertexColors: true,
       transparent: true,
-      map: pTex,
+      map: this.incandescentSparkTex,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     });
@@ -1318,6 +1831,207 @@ export class ParticleSystem {
     });
   }
 
+  // --- VOLUMETRIC BILLBOARD SPAWNERS & POOL MANAGERS ---
+
+  public setCamera(camera: THREE.Camera) {
+    this.camera = camera;
+  }
+
+  public spawnFireballMesh(
+    pos: THREE.Vector3,
+    velocity: THREE.Vector3,
+    startScale: number = 0.8,
+    targetScale: number = 3.2,
+    maxLife: number = 0.65,
+    initialOpacity: number = 0.95,
+    buoyancy: number = 5.0,
+    colorHex: number = 0xffffff
+  ): FireballMesh {
+    if (this.fireballMeshes.length >= this.maxFireballMeshes) {
+      const oldest = this.fireballMeshes.shift();
+      if (oldest) {
+        this.scene.remove(oldest.mesh);
+        oldest.mesh.geometry.dispose();
+        (oldest.mesh.material as THREE.Material).dispose();
+      }
+    }
+
+    const geo = new THREE.PlaneGeometry(1, 1);
+    const mat = new THREE.MeshBasicMaterial({
+      map: this.combustionFireballTex,
+      transparent: true,
+      opacity: initialOpacity,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      color: colorHex,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.copy(pos);
+    mesh.scale.set(startScale, startScale, 1);
+    mesh.rotation.z = Math.random() * Math.PI * 2;
+    if (this.camera) {
+      mesh.quaternion.copy(this.camera.quaternion);
+    }
+    this.scene.add(mesh);
+
+    const item: FireballMesh = {
+      mesh,
+      velocity: velocity.clone(),
+      rotSpeed: (Math.random() - 0.5) * 4.5,
+      rotation: mesh.rotation.z,
+      life: maxLife,
+      maxLife,
+      startScale,
+      targetScale,
+      initialOpacity,
+      buoyancy,
+    };
+    this.fireballMeshes.push(item);
+    return item;
+  }
+
+  public spawnSmokeMesh(
+    pos: THREE.Vector3,
+    velocity: THREE.Vector3,
+    startScale: number = 1.0,
+    targetScale: number = 4.2,
+    maxLife: number = 2.8,
+    initialOpacity: number = 0.82,
+    buoyancy: number = 2.2,
+    colorHex: number = 0x27272a
+  ): SmokeMesh {
+    if (this.smokeMeshes.length >= this.maxSmokeMeshes) {
+      const oldest = this.smokeMeshes.shift();
+      if (oldest) {
+        this.scene.remove(oldest.mesh);
+        oldest.mesh.geometry.dispose();
+        (oldest.mesh.material as THREE.Material).dispose();
+      }
+    }
+
+    const geo = new THREE.PlaneGeometry(1, 1);
+    const mat = new THREE.MeshBasicMaterial({
+      map: this.volumetricSmokeTex,
+      transparent: true,
+      opacity: initialOpacity,
+      blending: THREE.NormalBlending,
+      depthWrite: false,
+      color: colorHex,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.copy(pos);
+    mesh.scale.set(startScale, startScale, 1);
+    mesh.rotation.z = Math.random() * Math.PI * 2;
+    if (this.camera) {
+      mesh.quaternion.copy(this.camera.quaternion);
+    }
+    this.scene.add(mesh);
+
+    const item: SmokeMesh = {
+      mesh,
+      velocity: velocity.clone(),
+      rotSpeed: (Math.random() - 0.5) * 1.5,
+      rotation: mesh.rotation.z,
+      life: maxLife,
+      maxLife,
+      startScale,
+      targetScale,
+      initialOpacity,
+      buoyancy,
+    };
+    this.smokeMeshes.push(item);
+    return item;
+  }
+
+  public spawnPropDustMesh(
+    pos: THREE.Vector3,
+    velocity: THREE.Vector3,
+    startScale: number = 0.4,
+    targetScale: number = 2.2,
+    maxLife: number = 1.4,
+    initialOpacity: number = 0.85,
+    colorHex: number = 0x94a3b8,
+    isWood: boolean = false
+  ): PropDustMesh {
+    if (this.propDustMeshes.length >= this.maxPropDustMeshes) {
+      const oldest = this.propDustMeshes.shift();
+      if (oldest) {
+        this.scene.remove(oldest.mesh);
+        oldest.mesh.geometry.dispose();
+        (oldest.mesh.material as THREE.Material).dispose();
+      }
+    }
+
+    const geo = new THREE.PlaneGeometry(1, 1);
+    const mat = new THREE.MeshBasicMaterial({
+      map: isWood ? this.sawdustWoodChipTex : this.concreteDustTex,
+      transparent: true,
+      opacity: initialOpacity,
+      blending: THREE.NormalBlending,
+      depthWrite: false,
+      color: isWood ? 0xffffff : colorHex,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.copy(pos);
+    mesh.scale.set(startScale, startScale, 1);
+    mesh.rotation.z = Math.random() * Math.PI * 2;
+    if (this.camera) {
+      mesh.quaternion.copy(this.camera.quaternion);
+    }
+    this.scene.add(mesh);
+
+    const item: PropDustMesh = {
+      mesh,
+      velocity: velocity.clone(),
+      rotSpeed: (Math.random() - 0.5) * 2.8,
+      rotation: mesh.rotation.z,
+      life: maxLife,
+      maxLife,
+      startScale,
+      targetScale,
+      initialOpacity,
+    };
+    this.propDustMeshes.push(item);
+    return item;
+  }
+
+  public spawnGroundFirePatch(pos: THREE.Vector3, radius: number = 1.4, life: number = 3.6): GroundFirePatch {
+    if (this.groundFirePatches.length >= this.maxGroundFirePatches) {
+      const oldest = this.groundFirePatches.shift();
+      if (oldest) {
+        this.scene.remove(oldest.mesh);
+        oldest.mesh.geometry.dispose();
+        (oldest.mesh.material as THREE.Material).dispose();
+      }
+    }
+
+    const geo = new THREE.PlaneGeometry(radius * 2, radius * 2);
+    const mat = new THREE.MeshBasicMaterial({
+      map: this.groundFirePatchTex,
+      transparent: true,
+      opacity: 0.95,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.rotation.z = Math.random() * Math.PI * 2;
+    mesh.position.set(pos.x, 0.026, pos.z);
+    mesh.scale.set(0.3, 0.3, 1);
+    this.scene.add(mesh);
+
+    const item: GroundFirePatch = {
+      mesh,
+      life,
+      maxLife: life,
+      baseScale: radius * 2,
+    };
+    this.groundFirePatches.push(item);
+    return item;
+  }
+
   // --- PROCEDURAL CINEMATIC EXPLOSION SYSTEM ---
   public emitExplosion(pos: THREE.Vector3, scale: number = 1.0) {
     const s = Math.max(0.5, scale);
@@ -1326,7 +2040,7 @@ export class ParticleSystem {
     this.explosionLight.position.copy(pos);
     this.explosionLight.position.y += 1.2;
     this.explosionLight.color.setHex(0xfff7ed);
-    this.explosionLight.intensity = 18.0 * s;
+    this.explosionLight.intensity = 24.0 * s;
     this.explosionLightTimer = 0.45;
 
     // 2. Expanding Supersonic Shockwave Ring
@@ -1334,46 +2048,44 @@ export class ParticleSystem {
 
     // 3. Ground Carbonized Scorch Crater Decal (if explosion is close to ground level)
     if (pos.y < 4.2) {
-      this.spawnGroundScorchDecal(pos, 2.6 * s);
+      this.spawnGroundScorchDecal(pos, 2.8 * s);
     }
 
-    // 4. Dense Incandescent Fireball Core (Multi-temperature plasma expansion)
-    const coreCount = Math.floor((80 + Math.random() * 30) * s);
-    for (let i = 0; i < coreCount; i++) {
-      const spreadDir = new THREE.Vector3(
-        (Math.random() - 0.5) * 2,
-        Math.random() * 1.5 + 0.3,
-        (Math.random() - 0.5) * 2
-      ).normalize();
-
-      const speed = (Math.random() * 16 + 8) * s;
-      const vel = spreadDir.multiplyScalar(speed);
-
-      // Color gradation: central white/gold heat -> fiery orange -> dark crimson
-      const randType = Math.random();
-      let color: THREE.Color;
-      if (randType < 0.35) {
-        color = new THREE.Color(1.0, 0.98, 0.85); // White-hot core
-      } else if (randType < 0.75) {
-        color = new THREE.Color(1.0, Math.random() * 0.4 + 0.45, 0.05); // Flaming gold/orange
-      } else {
-        color = new THREE.Color(0.85 + Math.random() * 0.15, 0.12, 0.04); // Deep crimson flame
-      }
-
-      this.particles.push({
-        position: pos.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.4, (Math.random() - 0.5) * 0.4, (Math.random() - 0.5) * 0.4)),
-        velocity: vel,
-        color,
-        size: (Math.random() * 1.6 + 0.9) * s,
-        alpha: 1.0,
-        maxLife: 0.55 + Math.random() * 0.3,
-        life: 0.55 + Math.random() * 0.3,
-        gravity: -2.0, // Hot gas thermal buoyancy rising
-      });
+    // 4. Volumetric Billboard Fireball Clouds (Multi-layer turbulent expanding combustion plumes)
+    const fireballCount = Math.floor(18 * s);
+    for (let i = 0; i < fireballCount; i++) {
+      const spread = new THREE.Vector3(
+        (Math.random() - 0.5) * 5.5 * s,
+        Math.random() * 4.5 * s + 0.8,
+        (Math.random() - 0.5) * 5.5 * s
+      );
+      const startScale = (Math.random() * 0.8 + 0.6) * s;
+      const targetScale = (Math.random() * 2.8 + 2.4) * s;
+      const duration = 0.55 + Math.random() * 0.35;
+      const buoyancy = 5.0 + Math.random() * 4.0;
+      const colorHex = i < 6 ? 0xfffbeb : i < 12 ? 0xfbbf24 : 0xf97316;
+      this.spawnFireballMesh(pos.clone(), spread, startScale, targetScale, duration, 0.95, buoyancy, colorHex);
     }
 
-    // 5. High-Velocity Incandescent Embers & Sparks (Cascading parabolic trails)
-    const sparkCount = Math.floor((90 + Math.random() * 40) * s);
+    // 5. Heavy Volumetric Black & Charcoal Smoke Plume (Real billowing smoke, not circles!)
+    const smokeCount = Math.floor(16 * s);
+    for (let i = 0; i < smokeCount; i++) {
+      const spread = new THREE.Vector3(
+        (Math.random() - 0.5) * 4.2 * s,
+        Math.random() * 3.8 * s + 1.2,
+        (Math.random() - 0.5) * 4.2 * s
+      );
+      const startScale = (Math.random() * 0.9 + 0.8) * s;
+      const targetScale = (Math.random() * 3.2 + 3.0) * s;
+      const duration = 2.4 + Math.random() * 1.2;
+      const buoyancy = 2.4 + Math.random() * 2.0;
+      const grayTones = [0x18181b, 0x27272a, 0x3f3f46];
+      const colorHex = grayTones[i % grayTones.length];
+      this.spawnSmokeMesh(pos.clone().add(new THREE.Vector3(0, 0.4, 0)), spread, startScale, targetScale, duration, 0.88, buoyancy, colorHex);
+    }
+
+    // 6. High-Velocity Incandescent Embers & Sparks (Cascading parabolic trails)
+    const sparkCount = Math.floor(75 * s);
     for (let i = 0; i < sparkCount; i++) {
       const theta = Math.random() * Math.PI * 2;
       const phi = Math.acos(Math.random() * 1.8 - 0.9);
@@ -1389,18 +2101,18 @@ export class ParticleSystem {
       this.particles.push({
         position: pos.clone(),
         velocity: vel,
-        color: new THREE.Color(1.0, Math.random() * 0.5 + 0.5, 0.08), // Bright gold ember
+        color: new THREE.Color(1.0, Math.random() * 0.5 + 0.5, 0.08),
         size: (Math.random() * 0.35 + 0.2) * s,
         alpha: 1.0,
         maxLife: 1.0 + Math.random() * 0.9,
         life: 1.0 + Math.random() * 0.9,
-        gravity: 16.0 + Math.random() * 6.0, // Heavy downward gravity arc
+        gravity: 16.0 + Math.random() * 6.0,
       });
     }
 
-    // 6. Ground Dirt / Earth Dust Kick-up Fountain
+    // 7. Ground Dirt / Earth Dust Kick-up Fountain
     if (pos.y < 3.0) {
-      const dustCount = Math.floor(45 * s);
+      const dustCount = Math.floor(35 * s);
       for (let i = 0; i < dustCount; i++) {
         const angle = Math.random() * Math.PI * 2;
         const radius = Math.random() * 1.5;
@@ -1423,30 +2135,8 @@ export class ParticleSystem {
       }
     }
 
-    // 7. Heavy Volumetric Black & Charcoal Smoke Plume
-    const smokeCount = Math.floor((45 + Math.random() * 20) * s);
-    for (let i = 0; i < smokeCount; i++) {
-      const vel = new THREE.Vector3(
-        (Math.random() - 0.5) * 8 * s,
-        (Math.random() * 9 + 4) * s,
-        (Math.random() - 0.5) * 8 * s
-      );
-
-      const grayTone = Math.random() * 0.12 + 0.10;
-      this.particles.push({
-        position: pos.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.8, Math.random() * 0.5, (Math.random() - 0.5) * 0.8)),
-        velocity: vel,
-        color: new THREE.Color(grayTone, grayTone, grayTone * 1.05),
-        size: (Math.random() * 2.4 + 1.6) * s,
-        alpha: 0.85,
-        maxLife: 2.2 + Math.random() * 1.2,
-        life: 2.2 + Math.random() * 1.2,
-        gravity: -1.6, // Rising billowing column
-      });
-    }
-
     // 8. Flying 3D Jagged Shrapnel & Debris Chunks (Physics-enabled tumbling meshes)
-    const shrapnelCount = Math.min(22, Math.floor(14 * s));
+    const shrapnelCount = Math.min(20, Math.floor(12 * s));
     for (let i = 0; i < shrapnelCount; i++) {
       if (this.debrisParticles.length >= this.maxDebrisMeshes) {
         const oldest = this.debrisParticles.shift();
@@ -1457,7 +2147,7 @@ export class ParticleSystem {
         }
       }
 
-      const geo = new THREE.PlaneGeometry(0.18 * (Math.random() * 0.6 + 0.7) * s, 0.12 * (Math.random() * 0.6 + 0.7) * s);
+      const geo = new THREE.PlaneGeometry(0.22 * (Math.random() * 0.5 + 0.8) * s, 0.16 * (Math.random() * 0.5 + 0.8) * s);
       const mat = new THREE.MeshBasicMaterial({
         map: this.shrapnelTex,
         transparent: true,
@@ -1486,6 +2176,478 @@ export class ParticleSystem {
         maxLife: 1.8 + Math.random() * 0.8,
         isCeramic: false,
       });
+    }
+  }
+
+  // --- SPECIALIZED RED DRUM BLASTING PARTICLE EFFECT (EXPLOSIVE FUEL BARREL SIGNATURE BLAST) ---
+  public emitRedDrumExplosion(pos: THREE.Vector3) {
+    const s = 1.35; // Majestic scale for full 55-gallon pressurized fuel drum blast
+
+    // 1. Extreme Chemical Flash Light (Blinding warm orange/amber detonation)
+    this.explosionLight.position.copy(pos);
+    this.explosionLight.position.y += 1.4;
+    this.explosionLight.color.setHex(0xffedd5);
+    this.explosionLight.intensity = 38.0;
+    this.explosionLightTimer = 0.55;
+
+    // 2. Heavy Supersonic Floor Shockwave Ring
+    this.spawnShockwaveRing(pos, 1.4);
+
+    // 3. Ground Carbonized Scorch Crater
+    this.spawnGroundScorchDecal(pos, 3.4);
+
+    // 4. Multiple Persistent Ground Fire Patches (Flickering burning fuel on the floor!)
+    for (let i = 0; i < 5; i++) {
+      const angle = (i / 5) * Math.PI * 2 + (Math.random() - 0.5) * 0.4;
+      const dist = Math.random() * 1.8 + 0.6;
+      const firePos = pos.clone().add(new THREE.Vector3(Math.cos(angle) * dist, 0, Math.sin(angle) * dist));
+      this.spawnGroundFirePatch(firePos, Math.random() * 0.5 + 0.9, 3.5 + Math.random() * 1.2);
+    }
+
+    // 5. Giant Volumetric Turbulent Fireball Plumes (Rich non-circular flame lobes)
+    const fireballCount = 28;
+    for (let i = 0; i < fireballCount; i++) {
+      const spread = new THREE.Vector3(
+        (Math.random() - 0.5) * 8.5,
+        Math.random() * 6.5 + 1.2,
+        (Math.random() - 0.5) * 8.5
+      );
+      const startScale = Math.random() * 0.9 + 0.8;
+      const targetScale = Math.random() * 3.6 + 3.2;
+      const duration = 0.65 + Math.random() * 0.4;
+      const buoyancy = 5.5 + Math.random() * 4.5;
+      const colorHex = i < 8 ? 0xfffdf0 : i < 18 ? 0xfbbf24 : 0xef4444;
+      this.spawnFireballMesh(pos.clone(), spread, startScale, targetScale, duration, 0.96, buoyancy, colorHex);
+    }
+
+    // 6. Atomized Burning Fuel Spray Droplets (Red Drum Liquid Petroleum Signature!)
+    const fuelDropletCount = 55;
+    for (let i = 0; i < fuelDropletCount; i++) {
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(Math.random() * 1.6 - 0.8);
+      const sprayDir = new THREE.Vector3(
+        Math.sin(phi) * Math.cos(theta),
+        Math.abs(Math.cos(phi)) * 0.85 + 0.2,
+        Math.sin(phi) * Math.sin(theta)
+      ).normalize();
+
+      const speed = Math.random() * 22 + 10;
+      const vel = sprayDir.multiplyScalar(speed);
+
+      this.particles.push({
+        position: pos.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.6, Math.random() * 0.8, (Math.random() - 0.5) * 0.6)),
+        velocity: vel,
+        color: new THREE.Color(1.0, Math.random() * 0.35 + 0.25, 0.04), // Rich incendiary orange-red
+        size: Math.random() * 0.55 + 0.35,
+        alpha: 1.0,
+        maxLife: 1.4 + Math.random() * 0.8,
+        life: 1.4 + Math.random() * 0.8,
+        gravity: 14.0 + Math.random() * 4.0,
+      });
+    }
+
+    // 7. Flying Torn Red Steel Barrel Hull Shrapnel (Authentic red painted metal shards!)
+    const shardCount = 14;
+    for (let i = 0; i < shardCount; i++) {
+      if (this.debrisParticles.length >= this.maxDebrisMeshes) {
+        const oldest = this.debrisParticles.shift();
+        if (oldest) {
+          this.scene.remove(oldest.mesh);
+          oldest.mesh.geometry.dispose();
+          (oldest.mesh.material as THREE.Material).dispose();
+        }
+      }
+
+      // Curved torn plate geometry
+      const w = Math.random() * 0.3 + 0.28;
+      const h = Math.random() * 0.35 + 0.35;
+      const geo = new THREE.PlaneGeometry(w, h);
+      const mat = new THREE.MeshBasicMaterial({
+        map: this.barrelShrapnelTex,
+        transparent: true,
+        side: THREE.DoubleSide,
+      });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.copy(pos).add(new THREE.Vector3((Math.random() - 0.5) * 0.4, Math.random() * 0.8, (Math.random() - 0.5) * 0.4));
+      mesh.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+      this.scene.add(mesh);
+
+      const shardVel = new THREE.Vector3(
+        (Math.random() - 0.5) * 26,
+        Math.random() * 16 + 6,
+        (Math.random() - 0.5) * 26
+      );
+
+      this.debrisParticles.push({
+        mesh,
+        velocity: shardVel,
+        rotVel: new THREE.Vector3(
+          (Math.random() - 0.5) * 36,
+          (Math.random() - 0.5) * 36,
+          (Math.random() - 0.5) * 36
+        ),
+        life: 2.5 + Math.random() * 1.0,
+        maxLife: 2.5 + Math.random() * 1.0,
+        isCeramic: false,
+      });
+    }
+
+    // 8. Flying Heavy Steel Rolling Hoop Fragments
+    for (let i = 0; i < 3; i++) {
+      const hoopGeo = new THREE.BoxGeometry(0.04, 0.04, 0.65);
+      const hoopMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.5, metalness: 0.8 });
+      const hoopMesh = new THREE.Mesh(hoopGeo, hoopMat);
+      hoopMesh.position.copy(pos);
+      this.scene.add(hoopMesh);
+
+      this.debrisParticles.push({
+        mesh: hoopMesh,
+        velocity: new THREE.Vector3((Math.random() - 0.5) * 20, Math.random() * 14 + 5, (Math.random() - 0.5) * 20),
+        rotVel: new THREE.Vector3(Math.random() * 20, Math.random() * 20, Math.random() * 20),
+        life: 2.4,
+        maxLife: 2.4,
+        isCeramic: false,
+      });
+    }
+
+    // 8.5. Flying Blown-off 3D Red Barrel Lid with Steel Rim & Bung Plug
+    const lidGeo = new THREE.CylinderGeometry(0.38, 0.38, 0.035, 16);
+    const lidMat = new THREE.MeshStandardMaterial({
+      color: 0xdc2626,
+      roughness: 0.45,
+      metalness: 0.35,
+    });
+    const lidMesh = new THREE.Mesh(lidGeo, lidMat);
+    lidMesh.castShadow = true;
+
+    // Crimped steel chime rim
+    const rimGeo = new THREE.CylinderGeometry(0.395, 0.395, 0.02, 16);
+    const rimMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.35, metalness: 0.8 });
+    const rimMesh = new THREE.Mesh(rimGeo, rimMat);
+    rimMesh.position.y = -0.01;
+    lidMesh.add(rimMesh);
+
+    // Hexagonal bung cap on barrel lid
+    const bungGeo = new THREE.CylinderGeometry(0.045, 0.045, 0.03, 6);
+    const bungMesh = new THREE.Mesh(bungGeo, rimMat);
+    bungMesh.position.set(0.22, 0.025, 0.06);
+    lidMesh.add(bungMesh);
+
+    lidMesh.position.copy(pos).add(new THREE.Vector3(0, 0.85, 0));
+    lidMesh.rotation.set(Math.random() * 0.4, Math.random() * Math.PI, Math.random() * 0.4);
+    this.scene.add(lidMesh);
+
+    const lidVel = new THREE.Vector3(
+      (Math.random() - 0.5) * 8.0,
+      Math.random() * 6.0 + 15.0,
+      (Math.random() - 0.5) * 8.0
+    );
+    const lidRotVel = new THREE.Vector3(
+      (Math.random() - 0.5) * 24,
+      (Math.random() - 0.5) * 16,
+      (Math.random() - 0.5) * 24
+    );
+
+    this.debrisParticles.push({
+      mesh: lidMesh,
+      velocity: lidVel,
+      rotVel: lidRotVel,
+      life: 4.5,
+      maxLife: 4.5,
+      isCeramic: false,
+    });
+
+    // 9. Heavy Mushroom Column of Billowing Black Diesel Smoke
+    const smokePuffs = 26;
+    for (let i = 0; i < smokePuffs; i++) {
+      const spread = new THREE.Vector3(
+        (Math.random() - 0.5) * 5.5,
+        Math.random() * 5.5 + 1.8,
+        (Math.random() - 0.5) * 5.5
+      );
+      const startScale = Math.random() * 1.2 + 1.0;
+      const targetScale = Math.random() * 4.2 + 3.8;
+      const duration = 3.2 + Math.random() * 1.4;
+      const buoyancy = 2.8 + Math.random() * 2.2;
+      const darkSoots = [0x111113, 0x18181b, 0x27272a];
+      const colorHex = darkSoots[i % darkSoots.length];
+      this.spawnSmokeMesh(pos.clone().add(new THREE.Vector3(0, 0.6, 0)), spread, startScale, targetScale, duration, 0.90, buoyancy, colorHex);
+    }
+
+    // 10. Cascading White-Hot Incandescent Embers
+    for (let i = 0; i < 85; i++) {
+      const vel = new THREE.Vector3(
+        (Math.random() - 0.5) * 28,
+        Math.random() * 20 + 8,
+        (Math.random() - 0.5) * 28
+      );
+      this.particles.push({
+        position: pos.clone(),
+        velocity: vel,
+        color: new THREE.Color(1.0, Math.random() * 0.4 + 0.6, 0.1),
+        size: Math.random() * 0.38 + 0.22,
+        alpha: 1.0,
+        maxLife: 1.2 + Math.random() * 1.0,
+        life: 1.2 + Math.random() * 1.0,
+        gravity: 18.0 + Math.random() * 6.0,
+      });
+    }
+  }
+
+  // --- SPECIALIZED WOOD CRATE / PALLET SHATTERING EFFECT ---
+  public emitWoodCrateShatter(pos: THREE.Vector3, size: number = 1.6) {
+    // 1. Billowing Turbulent Sawdust Clouds (Rich procedural wood dust puffs, not circles!)
+    const dustCount = 14;
+    for (let i = 0; i < dustCount; i++) {
+      const vel = new THREE.Vector3(
+        (Math.random() - 0.5) * 5.2,
+        Math.random() * 3.5 + 1.0,
+        (Math.random() - 0.5) * 5.2
+      );
+      const startScale = Math.random() * 0.4 + 0.3;
+      const targetScale = Math.random() * 1.8 + 1.5;
+      const duration = 1.2 + Math.random() * 0.5;
+      const woodTones = [0xb45309, 0xd97706, 0x92400e];
+      const colorHex = woodTones[i % woodTones.length];
+      this.spawnPropDustMesh(pos.clone(), vel, startScale, targetScale, duration, 0.88, colorHex, true);
+    }
+
+    // 2. Flying 3D Wood Planks with Screws & Bands
+    const plankCount = 10;
+    for (let i = 0; i < plankCount; i++) {
+      const plankGeo = new THREE.BoxGeometry(0.12, 0.045, Math.random() * 0.4 + 0.45);
+      const plankMat = new THREE.MeshStandardMaterial({
+        color: i % 2 === 0 ? 0x78350f : 0x92400e,
+        roughness: 0.85,
+      });
+      const plankMesh = new THREE.Mesh(plankGeo, plankMat);
+      plankMesh.position.copy(pos).add(new THREE.Vector3((Math.random() - 0.5) * 0.8, Math.random() * 0.6, (Math.random() - 0.5) * 0.8));
+      this.scene.add(plankMesh);
+
+      const vel = new THREE.Vector3(
+        (Math.random() - 0.5) * 12,
+        Math.random() * 9 + 3,
+        (Math.random() - 0.5) * 12
+      );
+
+      this.debrisParticles.push({
+        mesh: plankMesh,
+        velocity: vel,
+        rotVel: new THREE.Vector3(Math.random() * 18 - 9, Math.random() * 18 - 9, Math.random() * 18 - 9),
+        life: 3.2,
+        maxLife: 3.2,
+        isCeramic: false,
+      });
+    }
+
+    // 3. Sharp Needle-like Wood Splinter Shards (3D physics splinters)
+    const splinterCount = 20;
+    for (let i = 0; i < splinterCount; i++) {
+      const splinterGeo = new THREE.BoxGeometry(0.024, 0.024, Math.random() * 0.25 + 0.2);
+      const splinterMat = new THREE.MeshStandardMaterial({
+        color: 0xd97706,
+        roughness: 0.9,
+      });
+      const splinterMesh = new THREE.Mesh(splinterGeo, splinterMat);
+      splinterMesh.position.copy(pos);
+      this.scene.add(splinterMesh);
+
+      const vel = new THREE.Vector3(
+        (Math.random() - 0.5) * 15,
+        Math.random() * 12 + 4,
+        (Math.random() - 0.5) * 15
+      );
+
+      this.debrisParticles.push({
+        mesh: splinterMesh,
+        velocity: vel,
+        rotVel: new THREE.Vector3(Math.random() * 24 - 12, Math.random() * 24 - 12, Math.random() * 24 - 12),
+        life: 2.4,
+        maxLife: 2.4,
+        isCeramic: false,
+      });
+    }
+
+    // 4. Subtle impact spark burst
+    this.emitImpactSparks(pos, new THREE.Vector3(0, 1, 0));
+  }
+
+  // --- SPECIALIZED CONCRETE / CINDERBLOCK SHATTERING EFFECT ---
+  public emitConcreteShatter(pos: THREE.Vector3, normal?: THREE.Vector3, count: number = 16) {
+    const dir = normal ? normal.clone().normalize() : new THREE.Vector3(0, 1, 0);
+
+    // 1. Billowing Pulverized Mortar & Concrete Dust (Chalky expanding cloud)
+    const dustCount = 14;
+    for (let i = 0; i < dustCount; i++) {
+      const vel = dir.clone().multiplyScalar(Math.random() * 3 + 1).add(new THREE.Vector3(
+        (Math.random() - 0.5) * 4.5,
+        Math.random() * 2.5 + 0.5,
+        (Math.random() - 0.5) * 4.5
+      ));
+      const startScale = Math.random() * 0.45 + 0.35;
+      const targetScale = Math.random() * 2.2 + 1.8;
+      const duration = 1.4 + Math.random() * 0.6;
+      this.spawnPropDustMesh(pos.clone(), vel, startScale, targetScale, duration, 0.88, 0x94a3b8, false);
+    }
+
+    // 2. 3D Irregular Jagged Concrete Masonry Rocks
+    const rockCount = Math.min(22, count);
+    for (let i = 0; i < rockCount; i++) {
+      const rSize = Math.random() * 0.18 + 0.12;
+      const rockGeo = new THREE.DodecahedronGeometry(rSize, 0);
+      const rockMat = new THREE.MeshStandardMaterial({
+        color: i % 2 === 0 ? 0x64748b : 0x475569,
+        roughness: 0.95,
+      });
+      const rockMesh = new THREE.Mesh(rockGeo, rockMat);
+      // Random non-uniform scale for irregular fractured rock appearance
+      rockMesh.scale.set(
+        Math.random() * 0.6 + 0.8,
+        Math.random() * 0.6 + 0.8,
+        Math.random() * 0.6 + 0.8
+      );
+      rockMesh.position.copy(pos).add(new THREE.Vector3((Math.random() - 0.5) * 0.5, Math.random() * 0.6, (Math.random() - 0.5) * 0.5));
+      rockMesh.castShadow = true;
+      this.scene.add(rockMesh);
+
+      const vel = dir.clone().multiplyScalar(Math.random() * 6 + 3).add(new THREE.Vector3(
+        (Math.random() - 0.5) * 9,
+        Math.random() * 7 + 2,
+        (Math.random() - 0.5) * 9
+      ));
+
+      this.debrisParticles.push({
+        mesh: rockMesh,
+        velocity: vel,
+        rotVel: new THREE.Vector3(Math.random() * 16 - 8, Math.random() * 16 - 8, Math.random() * 16 - 8),
+        life: 3.5,
+        maxLife: 3.5,
+        isCeramic: true,
+      });
+    }
+
+    // 3. High-velocity stone chips and sparks
+    this.emitImpactSparks(pos, dir);
+  }
+
+  // --- SPECIALIZED SANDBAG BARRIER BURST EFFECT ---
+  public emitSandbagBurst(pos: THREE.Vector3, normal?: THREE.Vector3) {
+    const dir = normal ? normal.clone().normalize() : new THREE.Vector3(0, 1, 0);
+
+    // 1. Rolling Earthen Dust Clouds
+    for (let i = 0; i < 12; i++) {
+      const vel = dir.clone().multiplyScalar(Math.random() * 2.5 + 1).add(new THREE.Vector3(
+        (Math.random() - 0.5) * 3.8,
+        Math.random() * 2.0 + 0.5,
+        (Math.random() - 0.5) * 3.8
+      ));
+      this.spawnPropDustMesh(pos.clone(), vel, 0.4, 2.0, 1.3, 0.85, 0xd97706, false);
+    }
+
+    // 2. Tumbling Shredded Burlap Fabric Pieces
+    for (let i = 0; i < 10; i++) {
+      const burlapGeo = new THREE.PlaneGeometry(0.25, 0.2);
+      const burlapMat = new THREE.MeshBasicMaterial({
+        map: this.burlapFiberTex,
+        transparent: true,
+        side: THREE.DoubleSide,
+      });
+      const burlapMesh = new THREE.Mesh(burlapGeo, burlapMat);
+      burlapMesh.position.copy(pos);
+      this.scene.add(burlapMesh);
+
+      this.debrisParticles.push({
+        mesh: burlapMesh,
+        velocity: new THREE.Vector3((Math.random() - 0.5) * 8, Math.random() * 6 + 2, (Math.random() - 0.5) * 8),
+        rotVel: new THREE.Vector3(Math.random() * 12, Math.random() * 12, Math.random() * 12),
+        life: 2.8,
+        maxLife: 2.8,
+        isCeramic: false,
+      });
+    }
+
+    // 3. Dense Sand Grains Spray
+    for (let i = 0; i < 35; i++) {
+      const vel = dir.clone().multiplyScalar(Math.random() * 6 + 2).add(new THREE.Vector3(
+        (Math.random() - 0.5) * 6,
+        Math.random() * 5 + 2,
+        (Math.random() - 0.5) * 6
+      ));
+      this.particles.push({
+        position: pos.clone(),
+        velocity: vel,
+        color: new THREE.Color(0.85, 0.65, 0.35),
+        size: 0.18,
+        alpha: 0.9,
+        maxLife: 1.2,
+        life: 1.2,
+        gravity: 16.0,
+      });
+    }
+  }
+
+  // --- SPECIALIZED PROPANE TANK DETONATION ---
+  public emitPropaneExplosion(pos: THREE.Vector3) {
+    this.emitExplosion(pos, 1.25);
+
+    // High pressure cryogenic gas vapor blowout (cyan-tinted expanding gas cloud)
+    for (let i = 0; i < 10; i++) {
+      const vel = new THREE.Vector3((Math.random() - 0.5) * 7, Math.random() * 5 + 1.5, (Math.random() - 0.5) * 7);
+      this.spawnPropDustMesh(pos.clone(), vel, 0.6, 3.2, 1.1, 0.85, 0xbae6fd, false);
+    }
+  }
+
+  // --- SPECIALIZED AMMO CRATE COOK-OFF EXPLOSION ---
+  public emitAmmoCrateExplosion(pos: THREE.Vector3) {
+    this.emitExplosion(pos, 0.9);
+
+    // Cook-off popping tracer sparks & brass shell casing showers
+    for (let i = 0; i < 40; i++) {
+      const vel = new THREE.Vector3((Math.random() - 0.5) * 16, Math.random() * 12 + 4, (Math.random() - 0.5) * 16);
+      this.particles.push({
+        position: pos.clone(),
+        velocity: vel,
+        color: new THREE.Color(1.0, 0.9, 0.3),
+        size: 0.25,
+        alpha: 1.0,
+        maxLife: 0.9,
+        life: 0.9,
+        gravity: 15.0,
+      });
+    }
+  }
+
+  // --- BULLET IMPACT PARTIAL DAMAGE PUFFS ---
+  public emitSawdust(pos: THREE.Vector3, normal: THREE.Vector3, count: number = 4) {
+    for (let i = 0; i < count; i++) {
+      const vel = normal.clone().multiplyScalar(Math.random() * 2 + 1).add(new THREE.Vector3(
+        (Math.random() - 0.5) * 2,
+        Math.random() * 1.5 + 0.5,
+        (Math.random() - 0.5) * 2
+      ));
+      this.spawnPropDustMesh(pos.clone(), vel, 0.25, 0.9, 0.7, 0.85, 0xb45309, true);
+    }
+  }
+
+  public emitConcreteDust(pos: THREE.Vector3, normal: THREE.Vector3, count: number = 4) {
+    for (let i = 0; i < count; i++) {
+      const vel = normal.clone().multiplyScalar(Math.random() * 2 + 1).add(new THREE.Vector3(
+        (Math.random() - 0.5) * 2,
+        Math.random() * 1.5 + 0.5,
+        (Math.random() - 0.5) * 2
+      ));
+      this.spawnPropDustMesh(pos.clone(), vel, 0.3, 1.1, 0.8, 0.85, 0x94a3b8, false);
+    }
+  }
+
+  public emitSandDust(pos: THREE.Vector3, normal: THREE.Vector3) {
+    for (let i = 0; i < 4; i++) {
+      const vel = normal.clone().multiplyScalar(Math.random() * 2 + 1).add(new THREE.Vector3(
+        (Math.random() - 0.5) * 2,
+        Math.random() * 1.5 + 0.5,
+        (Math.random() - 0.5) * 2
+      ));
+      this.spawnPropDustMesh(pos.clone(), vel, 0.3, 1.2, 0.8, 0.85, 0xd97706, false);
     }
   }
 
@@ -1892,6 +3054,144 @@ export class ParticleSystem {
       }
     }
 
+    // 1.7 Update Volumetric Fireball Clouds (Expanding fiery combustion tongues)
+    for (let i = this.fireballMeshes.length - 1; i >= 0; i--) {
+      const fb = this.fireballMeshes[i];
+      fb.life -= dt;
+      if (fb.life <= 0) {
+        this.scene.remove(fb.mesh);
+        fb.mesh.geometry.dispose();
+        (fb.mesh.material as THREE.Material).dispose();
+        this.fireballMeshes.splice(i, 1);
+        continue;
+      }
+
+      // Buoyant lift and aerodynamic drag
+      fb.velocity.y += fb.buoyancy * dt;
+      fb.velocity.x *= Math.max(0, 1 - 1.2 * dt);
+      fb.velocity.z *= Math.max(0, 1 - 1.2 * dt);
+      fb.mesh.position.addScaledVector(fb.velocity, dt);
+
+      // Explosive expansion curve (rapid initial expansion then slow swelling)
+      const progress = 1 - fb.life / fb.maxLife;
+      const scaleEase = Math.sin(Math.min(1, progress) * Math.PI * 0.5);
+      const currentScale = fb.startScale + (fb.targetScale - fb.startScale) * scaleEase;
+      fb.mesh.scale.set(currentScale, currentScale, 1);
+
+      // Face camera and rotate
+      if (this.camera) {
+        fb.mesh.quaternion.copy(this.camera.quaternion);
+      }
+      fb.rotation += fb.rotSpeed * dt;
+      fb.mesh.rotateZ(fb.rotation);
+
+      // Alpha burn decay
+      const alphaRatio = Math.max(0, fb.life / fb.maxLife);
+      const mat = fb.mesh.material as THREE.MeshBasicMaterial;
+      mat.opacity = Math.pow(alphaRatio, 0.75) * fb.initialOpacity;
+    }
+
+    // 1.8 Update Volumetric Smoke Plumes (Turbulent billowing cumulus lobes)
+    for (let i = this.smokeMeshes.length - 1; i >= 0; i--) {
+      const sm = this.smokeMeshes[i];
+      sm.life -= dt;
+      if (sm.life <= 0) {
+        this.scene.remove(sm.mesh);
+        sm.mesh.geometry.dispose();
+        (sm.mesh.material as THREE.Material).dispose();
+        this.smokeMeshes.splice(i, 1);
+        continue;
+      }
+
+      // Atmospheric thermal updraft and drag
+      sm.velocity.y += sm.buoyancy * dt;
+      sm.velocity.x *= Math.max(0, 1 - 0.65 * dt);
+      sm.velocity.z *= Math.max(0, 1 - 0.65 * dt);
+      sm.mesh.position.addScaledVector(sm.velocity, dt);
+
+      // Natural cloud swelling
+      const progress = 1 - sm.life / sm.maxLife;
+      const scaleEase = Math.sin(Math.min(1, progress) * Math.PI * 0.5);
+      const currentScale = sm.startScale + (sm.targetScale - sm.startScale) * scaleEase;
+      sm.mesh.scale.set(currentScale, currentScale, 1);
+
+      // Face camera and rotate
+      if (this.camera) {
+        sm.mesh.quaternion.copy(this.camera.quaternion);
+      }
+      sm.rotation += sm.rotSpeed * dt;
+      sm.mesh.rotateZ(sm.rotation);
+
+      // Soft envelope: fade in quickly during initial bloom, then slowly evaporate
+      const fadeIn = Math.min(1, progress / 0.12);
+      const fadeOut = Math.max(0, sm.life / sm.maxLife);
+      const mat = sm.mesh.material as THREE.MeshBasicMaterial;
+      mat.opacity = fadeIn * Math.pow(fadeOut, 1.2) * sm.initialOpacity;
+    }
+
+    // 1.9 Update Prop Dust Clouds (Sawdust, concrete dust, masonry chalk puffs)
+    for (let i = this.propDustMeshes.length - 1; i >= 0; i--) {
+      const pd = this.propDustMeshes[i];
+      pd.life -= dt;
+      if (pd.life <= 0) {
+        this.scene.remove(pd.mesh);
+        pd.mesh.geometry.dispose();
+        (pd.mesh.material as THREE.Material).dispose();
+        this.propDustMeshes.splice(i, 1);
+        continue;
+      }
+
+      // Drag and gentle gravity
+      pd.velocity.y -= 1.8 * dt;
+      pd.velocity.x *= Math.max(0, 1 - 2.2 * dt);
+      pd.velocity.z *= Math.max(0, 1 - 2.2 * dt);
+      pd.mesh.position.addScaledVector(pd.velocity, dt);
+
+      // Radial dust plume puff expansion
+      const progress = 1 - pd.life / pd.maxLife;
+      const scaleEase = Math.sin(Math.min(1, progress) * Math.PI * 0.5);
+      const currentScale = pd.startScale + (pd.targetScale - pd.startScale) * scaleEase;
+      pd.mesh.scale.set(currentScale, currentScale, 1);
+
+      // Face camera and rotate
+      if (this.camera) {
+        pd.mesh.quaternion.copy(this.camera.quaternion);
+      }
+      pd.rotation += pd.rotSpeed * dt;
+      pd.mesh.rotateZ(pd.rotation);
+
+      // Linear fade out
+      const alphaRatio = Math.max(0, pd.life / pd.maxLife);
+      const mat = pd.mesh.material as THREE.MeshBasicMaterial;
+      mat.opacity = Math.pow(alphaRatio, 1.1) * pd.initialOpacity;
+    }
+
+    // 1.10 Update Ground Fire Patches (Flickering persistent floor flame pools)
+    const timeNow = Date.now() * 0.008;
+    for (let i = this.groundFirePatches.length - 1; i >= 0; i--) {
+      const fp = this.groundFirePatches[i];
+      fp.life -= dt;
+      if (fp.life <= 0) {
+        this.scene.remove(fp.mesh);
+        fp.mesh.geometry.dispose();
+        (fp.mesh.material as THREE.Material).dispose();
+        this.groundFirePatches.splice(i, 1);
+        continue;
+      }
+
+      // Dynamic flame flicker & pulse
+      const flicker = 1.0 + Math.sin(timeNow + i * 2.3) * 0.08 + Math.cos(timeNow * 1.7 + i) * 0.05;
+      const curScale = (fp.baseScale / 2) * flicker;
+      fp.mesh.scale.set(curScale, curScale, 1);
+
+      const mat = fp.mesh.material as THREE.MeshBasicMaterial;
+      if (fp.life < 1.5) {
+        mat.opacity = (fp.life / 1.5) * 0.95;
+      } else {
+        mat.opacity = 0.85 + Math.sin(timeNow * 2.5 + i) * 0.1;
+      }
+    }
+
     // 2. Update Tracers
     for (let i = this.tracers.length - 1; i >= 0; i--) {
       const t = this.tracers[i];
@@ -1938,5 +3238,57 @@ export class ParticleSystem {
         sc.velocity.z *= 0.6;
       }
     }
+  }
+
+  // --- CLEANUP & DISPOSAL ---
+  public destroy() {
+    this.scene.remove(this.pointsMesh);
+    this.pointsGeo.dispose();
+    this.pointsMat.dispose();
+
+    this.scene.remove(this.bloodPointsMesh);
+    this.bloodPointsGeo.dispose();
+    this.bloodPointsMat.dispose();
+
+    this.scene.remove(this.mistPointsMesh);
+    this.mistPointsGeo.dispose();
+    this.mistPointsMat.dispose();
+
+    this.scene.remove(this.muzzleFlashLight);
+    this.scene.remove(this.explosionLight);
+
+    const disposeList = [
+      ...this.debrisParticles,
+      ...this.bloodDecals,
+      ...this.shockwaveRings,
+      ...this.scorchDecals,
+      ...this.fireballMeshes,
+      ...this.smokeMeshes,
+      ...this.propDustMeshes,
+      ...this.groundFirePatches,
+      ...this.tracers,
+      ...this.shellCasings,
+    ];
+    for (const item of disposeList) {
+      if (item && item.mesh) {
+        this.scene.remove(item.mesh);
+        item.mesh.geometry.dispose();
+        if (Array.isArray(item.mesh.material)) {
+          item.mesh.material.forEach((m: THREE.Material) => m.dispose());
+        } else if (item.mesh.material) {
+          (item.mesh.material as THREE.Material).dispose();
+        }
+      }
+    }
+    this.debrisParticles = [];
+    this.bloodDecals = [];
+    this.shockwaveRings = [];
+    this.scorchDecals = [];
+    this.fireballMeshes = [];
+    this.smokeMeshes = [];
+    this.propDustMeshes = [];
+    this.groundFirePatches = [];
+    this.tracers = [];
+    this.shellCasings = [];
   }
 }

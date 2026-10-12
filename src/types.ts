@@ -311,7 +311,7 @@ export interface EliminationAccolade {
   title: string;
   points: number;
   subtext?: string;
-  icon?: 'kill' | 'headshot' | 'streak' | 'revenge' | 'longshot' | 'one_shot';
+  icon?: 'kill' | 'headshot' | 'streak' | 'revenge' | 'longshot' | 'one_shot' | 'easter_egg';
   timestamp: number;
 }
 

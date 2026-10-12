@@ -194,6 +194,16 @@ export class EnvironmentManager {
   // Wetness & PBR targets
   private mapMaterials: THREE.MeshStandardMaterial[] = [];
 
+  // Solar Easter Egg & Supernova State
+  private sunHitPulseTimer: number = 0;
+  private sunPulseScale: number = 1.0;
+  public isSupernovaActive: boolean = false;
+  private supernovaTimer: number = 0;
+  private supernovaDuration: number = 2.6;
+  private supernovaRingMesh: THREE.Mesh | null = null;
+  private onSupernovaComplete: (() => void) | null = null;
+  public onSupernovaFlash: ((whiteoutAlpha: number) => void) | null = null;
+
   // Callback
   public onEnvironmentChange: (state: EnvironmentState) => void = () => {};
 
@@ -832,6 +842,54 @@ export class EnvironmentManager {
       }
     }
 
+    // Solar Easter Egg Pulse Decay
+    if (this.sunHitPulseTimer > 0) {
+      this.sunHitPulseTimer -= dt;
+      const p = Math.max(0, this.sunHitPulseTimer / 0.45);
+      if (this.celestialMesh) {
+        this.celestialMesh.scale.setScalar(1.0 + (this.sunPulseScale - 1.0) * p);
+      }
+    } else if (!this.isSupernovaActive && this.celestialMesh && this.celestialMesh.scale.x !== 1) {
+      this.celestialMesh.scale.setScalar(1.0);
+    }
+
+    // Solar Supernova Blast Wave Animation
+    if (this.isSupernovaActive) {
+      this.supernovaTimer += dt;
+      const progress = Math.min(1.0, this.supernovaTimer / this.supernovaDuration);
+
+      // Celestial scale explosion (massively expanding blazing core)
+      if (this.celestialMesh) {
+        const growth = 1.0 + Math.pow(progress, 1.8) * 16.0;
+        this.celestialMesh.scale.setScalar(growth);
+      }
+
+      // Expand 3D supernova shockwave ring
+      if (this.supernovaRingMesh) {
+        const ringScale = 1.0 + progress * 140.0;
+        this.supernovaRingMesh.scale.setScalar(ringScale);
+        const ringAlpha = Math.max(0, 1.0 - Math.pow(progress, 1.3));
+        (this.supernovaRingMesh.material as THREE.MeshBasicMaterial).opacity = ringAlpha;
+      }
+
+      // Sky flash radiance
+      this.sunLight.intensity = 2.8 + Math.sin(progress * Math.PI) * 16.0;
+      this.ambientLight.intensity = 0.95 + Math.sin(progress * Math.PI) * 7.5;
+
+      // Full-screen whiteout flash callback
+      const flashAlpha = progress < 0.22
+        ? (progress / 0.22)
+        : Math.max(0, 1.0 - (progress - 0.22) / 0.78);
+      this.onSupernovaFlash?.(flashAlpha);
+
+      // On completion, trigger end match callback
+      if (progress >= 1.0 && this.onSupernovaComplete) {
+        const cb = this.onSupernovaComplete;
+        this.onSupernovaComplete = null;
+        cb();
+      }
+    }
+
     // 1. Dynamic Time Progression
     if (this.isDynamicCycle) {
       this.cycleTimeSec += dt;
@@ -1037,11 +1095,102 @@ export class EnvironmentManager {
     soundManager.setWeatherAudio(this.currentWeather, cfg.rainIntensity > 0 ? cfg.rainIntensity : (cfg.dustIntensity > 0.3 ? 0.6 : 0.2));
   }
 
+  // --- SOLAR EASTER EGG METHODS ---
+  public getSunDirection(): THREE.Vector3 {
+    return this.activeSunVector.clone().normalize();
+  }
+
+  public isPointTowardsSun(shootDir: THREE.Vector3, thresholdRad: number = 0.16): boolean {
+    const sunDir = this.getSunDirection();
+    const dot = shootDir.dot(sunDir);
+    // thresholdRad around 0.16 rad (~9.1 degrees cone around sun core)
+    return dot >= Math.cos(thresholdRad);
+  }
+
+  public pulseSunHit(hitCount: number) {
+    this.sunHitPulseTimer = 0.45;
+    this.sunPulseScale = 1.0 + Math.min(0.9, (hitCount / 30) * 0.85);
+
+    // Dynamic solar corona light burst
+    this.sunLight.intensity = Math.min(6.5, this.sunLight.intensity + 1.2);
+
+    // Redraw celestial disc canvas with escalating coronal mass ejection flares
+    if (this.celestialCanvas && this.celestialTexture) {
+      const ctx = this.celestialCanvas.getContext('2d')!;
+      const w = 256;
+      const h = 256;
+      const cx = 128;
+      const cy = 128;
+      ctx.clearRect(0, 0, w, h);
+
+      const progress = Math.min(1.0, hitCount / 30);
+      const haloRadius = 120 + progress * 8;
+      const haloGrad = ctx.createRadialGradient(cx, cy, 20 + progress * 14, cx, cy, haloRadius);
+      haloGrad.addColorStop(0, '#ffffff');
+      haloGrad.addColorStop(0.2, progress > 0.65 ? '#f59e0b' : '#fef08a');
+      haloGrad.addColorStop(0.5, progress > 0.85 ? '#dc2626' : '#ea580c');
+      haloGrad.addColorStop(0.85, 'rgba(185, 28, 28, 0.42)');
+      haloGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = haloGrad;
+      ctx.fillRect(0, 0, w, h);
+
+      // Energetic solar flare radiation spikes
+      ctx.strokeStyle = progress > 0.75 ? '#fee2e2' : '#fef9c3';
+      ctx.lineWidth = 1.8 + progress * 3.2;
+      const spikeCount = 8 + Math.floor(progress * 12);
+      for (let s = 0; s < spikeCount; s++) {
+        const angle = (s / spikeCount) * Math.PI * 2 + (hitCount * 0.25);
+        const len = 65 + Math.sin(s * 3.5 + hitCount) * 55 * progress;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(cx + Math.cos(angle) * len, cy + Math.sin(angle) * len);
+        ctx.stroke();
+      }
+
+      // Blazing sun core
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(cx, cy, 24 + progress * 12, 0, Math.PI * 2);
+      ctx.fill();
+
+      this.celestialTexture.needsUpdate = true;
+    }
+  }
+
+  public triggerSupernova(onComplete: () => void) {
+    if (this.isSupernovaActive) return;
+    this.isSupernovaActive = true;
+    this.supernovaTimer = 0;
+    this.onSupernovaComplete = onComplete;
+
+    // Create 3D additive shockwave ring in celestialGroup
+    if (!this.supernovaRingMesh && this.celestialGroup) {
+      const ringGeo = new THREE.RingGeometry(0.8, 3.8, 64);
+      const ringMat = new THREE.MeshBasicMaterial({
+        color: 0xffffff,
+        transparent: true,
+        opacity: 0.95,
+        side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      });
+      this.supernovaRingMesh = new THREE.Mesh(ringGeo, ringMat);
+      this.supernovaRingMesh.position.set(0, 0, 0.5);
+      this.celestialGroup.add(this.supernovaRingMesh);
+    }
+  }
+
   public destroy() {
     this.scene.remove(this.ambientLight);
     this.scene.remove(this.sunLight);
     this.scene.remove(this.fillLight);
     this.scene.remove(this.skyDome);
+    if (this.supernovaRingMesh && this.celestialGroup) {
+      this.celestialGroup.remove(this.supernovaRingMesh);
+      this.supernovaRingMesh.geometry.dispose();
+      (this.supernovaRingMesh.material as THREE.Material).dispose();
+      this.supernovaRingMesh = null;
+    }
     this.scene.remove(this.celestialGroup);
     this.scene.remove(this.rainPoints);
     this.scene.remove(this.dustPoints);

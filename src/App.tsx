@@ -76,6 +76,7 @@ export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [isGameOver, setIsGameOver] = useState<boolean>(false);
   const [isVictory, setIsVictory] = useState<boolean>(false);
+  const [easterEggVictory, setEasterEggVictory] = useState<string | null>(null);
 
   // Environment & Weather State
   const [environment, setEnvironment] = useState<EnvironmentState>({
@@ -275,8 +276,9 @@ export default function App() {
       setRadioCallout(callout);
     };
     engine.onStreakUpdate = updatedStreaks => setStreaks([...updatedStreaks]);
-    engine.onMatchEnd = (victory, finalStats) => {
+    engine.onMatchEnd = (victory, finalStats, reason) => {
       setIsVictory(victory);
+      setEasterEggVictory(reason || null);
       setIsGameOver(true);
       setStats(finalStats);
       document.exitPointerLock?.();
@@ -454,6 +456,7 @@ export default function App() {
     setIsPlaying(false);
     setIsGameOver(false);
     setIsPaused(false);
+    setEasterEggVictory(null);
     setTimeout(() => {
       startMission();
     }, 100);
@@ -463,6 +466,7 @@ export default function App() {
     setIsPlaying(false);
     setIsGameOver(false);
     setIsPaused(false);
+    setEasterEggVictory(null);
     if (engineRef.current) {
       engineRef.current.destroy();
       engineRef.current = null;
@@ -729,6 +733,7 @@ export default function App() {
         <GameOverModal
           victory={isVictory}
           stats={stats}
+          easterEgg={easterEggVictory}
           onPlayAgain={handleRestart}
           onReturnToHome={handleReturnToHomescreen}
         />

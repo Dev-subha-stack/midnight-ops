@@ -36,6 +36,7 @@ import {
   AlertTriangle,
   ShieldAlert,
   Users,
+  Sparkles,
 } from 'lucide-react';
 import { Minimap } from './Minimap';
 import { Killfeed } from './Killfeed';
@@ -622,17 +623,23 @@ export const HUD: React.FC<HUDProps> = ({
         {accolades.slice(-2).map(acc => (
           <div
             key={acc.id}
-            className="flex items-center gap-2 bg-black/80 px-4 py-1.5 rounded-lg border border-amber-500/60 shadow-lg text-xs font-mono font-black text-amber-300 uppercase animate-in fade-in zoom-in duration-100"
+            className={`flex items-center gap-2 px-4 py-1.5 rounded-lg border shadow-lg text-xs font-mono font-black uppercase animate-in fade-in zoom-in duration-100 ${
+              acc.icon === 'easter_egg'
+                ? 'bg-purple-950/90 border-amber-400 text-amber-300 shadow-[0_0_20px_rgba(251,191,36,0.6)] animate-pulse'
+                : 'bg-black/80 border-amber-500/60 text-amber-300'
+            }`}
           >
             {acc.icon === 'headshot' ? (
               <Skull className="w-4 h-4 text-red-500" />
             ) : acc.icon === 'streak' ? (
               <Flame className="w-4 h-4 text-amber-400" />
+            ) : acc.icon === 'easter_egg' ? (
+              <Sparkles className="w-4 h-4 text-amber-300 animate-spin" />
             ) : (
               <Target className="w-4 h-4 text-yellow-400" />
             )}
             <span>{acc.title}</span>
-            {acc.subtext && <span className="text-[10px] text-amber-400/80 font-normal">({acc.subtext})</span>}
+            {acc.subtext && <span className={`text-[10px] font-normal ${acc.icon === 'easter_egg' ? 'text-amber-200 font-bold' : 'text-amber-400/80'}`}>({acc.subtext})</span>}
           </div>
         ))}
       </div>

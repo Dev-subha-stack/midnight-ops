@@ -628,6 +628,7 @@ export class DestructionManager {
 
     // Visual & Particle Feedback
     if (prop.type === 'concrete_wall') {
+      this.particles.emitConcreteDust(hp, hn, 4);
       this.particles.emitImpactSparks(hp, hn);
       this.spawnConcreteChips(hp, hn, 4);
 
@@ -645,6 +646,7 @@ export class DestructionManager {
         this.onCoverModified(prop);
       }
     } else if (prop.type === 'cinderblock_wall') {
+      this.particles.emitConcreteDust(hp, hn, 5);
       this.particles.emitImpactSparks(hp, hn);
       this.spawnConcreteChips(hp, hn, 6);
 
@@ -661,6 +663,7 @@ export class DestructionManager {
         this.onCoverModified(prop);
       }
     } else if (prop.type === 'sandbag_barrier') {
+      this.particles.emitSandDust(hp, hn);
       this.spawnSandDust(hp, hn);
       if (healthPct <= 0) {
         this.destroyProp(prop, hn);
@@ -675,6 +678,7 @@ export class DestructionManager {
         this.onCoverModified(prop);
       }
     } else if (prop.type === 'wooden_crate' || prop.type === 'wooden_pallet') {
+      this.particles.emitSawdust(hp, hn, 5);
       this.spawnWoodSplinters(hp, hn, 6);
       if (healthPct <= 0) {
         this.destroyProp(prop, hn);
@@ -686,8 +690,9 @@ export class DestructionManager {
         }
       }
     } else if (prop.type === 'explosive_barrel') {
-      // Leaking fiery sparks when damaged
+      // Leaking fiery sparks & atomized fuel spray when damaged
       this.particles.emitImpactSparks(hp, hn);
+      this.particles.emitSawdust(hp, hn, 2);
       if (healthPct <= 0) {
         this.detonateBarrel(prop);
         return true;
@@ -742,6 +747,7 @@ export class DestructionManager {
 
   // --- SPAWN SAND DUST PARTICLES ---
   private spawnSandDust(pos: THREE.Vector3, normal: THREE.Vector3) {
+    this.particles.emitSandDust(pos, normal);
     this.particles.emitImpactSparks(pos, normal);
     for (let i = 0; i < 3; i++) {
       this.spawnDebrisChunk(pos, 0.12, 0xd97706);
@@ -756,9 +762,10 @@ export class DestructionManager {
       seg.scale.y = 0.45;
       seg.position.y = -0.38;
 
-      // Spawn tumbling concrete chunk debris
+      // Spawn tumbling concrete chunk debris and dust cloud puff
       const worldPos = new THREE.Vector3();
       seg.getWorldPosition(worldPos);
+      this.particles.emitConcreteDust(worldPos.clone().add(new THREE.Vector3(0, 0.4, 0)), new THREE.Vector3(0, 1, 0), 4);
       this.spawnDebrisChunk(worldPos.add(new THREE.Vector3(0, 0.6, 0)), 0.35, 0x64748b);
       this.spawnDebrisChunk(worldPos.add(new THREE.Vector3(0.2, 0.4, 0.1)), 0.25, 0x475569);
 
@@ -777,7 +784,10 @@ export class DestructionManager {
     const pos = prop.position.clone();
 
     if (prop.type === 'concrete_wall' || prop.type === 'cinderblock_wall') {
-      // Shatter entire barrier into physics rubble chunks
+      // 1. Rich procedural shattering VFX (billowing dust clouds, jagged rock chunks, masonry sparks)
+      this.particles.emitConcreteShatter(pos, impactDir, 22);
+
+      // 2. Shatter entire barrier into physics rubble chunks
       for (let i = 0; i < 10; i++) {
         const offset = new THREE.Vector3(
           (Math.random() - 0.5) * 2.5,
@@ -788,7 +798,10 @@ export class DestructionManager {
       }
       this.particles.emitImpactSparks(pos.clone().add(new THREE.Vector3(0, 0.8, 0)), new THREE.Vector3(0, 1, 0));
     } else if (prop.type === 'sandbag_barrier') {
-      // Collapse sandbags
+      // 1. Specialized sandbag burst VFX (rolling earth dust, shredded burlap pieces, coarse sand spray)
+      this.particles.emitSandbagBurst(pos, impactDir);
+
+      // 2. Collapse sandbags
       for (let i = 0; i < 8; i++) {
         const offset = new THREE.Vector3(
           (Math.random() - 0.5) * 2.2,
@@ -797,10 +810,12 @@ export class DestructionManager {
         );
         this.spawnDebrisChunk(pos.clone().add(offset), 0.25, 0x78716c);
       }
-      this.spawnSandDust(pos, new THREE.Vector3(0, 1, 0));
       soundManager.playSlide();
     } else if (prop.type === 'wooden_crate' || prop.type === 'wooden_pallet') {
-      // Shatter wooden crate/pallet into wood planks
+      // 1. Specialized wood crate shattering VFX (billowing sawdust clouds, flying wood planks, sharp splinters)
+      this.particles.emitWoodCrateShatter(pos, 2.0);
+
+      // 2. Shatter wooden crate/pallet into wood planks
       for (let i = 0; i < 12; i++) {
         const offset = new THREE.Vector3(
           (Math.random() - 0.5) * 1.4,
@@ -841,9 +856,9 @@ export class DestructionManager {
 
     const blastPos = prop.position.clone().add(new THREE.Vector3(0, 0.8, 0));
 
-    // Audio & Massive Fireball Blast
+    // Audio & Massive Cryogenic Vapor Fireball Blast
     soundManager.playExplosion();
-    this.particles.emitExplosion(blastPos);
+    this.particles.emitPropaneExplosion(blastPos);
 
     this.scene.remove(prop.mesh);
 
@@ -885,8 +900,7 @@ export class DestructionManager {
     const blastPos = prop.position.clone().add(new THREE.Vector3(0, 0.5, 0));
 
     soundManager.playExplosion();
-    this.particles.emitExplosion(blastPos);
-    this.particles.emitImpactSparks(blastPos, new THREE.Vector3(0, 1, 0));
+    this.particles.emitAmmoCrateExplosion(blastPos);
 
     this.scene.remove(prop.mesh);
 
@@ -911,9 +925,9 @@ export class DestructionManager {
 
     const blastPos = prop.position.clone().add(new THREE.Vector3(0, 0.7, 0));
 
-    // Audio & Big Fireball Particle system
+    // Audio & Signature Red Drum Blasting Particle System
     soundManager.playExplosion();
-    this.particles.emitExplosion(blastPos);
+    this.particles.emitRedDrumExplosion(blastPos);
 
     // Remove barrel mesh
     this.scene.remove(prop.mesh);

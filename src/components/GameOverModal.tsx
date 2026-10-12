@@ -1,11 +1,12 @@
 import React, { useEffect } from 'react';
 import { PlayerStats } from '../types';
-import { Trophy, Flame, Skull, Crosshair, Target, RotateCcw, Home } from 'lucide-react';
+import { Trophy, Flame, Skull, Crosshair, Target, RotateCcw, Home, Sparkles, Sun } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
 interface GameOverModalProps {
   victory: boolean;
   stats: PlayerStats;
+  easterEgg?: string | null;
   onPlayAgain: () => void;
   onReturnToHome?: () => void;
 }
@@ -13,17 +14,29 @@ interface GameOverModalProps {
 export const GameOverModal: React.FC<GameOverModalProps> = ({
   victory,
   stats,
+  easterEgg,
   onPlayAgain,
   onReturnToHome,
 }) => {
+  const isSolarSupernova = easterEgg === 'solar_supernova';
+
   useEffect(() => {
     if (victory) {
-      confetti({
-        particleCount: 80,
-        spread: 70,
-        origin: { y: 0.6 },
-        colors: ['#38bdf8', '#06b6d4', '#eab308'],
-      });
+      if (isSolarSupernova) {
+        confetti({
+          particleCount: 120,
+          spread: 90,
+          origin: { y: 0.55 },
+          colors: ['#f59e0b', '#f97316', '#38bdf8', '#fbbf24', '#ffffff'],
+        });
+      } else {
+        confetti({
+          particleCount: 80,
+          spread: 70,
+          origin: { y: 0.6 },
+          colors: ['#38bdf8', '#06b6d4', '#eab308'],
+        });
+      }
     }
 
     const handleKey = (e: KeyboardEvent) => {
@@ -33,16 +46,24 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
     };
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [victory, onPlayAgain]);
+  }, [victory, isSolarSupernova, onPlayAgain]);
 
   const kd = stats.deaths > 0 ? (stats.kills / stats.deaths).toFixed(2) : stats.kills.toFixed(2);
 
   return (
     <div id="gameover-modal" className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-xl p-4 sm:p-6 text-slate-200 select-none font-sans">
-      <div className="w-full max-w-lg bg-slate-950/95 border border-slate-800 rounded-2xl shadow-2xl p-6 sm:p-8 flex flex-col items-center gap-5 text-center">
+      <div className={`w-full max-w-lg bg-slate-950/95 rounded-2xl shadow-2xl p-6 sm:p-8 flex flex-col items-center gap-5 text-center ${
+        isSolarSupernova
+          ? 'border-2 border-amber-500/80 shadow-[0_0_50px_rgba(245,158,11,0.4)]'
+          : 'border border-slate-800'
+      }`}>
         {/* Banner */}
         <div className="flex flex-col items-center gap-2">
-          {victory ? (
+          {isSolarSupernova ? (
+            <div className="w-16 h-16 rounded-full bg-amber-500/20 border-2 border-amber-400 flex items-center justify-center text-amber-400 shadow-[0_0_36px_rgba(245,158,11,0.7)] animate-pulse">
+              <Sun className="w-9 h-9 text-amber-400 animate-spin" />
+            </div>
+          ) : victory ? (
             <div className="w-14 h-14 rounded-full bg-cyan-500/15 border border-cyan-400/50 flex items-center justify-center text-cyan-400 shadow-[0_0_24px_rgba(6,182,212,0.3)]">
               <Trophy className="w-7 h-7" />
             </div>
@@ -52,16 +73,32 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
             </div>
           )}
 
-          <span className="text-[10px] font-mono uppercase tracking-widest text-cyan-400 font-bold">
-            MISSION DEBRIEFING
-          </span>
-          <h1 className={`text-4xl font-black uppercase tracking-tight ${victory ? 'text-cyan-400' : 'text-rose-500'}`}>
-            {victory ? 'VICTORY' : 'DEFEAT'}
+          {isSolarSupernova ? (
+            <span className="flex items-center gap-1.5 px-3 py-1 bg-amber-500/20 border border-amber-400/60 rounded-full text-[10px] font-mono uppercase tracking-widest text-amber-300 font-black animate-pulse">
+              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+              SECRET EASTER EGG UNLOCKED // 30-SHOT SOLAR DESTROYER
+            </span>
+          ) : (
+            <span className="text-[10px] font-mono uppercase tracking-widest text-cyan-400 font-bold">
+              MISSION DEBRIEFING
+            </span>
+          )}
+
+          <h1 className={`text-4xl font-black uppercase tracking-tight ${
+            isSolarSupernova
+              ? 'text-transparent bg-clip-text bg-gradient-to-r from-amber-400 via-orange-300 to-yellow-200'
+              : victory
+                ? 'text-cyan-400'
+                : 'text-rose-500'
+          }`}>
+            {isSolarSupernova ? 'SUPERNOVA VICTORY' : victory ? 'VICTORY' : 'DEFEAT'}
           </h1>
           <p className="text-xs text-slate-400 max-w-sm">
-            {victory
-              ? 'Target zone secured. All hostiles eliminated with high combat efficiency.'
-              : 'Hostile forces held the perimeter. Regroup for tactical reassignment.'}
+            {isSolarSupernova
+              ? 'You fired 30 direct rounds into the sun core! The resulting cosmic supernova wiped out all hostile perimeter forces instantly.'
+              : victory
+                ? 'Target zone secured. All hostiles eliminated with high combat efficiency.'
+                : 'Hostile forces held the perimeter. Regroup for tactical reassignment.'}
           </p>
         </div>
 

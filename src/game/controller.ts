@@ -9,6 +9,8 @@ import { DEFAULT_WEAPON_OPTICS, OPTIC_REGISTRY, WEAPON_REGISTRY, WEAPON_VIEWMODE
 import { CollisionSystem } from './collision';
 import { GrenadeManager } from './grenades';
 import { TrainingManager } from './training';
+import { EasterEggManager } from './easter_eggs';
+import { EnvironmentManager } from './environment';
 
 export class FPSController {
   public camera: THREE.PerspectiveCamera;
@@ -18,6 +20,16 @@ export class FPSController {
   public botManager: BotManager | null = null;
   public grenadeManager: GrenadeManager | null = null;
   public trainingManager: TrainingManager | null = null;
+  public easterEggManager: EasterEggManager | null = null;
+  public environmentManager: EnvironmentManager | null = null;
+  public adrenalineTimer: number = 0;
+  public adrenalineMultiplier: number = 1.0;
+
+  public applyAdrenalineBoost(durationSec: number, multiplier: number) {
+    this.adrenalineTimer = durationSec;
+    this.adrenalineMultiplier = multiplier;
+  }
+
   public gameMode: GameMode = 'tdm';
   public playerShadowMesh: THREE.Group | null = null;
   private shadowLocomotionPhase: number = 0;
@@ -487,8 +499,23 @@ export class FPSController {
         this.toggleTacticalType();
       }
 
+      // Interact with nearby Easter Egg Shrine (E Key)
+      if (e.code === 'KeyE') {
+        const nearbyShrine = this.easterEggManager?.getNearbyShrine(this.position);
+        if (nearbyShrine) {
+          nearbyShrine.onTrigger();
+          return;
+        }
+      }
+
       // Laser / Flashlight Toggle (F Key)
       if (e.code === 'KeyF') {
+        // Also check if shrine is right in front
+        const nearbyShrine = this.easterEggManager?.getNearbyShrine(this.position);
+        if (nearbyShrine) {
+          nearbyShrine.onTrigger();
+          return;
+        }
         this.toggleTacticalGear();
       }
 
@@ -1191,6 +1218,17 @@ export class FPSController {
       let hitOccurred = false;
       let finalHitPoint = currentPos.clone().addScaledVector(shootDir, 80);
 
+      // 0. Secret Easter Egg: Check if firing towards the Sun with clear sky
+      if (this.environmentManager?.isPointTowardsSun(shootDir)) {
+        const skyRay = new THREE.Raycaster(currentPos, shootDir, 0.5, 45);
+        const skyHits = skyRay.intersectObjects(this.map.obstacles.map(o => o.mesh), true);
+        if (skyHits.length === 0) {
+          this.easterEggManager?.recordSunShot();
+          hitOccurred = true;
+          finalHitPoint = currentPos.clone().addScaledVector(shootDir, 160);
+        }
+      }
+
       for (let step = 0; step < maxSteps && !hitOccurred; step++) {
         const nextPos = currentPos.clone().addScaledVector(velocity, timeStep);
         velocity.y -= gravity * timeStep;
@@ -1222,6 +1260,23 @@ export class FPSController {
           wallHitPoint = wallHits[0].point;
           if (wallHits[0].face) wallHitNormal = wallHits[0].face.normal;
           hitWallObj = wallHits[0].object;
+        }
+
+        // 1.5 Raycast against Secret Easter Egg Shrines (Minecraft, CoD, Temple Run, Halo)
+        if (this.easterEggManager) {
+          for (const shrine of this.easterEggManager.shrines) {
+            if (!shrine.isTriggered) {
+              const shrineHits = ray.intersectObjects(shrine.mesh.children, true);
+              if (shrineHits.length > 0 && shrineHits[0].distance < closestWallDist) {
+                hitOccurred = true;
+                finalHitPoint = shrineHits[0].point;
+                shrine.onTrigger();
+                this.onHitmarker({ type: 'headshot', timestamp: Date.now() });
+                break;
+              }
+            }
+          }
+          if (hitOccurred) break;
         }
 
         // 2. Raycast against Training Target Dummies & Steel Plates (Priority if in Training)
@@ -1723,6 +1778,12 @@ export class FPSController {
     // Concussion neural suppression slows movement
     if (this.concussedTimer > 0) {
       baseSpeed *= 0.52;
+    }
+
+    // Adrenaline Surge Boost from Easter Egg Relics
+    if (this.adrenalineTimer > 0) {
+      this.adrenalineTimer = Math.max(0, this.adrenalineTimer - dt);
+      baseSpeed *= this.adrenalineMultiplier;
     }
 
     if (this.isDiving) {
