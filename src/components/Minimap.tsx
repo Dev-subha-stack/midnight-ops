@@ -16,7 +16,7 @@ export const Minimap: React.FC<MinimapProps> = ({
   bots,
   uavActive,
   battleRoyaleState,
-  shape = 'circular',
+  shape = 'square',
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const sweepAngleRef = useRef<number>(0);
@@ -33,35 +33,27 @@ export const Minimap: React.FC<MinimapProps> = ({
     const height = canvas.height;
     const cx = width / 2;
     const cy = height / 2;
-    const radarRadius = cx - 8;
+    const radarRadius = cx - 6;
 
-    // Advance sweep angle
-    sweepAngleRef.current = (sweepAngleRef.current + (uavActive ? 0.08 : 0.04)) % (Math.PI * 2);
+    sweepAngleRef.current = (sweepAngleRef.current + (uavActive ? 0.08 : 0.035)) % (Math.PI * 2);
     const sweep = sweepAngleRef.current;
 
-    // Clear canvas
     ctx.clearRect(0, 0, width, height);
 
     ctx.save();
     if (isSquare) {
-      // Modern Warfare / Warzone Square Radar Boundary
-      const pad = 6;
-      const cornerRadius = 10;
+      const pad = 4;
       ctx.beginPath();
-      if (typeof ctx.roundRect === 'function') {
-        ctx.roundRect(pad, pad, width - pad * 2, height - pad * 2, cornerRadius);
-      } else {
-        ctx.rect(pad, pad, width - pad * 2, height - pad * 2);
-      }
-      ctx.fillStyle = 'rgba(8, 12, 18, 0.94)';
+      ctx.rect(pad, pad, width - pad * 2, height - pad * 2);
+      ctx.fillStyle = 'rgba(10, 12, 16, 0.92)';
       ctx.fill();
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = uavActive ? 'rgba(56, 189, 248, 0.95)' : 'rgba(71, 85, 105, 0.85)';
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = uavActive ? 'rgba(163, 230, 53, 0.8)' : 'rgba(255, 255, 255, 0.14)';
       ctx.stroke();
       ctx.clip();
 
-      // Tactical Square Grid lines
-      ctx.strokeStyle = 'rgba(56, 189, 248, 0.12)';
+      // Tactical Grid Lines
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
       ctx.lineWidth = 1;
       const step = (width - pad * 2) / 4;
       for (let i = 1; i < 4; i++) {
@@ -77,16 +69,16 @@ export const Minimap: React.FC<MinimapProps> = ({
         ctx.stroke();
       }
 
-      // Concentric Range Rings inside Square
-      ctx.strokeStyle = 'rgba(51, 65, 85, 0.55)';
-      [0.4, 0.75, 1.0].forEach(r => {
+      // Range Rings
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+      [0.4, 0.75].forEach(r => {
         ctx.beginPath();
         ctx.arc(cx, cy, radarRadius * r, 0, Math.PI * 2);
         ctx.stroke();
       });
 
-      // Axis cross lines
-      ctx.strokeStyle = 'rgba(56, 189, 248, 0.28)';
+      // Center Axis Hairlines
+      ctx.strokeStyle = 'rgba(163, 230, 53, 0.12)';
       ctx.beginPath();
       ctx.moveTo(cx, pad);
       ctx.lineTo(cx, height - pad);
@@ -94,18 +86,16 @@ export const Minimap: React.FC<MinimapProps> = ({
       ctx.lineTo(width - pad, cy);
       ctx.stroke();
     } else {
-      // Classic 360 Radial Circular Radar
       ctx.beginPath();
       ctx.arc(cx, cy, radarRadius, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(10, 15, 22, 0.92)';
+      ctx.fillStyle = 'rgba(10, 12, 16, 0.92)';
       ctx.fill();
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = uavActive ? 'rgba(56, 189, 248, 0.95)' : 'rgba(71, 85, 105, 0.85)';
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = uavActive ? 'rgba(163, 230, 53, 0.85)' : 'rgba(255, 255, 255, 0.16)';
       ctx.stroke();
       ctx.clip();
 
-      // Concentric Range Rings
-      ctx.strokeStyle = 'rgba(51, 65, 85, 0.5)';
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
       ctx.lineWidth = 1;
       [0.35, 0.7, 1.0].forEach(r => {
         ctx.beginPath();
@@ -113,8 +103,7 @@ export const Minimap: React.FC<MinimapProps> = ({
         ctx.stroke();
       });
 
-      // Crosshair Grid lines
-      ctx.strokeStyle = 'rgba(56, 189, 248, 0.2)';
+      ctx.strokeStyle = 'rgba(163, 230, 53, 0.14)';
       ctx.beginPath();
       ctx.moveTo(cx, cy - radarRadius);
       ctx.lineTo(cx, cy + radarRadius);
@@ -123,34 +112,31 @@ export const Minimap: React.FC<MinimapProps> = ({
       ctx.stroke();
     }
 
-    // Rotating Radar Sweep Fan Beam (Call of Duty UAV Sweep)
-    const sweepRadius = isSquare ? radarRadius * 1.35 : radarRadius;
+    // UAV / Radar Sweep Beam
+    const sweepRadius = isSquare ? radarRadius * 1.42 : radarRadius;
     const gradient = ctx.createRadialGradient(cx, cy, 0, cx, cy, sweepRadius);
-    gradient.addColorStop(0, uavActive ? 'rgba(56, 189, 248, 0.35)' : 'rgba(56, 189, 248, 0.16)');
-    gradient.addColorStop(1, 'rgba(56, 189, 248, 0.0)');
+    gradient.addColorStop(0, uavActive ? 'rgba(163, 230, 53, 0.28)' : 'rgba(255, 255, 255, 0.08)');
+    gradient.addColorStop(1, 'rgba(163, 230, 53, 0.0)');
 
     ctx.save();
     ctx.beginPath();
     ctx.moveTo(cx, cy);
-    ctx.arc(cx, cy, sweepRadius, sweep - 0.45, sweep);
+    ctx.arc(cx, cy, sweepRadius, sweep - 0.4, sweep);
     ctx.closePath();
     ctx.fillStyle = gradient;
     ctx.fill();
 
-    // Leading sweep ray line
     ctx.beginPath();
     ctx.moveTo(cx, cy);
     ctx.lineTo(cx + Math.cos(sweep) * sweepRadius, cy + Math.sin(sweep) * sweepRadius);
-    ctx.strokeStyle = uavActive ? 'rgba(56, 189, 248, 0.95)' : 'rgba(56, 189, 248, 0.55)';
-    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = uavActive ? 'rgba(163, 230, 53, 0.9)' : 'rgba(255, 255, 255, 0.22)';
+    ctx.lineWidth = 1.25;
     ctx.stroke();
     ctx.restore();
 
-    // Adaptive scale: 92m range in Battle Royale, 42m in TDM
     const mapRange = battleRoyaleState ? 92 : 42;
     const mapScale = radarRadius / mapRange;
 
-    // Helper to test if point is inside radar bounds
     const isInsideBounds = (bx: number, by: number, padOffset: number = 4) => {
       if (isSquare) {
         return (
@@ -161,12 +147,10 @@ export const Minimap: React.FC<MinimapProps> = ({
       return Math.hypot(bx - cx, by - cy) <= radarRadius - padOffset;
     };
 
-    // Draw Battle Royale Safe Zone Circles & Danger Zone
     if (battleRoyaleState) {
       const cos = Math.cos(playerYaw);
       const sin = Math.sin(playerYaw);
 
-      // Free Fire Red Danger Zone (Airstrike Bombardment)
       if (battleRoyaleState.dangerZone) {
         const dzDx = battleRoyaleState.dangerZone.center.x - playerPos.x;
         const dzDz = battleRoyaleState.dangerZone.center.z - playerPos.z;
@@ -179,16 +163,15 @@ export const Minimap: React.FC<MinimapProps> = ({
         ctx.save();
         ctx.beginPath();
         ctx.arc(dzScreenX, dzScreenY, dzScreenR, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(239, 68, 68, 0.28)';
+        ctx.fillStyle = 'rgba(239, 68, 68, 0.25)';
         ctx.fill();
-        ctx.lineWidth = 1.8;
+        ctx.lineWidth = 1.5;
         ctx.strokeStyle = '#ef4444';
         ctx.setLineDash([4, 3]);
         ctx.stroke();
         ctx.restore();
       }
 
-      // Current Safe Zone (Blue ring)
       const cDx = battleRoyaleState.circleCenter.x - playerPos.x;
       const cDz = battleRoyaleState.circleCenter.z - playerPos.z;
       const cRx = cDx * cos - cDz * sin;
@@ -201,10 +184,9 @@ export const Minimap: React.FC<MinimapProps> = ({
       ctx.beginPath();
       ctx.arc(circleScreenX, circleScreenY, circleScreenR, 0, Math.PI * 2);
       ctx.strokeStyle = battleRoyaleState.isShrinking ? 'rgba(239, 68, 68, 0.95)' : 'rgba(56, 189, 248, 0.88)';
-      ctx.lineWidth = 2.2;
+      ctx.lineWidth = 2;
       ctx.stroke();
 
-      // Next Safe Zone (Dotted white ring)
       const nextDx = battleRoyaleState.nextCircleCenter.x - playerPos.x;
       const nextDz = battleRoyaleState.nextCircleCenter.z - playerPos.z;
       const nextRx = nextDx * cos - nextDz * sin;
@@ -216,12 +198,11 @@ export const Minimap: React.FC<MinimapProps> = ({
       ctx.beginPath();
       ctx.arc(nextX, nextY, nextR, 0, Math.PI * 2);
       ctx.setLineDash([3, 3]);
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
-      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.78)';
+      ctx.lineWidth = 1.25;
       ctx.stroke();
       ctx.restore();
 
-      // POI Town labels when on Bermuda map
       const bermudaPois = [
         { name: 'PEAK', x: 0, z: 0 },
         { name: 'CLOCK', x: -55, z: 28 },
@@ -231,8 +212,8 @@ export const Minimap: React.FC<MinimapProps> = ({
       ];
 
       ctx.save();
-      ctx.font = 'bold 7px sans-serif';
-      ctx.fillStyle = 'rgba(148, 163, 184, 0.75)';
+      ctx.font = '600 7px "JetBrains Mono", monospace';
+      ctx.fillStyle = 'rgba(203, 213, 225, 0.7)';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       bermudaPois.forEach(poi => {
@@ -248,7 +229,6 @@ export const Minimap: React.FC<MinimapProps> = ({
       });
       ctx.restore();
 
-      // Airdrop Crate Blip on Minimap
       if (battleRoyaleState.airdropPosition && !battleRoyaleState.airdropPosition.isLooted) {
         const adDx = battleRoyaleState.airdropPosition.x - playerPos.x;
         const adDz = battleRoyaleState.airdropPosition.z - playerPos.z;
@@ -257,23 +237,20 @@ export const Minimap: React.FC<MinimapProps> = ({
         const adX = cx + adRx * mapScale;
         const adY = cy + adRy * mapScale;
         if (isInsideBounds(adX, adY, 4)) {
-          ctx.fillStyle = '#22c55e';
-          ctx.beginPath();
-          ctx.arc(adX, adY, 4.5, 0, Math.PI * 2);
-          ctx.fill();
+          ctx.fillStyle = '#eab308';
+          ctx.fillRect(adX - 3.5, adY - 3.5, 7, 7);
           ctx.strokeStyle = '#ffffff';
           ctx.lineWidth = 1;
-          ctx.stroke();
+          ctx.strokeRect(adX - 3.5, adY - 3.5, 7, 7);
         }
       }
     }
 
-    // Draw Bot blips: Allies (Cyan) vs Enemies (Red)
+    // Bot blips
     bots.forEach(bot => {
       if (bot.state === 'dead') return;
       const isAlly = bot.team === 'allies';
 
-      // Axis enemies only visible if scanned by radar / firing / direct LoS
       if (!isAlly && !bot.isVisibleToPlayer && !bot.spottedByRadar && !uavActive) {
         return;
       }
@@ -282,7 +259,6 @@ export const Minimap: React.FC<MinimapProps> = ({
       const dz = bot.position.z - playerPos.z;
       const dy = bot.position.y - playerPos.y;
 
-      // Rotate by player yaw so top of radar is player facing direction
       const cos = Math.cos(playerYaw);
       const sin = Math.sin(playerYaw);
       const rx = dx * cos - dz * sin;
@@ -292,56 +268,51 @@ export const Minimap: React.FC<MinimapProps> = ({
       const blipY = cy + ry * mapScale;
 
       if (isInsideBounds(blipX, blipY, 4)) {
-        // Tactical cover / suppression / flanking aura
         if (bot.isSuppressed) {
           ctx.beginPath();
-          ctx.arc(blipX, blipY, 6.5, 0, Math.PI * 2);
-          ctx.strokeStyle = 'rgba(234, 179, 8, 0.9)'; // Yellow suppression halo
-          ctx.lineWidth = 1.2;
+          ctx.arc(blipX, blipY, 6, 0, Math.PI * 2);
+          ctx.strokeStyle = 'rgba(234, 179, 8, 0.85)';
+          ctx.lineWidth = 1;
           ctx.stroke();
         } else if (bot.isFlanking) {
           ctx.beginPath();
-          ctx.arc(blipX, blipY, 6.5, 0, Math.PI * 2);
-          ctx.strokeStyle = 'rgba(244, 63, 94, 0.9)'; // Rose/Purple flanking aura
+          ctx.arc(blipX, blipY, 6, 0, Math.PI * 2);
+          ctx.strokeStyle = 'rgba(239, 68, 68, 0.85)';
           ctx.setLineDash([2, 2]);
-          ctx.lineWidth = 1.2;
+          ctx.lineWidth = 1;
           ctx.stroke();
           ctx.setLineDash([]);
-        } else if (bot.isCrouchedInCover || bot.isPeekingCover) {
-          ctx.strokeStyle = isAlly ? 'rgba(56, 189, 248, 0.7)' : 'rgba(239, 68, 68, 0.7)';
-          ctx.strokeRect(blipX - 5, blipY - 5, 10, 10);
         }
 
         ctx.beginPath();
-        ctx.arc(blipX, blipY, isAlly ? 4.0 : (uavActive ? 4.5 : 3.5), 0, Math.PI * 2);
-        ctx.fillStyle = isAlly ? '#06b6d4' : '#ef4444';
+        ctx.arc(blipX, blipY, isAlly ? 3.5 : uavActive ? 4 : 3.5, 0, Math.PI * 2);
+        ctx.fillStyle = isAlly ? '#38bdf8' : '#ef4444';
         ctx.fill();
-        ctx.strokeStyle = '#ffffff';
+        ctx.strokeStyle = '#090b0e';
         ctx.lineWidth = 1;
         ctx.stroke();
 
-        // Elevation indicator chevrons (COD style above/below indicators)
         if (dy > 1.8) {
           ctx.beginPath();
-          ctx.moveTo(blipX - 3, blipY - 5);
-          ctx.lineTo(blipX, blipY - 8);
-          ctx.lineTo(blipX + 3, blipY - 5);
-          ctx.strokeStyle = isAlly ? '#67e8f9' : '#fca5a5';
+          ctx.moveTo(blipX - 2.5, blipY - 5);
+          ctx.lineTo(blipX, blipY - 7.5);
+          ctx.lineTo(blipX + 2.5, blipY - 5);
+          ctx.strokeStyle = isAlly ? '#7dd3fc' : '#fca5a5';
           ctx.lineWidth = 1.2;
           ctx.stroke();
         } else if (dy < -1.8) {
           ctx.beginPath();
-          ctx.moveTo(blipX - 3, blipY + 5);
-          ctx.lineTo(blipX, blipY + 8);
-          ctx.lineTo(blipX + 3, blipY + 5);
-          ctx.strokeStyle = isAlly ? '#67e8f9' : '#fca5a5';
+          ctx.moveTo(blipX - 2.5, blipY + 5);
+          ctx.lineTo(blipX, blipY + 7.5);
+          ctx.lineTo(blipX + 2.5, blipY + 5);
+          ctx.strokeStyle = isAlly ? '#7dd3fc' : '#fca5a5';
           ctx.lineWidth = 1.2;
           ctx.stroke();
         }
       }
     });
 
-    // Draw Player Chevron (Center pointing Up in Cyan / Blue)
+    // Player Chevron (MW3 White / Lime Arrow)
     ctx.save();
     ctx.translate(cx, cy);
     ctx.beginPath();
@@ -350,20 +321,20 @@ export const Minimap: React.FC<MinimapProps> = ({
     ctx.lineTo(0, 2.5);
     ctx.lineTo(-4.5, 5);
     ctx.closePath();
-    ctx.fillStyle = '#38bdf8';
+    ctx.fillStyle = '#a3e635';
     ctx.fill();
-    ctx.strokeStyle = '#ffffff';
+    ctx.strokeStyle = '#090b0e';
     ctx.lineWidth = 1.2;
     ctx.stroke();
     ctx.restore();
 
-    // Draw North (N) Pointer along radar perimeter
+    // North Indicator
     const northAngle = -playerYaw - Math.PI / 2;
-    const nx = cx + Math.cos(northAngle) * (radarRadius - 7);
-    const ny = cy + Math.sin(northAngle) * (radarRadius - 7);
+    const nx = cx + Math.cos(northAngle) * (radarRadius - 8);
+    const ny = cy + Math.sin(northAngle) * (radarRadius - 8);
 
-    ctx.fillStyle = '#f59e0b';
-    ctx.font = 'bold 9px monospace';
+    ctx.fillStyle = '#eab308';
+    ctx.font = 'bold 9px "JetBrains Mono", monospace';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText('N', nx, ny);
@@ -373,8 +344,8 @@ export const Minimap: React.FC<MinimapProps> = ({
 
   return (
     <div
-      className={`relative overflow-hidden shadow-2xl border-2 border-slate-700/90 bg-black/90 backdrop-blur-xl transition-all duration-300 ${
-        isSquare ? 'w-40 h-40 rounded-xl' : 'w-36 h-36 rounded-full'
+      className={`relative overflow-hidden bg-[#0A0C10]/90 border border-white/15 backdrop-blur-md transition-all ${
+        isSquare ? 'w-40 h-40 rounded-sm' : 'w-36 h-36 rounded-full'
       }`}
     >
       <canvas
@@ -384,22 +355,21 @@ export const Minimap: React.FC<MinimapProps> = ({
         className="w-full h-full block"
       />
 
-      {/* Tactical Corner Brackets for Square Style */}
       {isSquare && (
         <>
-          <div className="absolute top-1 left-1 w-2.5 h-2.5 border-t-2 border-l-2 border-cyan-400/80 pointer-events-none" />
-          <div className="absolute top-1 right-1 w-2.5 h-2.5 border-t-2 border-r-2 border-cyan-400/80 pointer-events-none" />
-          <div className="absolute bottom-1 left-1 w-2.5 h-2.5 border-b-2 border-l-2 border-cyan-400/80 pointer-events-none" />
-          <div className="absolute bottom-1 right-1 w-2.5 h-2.5 border-b-2 border-r-2 border-cyan-400/80 pointer-events-none" />
-          <div className="absolute bottom-1 right-2 text-[8px] font-mono text-slate-500 pointer-events-none font-bold">
-            GRID // 04
+          <div className="absolute top-0 left-0 w-2 h-2 border-t border-l border-[#A3E635] pointer-events-none" />
+          <div className="absolute top-0 right-0 w-2 h-2 border-t border-r border-[#A3E635] pointer-events-none" />
+          <div className="absolute bottom-0 left-0 w-2 h-2 border-b border-l border-[#A3E635] pointer-events-none" />
+          <div className="absolute bottom-0 right-0 w-2 h-2 border-b border-r border-[#A3E635] pointer-events-none" />
+          <div className="absolute bottom-1 left-1.5 text-[8px] font-mono text-zinc-400 tracking-wider pointer-events-none uppercase tabular-nums">
+            SEC-B4
           </div>
         </>
       )}
 
       {uavActive && (
-        <div className="absolute top-2 left-1/2 -translate-x-1/2 bg-sky-500 text-slate-950 text-[9px] font-black px-2 py-0.5 rounded tracking-widest uppercase animate-pulse shadow-md font-mono">
-          UAV ACTIVE
+        <div className="absolute top-1.5 left-1/2 -translate-x-1/2 bg-[#A3E635] text-[#090B0E] text-[9px] font-mono font-bold px-1.5 py-0.5 tracking-widest uppercase">
+          UAV ONLINE
         </div>
       )}
     </div>

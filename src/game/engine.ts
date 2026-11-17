@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { BattleRoyaleState, EliminationAccolade, EnvironmentState, FloatingDamageNumberItem, GameMode, GameSettings, HitmarkerEvent, KillFeedItem, LeanDirection, MapType, PlayerEliminatedInfo, PlayerStats, TacticalType, TrainingTelemetryData, WeaponCamo, WeaponType, WeatherType } from '../types';
+import { BattleRoyaleState, EliminationAccolade, EnvironmentState, FloatingDamageNumberItem, GameMode, GameSettings, HitmarkerEvent, KillFeedItem, LeanDirection, MapType, OperatorCamo, PlayerEliminatedInfo, PlayerStats, TacticalType, TrainingTelemetryData, WeaponCamo, WeaponType, WeatherType } from '../types';
 import { TacticalMap } from './map';
 import { ParticleSystem } from './particles';
 import { BotManager } from './ai';
@@ -11,6 +11,7 @@ import { EnvironmentManager } from './environment';
 import { TrainingManager } from './training';
 import { EasterEggManager } from './easter_eggs';
 import { soundManager } from './audio';
+import { CharacterModelLoader } from './character_loader';
 import { WEAPON_REGISTRY } from './weapons';
 
 export class GameEngine {
@@ -298,6 +299,10 @@ export class GameEngine {
   }
 
   private setupEvents() {
+    CharacterModelLoader.onModelChange = () => {
+      this.botManager.rebuildAllBotMeshes();
+    };
+
     this.environment.onEnvironmentChange = (envState) => {
       this.onEnvironmentUpdate(envState);
     };
@@ -563,6 +568,7 @@ export class GameEngine {
     }
 
     this.stats.health = Math.max(0, this.stats.health - damage);
+    this.controller.health = this.stats.health;
 
     // Procedural blood spatter and armor debris impact on player
     const hitDir = botPos
@@ -836,7 +842,6 @@ export class GameEngine {
     // Sync Tactical Mobility & Scope Telemetry to React UI State
     this.stats.tacSprintStamina = this.controller.tacSprintStamina;
     this.stats.isTacSprinting = this.controller.isTacSprinting;
-    this.stats.isTacStance = this.controller.isTacStance;
     this.stats.isMantling = this.controller.isMantling;
     this.stats.breathStamina = this.controller.breathStamina;
     this.stats.isHoldingBreath = this.controller.isHoldingBreath;
@@ -1121,6 +1126,12 @@ export class GameEngine {
     this.environment.setWeather(preset);
   }
 
+  public setOperatorCamo(camo: OperatorCamo) {
+    if (this.controller) {
+      this.controller.setOperatorCamo(camo);
+    }
+  }
+
   public updateSettings(newSettings: Partial<GameSettings>) {
     this.settings = { ...this.settings, ...newSettings };
     if (this.controller) {
@@ -1265,6 +1276,7 @@ export class GameEngine {
     this.environment.destroy();
     this.particles.destroy();
     this.easterEggs.destroy();
+    CharacterModelLoader.onModelChange = undefined;
     soundManager.stopHeartbeat();
     window.removeEventListener('resize', this.onResize);
     if (this.renderer.domElement.parentElement) {

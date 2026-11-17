@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { GameMode, GameSettings, HitmarkerEvent, LeanDirection, OpticType, ReticleColor, ReticleStyle, TacticalType, WeaponCamo, WeaponType } from '../types';
+import { GameMode, GameSettings, HitmarkerEvent, LeanDirection, OperatorCamo, OpticType, ReticleColor, ReticleStyle, TacticalType, WeaponCamo, WeaponType } from '../types';
 import { soundManager } from './audio';
 import { ModelFactory } from './models';
 import { ParticleSystem } from './particles';
@@ -50,7 +50,6 @@ export class FPSController {
   public isDiving: boolean = false;
   public isMantling: boolean = false;
   public isMounted: boolean = false;
-  public isTacStance: boolean = false;
   // Leaning Feature (PUBG / BGMI style: Peek Left [<] & Peek Right [>])
   public leanState: LeanDirection = 'none';
   public currentLeanFactor: number = 0; // -1 (full left) to +1 (full right)
@@ -156,6 +155,18 @@ export class FPSController {
   public viewmodelRig: THREE.Group = new THREE.Group();
   public weaponMesh: THREE.Group | null = null;
   public armsMesh: THREE.Group | null = null;
+  public operatorCamo: OperatorCamo = 'allies_multicam';
+  private watchCanvas: HTMLCanvasElement | null = null;
+  private watchCtx: CanvasRenderingContext2D | null = null;
+  private watchTexture: THREE.CanvasTexture | null = null;
+  private watchUpdateTimer: number = 0;
+  private readonly _vmTargetLeftPos = new THREE.Vector3();
+  private readonly _vmTargetLeftRot = new THREE.Vector3();
+  private readonly _vmTargetRightPos = new THREE.Vector3();
+  private readonly _vmTargetRightRot = new THREE.Vector3();
+  private readonly _shadowFwd = new THREE.Vector3();
+  private readonly _shadowRight = new THREE.Vector3();
+  private readonly _shadowUpAxis = new THREE.Vector3(0, 1, 0);
 
   // Tactical Laser & Flashlight
   public laserActive: boolean = true;
@@ -214,6 +225,7 @@ export class FPSController {
   private keys: Record<string, boolean> = {};
   public isLocked: boolean = false;
   public isDead: boolean = false;
+  public health: number = 100;
 
   public setDeadState(dead: boolean) {
     this.isDead = dead;
@@ -306,10 +318,135 @@ export class FPSController {
     this.camera.add(this.viewmodelRig);
     this.viewmodelRig.position.set(0, 0, 0);
 
-    this.armsMesh = ModelFactory.createViewmodelArms();
+    this.armsMesh = ModelFactory.createViewmodelArms(this.operatorCamo);
     this.viewmodelRig.add(this.armsMesh);
+    this.initWatchDisplay();
 
     this.equipWeapon(this.currentWeapon, this.currentCamo);
+  }
+
+  public setOperatorCamo(camo: OperatorCamo) {
+    this.operatorCamo = camo;
+    if (this.armsMesh) {
+      this.viewmodelRig.remove(this.armsMesh);
+    }
+    this.armsMesh = ModelFactory.createViewmodelArms(this.operatorCamo);
+    this.viewmodelRig.add(this.armsMesh);
+    this.initWatchDisplay();
+
+    // Synchronize Real-time 3D Player & Gun Shadow Operator Proxy in map scene
+    if (this.playerShadowMesh) {
+      this.map.scene.remove(this.playerShadowMesh);
+      const currentOptic = this.equippedOptics[this.currentWeapon] || 'holo_553';
+      this.playerShadowMesh = ModelFactory.createPlayerShadowMesh(this.currentWeapon, this.currentCamo, currentOptic);
+      this.map.scene.add(this.playerShadowMesh);
+    }
+  }
+
+  private initWatchDisplay() {
+    if (!this.armsMesh) return;
+    const screenMesh = this.armsMesh.getObjectByName('smartwatch_screen_mesh') as THREE.Mesh;
+    if (screenMesh) {
+      if (!this.watchCanvas) {
+        this.watchCanvas = document.createElement('canvas');
+        this.watchCanvas.width = 256;
+        this.watchCanvas.height = 256;
+        this.watchCtx = this.watchCanvas.getContext('2d');
+        this.watchTexture = new THREE.CanvasTexture(this.watchCanvas);
+      }
+      const mat = screenMesh.material as THREE.MeshStandardMaterial;
+      if (mat && this.watchTexture) {
+        mat.map = this.watchTexture;
+        mat.emissiveMap = this.watchTexture;
+        mat.emissive = new THREE.Color(0x06b6d4);
+        mat.emissiveIntensity = 0.65;
+        mat.needsUpdate = true;
+      }
+      this.updateWatchTelemetry(0, true);
+    }
+  }
+
+  private updateWatchTelemetry(dt: number, force: boolean = false) {
+    this.watchUpdateTimer += dt;
+    if (!force && this.watchUpdateTimer < 0.2) return;
+    this.watchUpdateTimer = 0;
+
+    if (!this.watchCtx || !this.watchCanvas || !this.watchTexture) return;
+    const ctx = this.watchCtx;
+
+    // Heading calculation: degrees 0..359
+    const deg = Math.round(((this.yaw % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2)) * 180 / Math.PI);
+    const cardinals = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+    const cardIdx = Math.round(deg / 45) % 8;
+    const cardStr = cardinals[cardIdx];
+
+    // Heart rate calculation based on activity
+    const horizSpeed = Math.hypot(this.velocity.x, this.velocity.z);
+    let targetBpm = 72;
+    if (this.isSprinting) targetBpm += 65;
+    else if (horizSpeed > 1.0) targetBpm += 28;
+    if (this.isShooting) targetBpm += 30;
+    if (this.health < 40) targetBpm += 45;
+    const bpm = Math.min(195, Math.max(68, Math.round(targetBpm + Math.sin(Date.now() * 0.005) * 4)));
+
+    // Time string
+    const now = new Date();
+    const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+
+    // GPS Coords
+    const gridX = (this.position.x * 2.5).toFixed(1);
+    const gridZ = (this.position.z * 2.5).toFixed(1);
+
+    // OLED Dark Screen Background
+    ctx.fillStyle = '#050b14';
+    ctx.fillRect(0, 0, 256, 256);
+
+    // Cyan Outer Bezel Ring
+    ctx.strokeStyle = '#0284c7';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(128, 128, 118, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Subtle scanline
+    ctx.fillStyle = 'rgba(6, 182, 212, 0.08)';
+    for (let y = 0; y < 256; y += 4) {
+      ctx.fillRect(0, y, 256, 2);
+    }
+
+    // Compass Direction Top & Heading Degrees
+    ctx.fillStyle = '#38bdf8';
+    ctx.font = 'bold 18px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(`${deg.toString().padStart(3, '0')}° ${cardStr}`, 128, 42);
+
+    // Heartbeat Pulse Rate with glowing icon
+    ctx.fillStyle = bpm > 140 ? '#ef4444' : '#10b981';
+    ctx.font = 'bold 20px monospace';
+    ctx.fillText(`♥ ${bpm} BPM`, 128, 80);
+
+    // Digital Tactical Clock (center focal point)
+    ctx.fillStyle = '#22d3ee';
+    ctx.font = 'bold 36px monospace';
+    ctx.fillText(timeStr, 128, 130);
+
+    // Taskforce status
+    ctx.fillStyle = '#10b981';
+    ctx.font = 'bold 13px monospace';
+    ctx.fillText('TF-141 // ACTIVE', 128, 168);
+
+    // GPS Grid Position
+    ctx.fillStyle = '#94a3b8';
+    ctx.font = '12px monospace';
+    ctx.fillText(`GRID: ${gridX}E, ${gridZ}N`, 128, 192);
+
+    // Operator Camo Tag
+    ctx.fillStyle = '#38bdf8';
+    ctx.font = 'bold 11px monospace';
+    const camoLabel = this.operatorCamo.replace('_', ' ').toUpperCase();
+    ctx.fillText(`CAMO: ${camoLabel}`, 128, 218);
+
+    this.watchTexture.needsUpdate = true;
   }
 
   private initTacticalGear() {
@@ -390,12 +527,6 @@ export class FPSController {
 
       // Prevent repetitive trigger spam from holding keys (fixes continuous sound / sprint bug)
       if (e.repeat) return;
-
-      // Tactical Stance Toggle (Z or B Key)
-      if (e.code === 'KeyZ' || e.code === 'KeyB') {
-        this.isTacStance = !this.isTacStance;
-        soundManager.playTacStanceToggle();
-      }
 
       // BGMI / PUBG Leaning Feature: '<' (Comma) leans Left, '>' (Period) leans Right
       const isLeftLean = e.code === 'Comma' || e.key === '<' || e.key === ',';
@@ -653,8 +784,23 @@ export class FPSController {
         this.performMelee();
       } else if (e.button === 2) {
         this.isAiming = true;
+        this.isInspecting = false;
+        this.isMeleeing = false;
+        this.isSprinting = false;
+        this.isTacSprinting = false;
         soundManager.playScopeRaise();
       }
+    });
+
+    this.domElement.addEventListener('contextmenu', e => {
+      e.preventDefault();
+    });
+
+    window.addEventListener('blur', () => {
+      this.isAiming = false;
+      this.isShooting = false;
+      this.isHoldingBreath = false;
+      this.keys = {};
     });
 
     window.addEventListener('mouseup', e => {
@@ -1396,6 +1542,9 @@ export class FPSController {
 
     this.fireTimer = Math.max(0, this.fireTimer - dt);
 
+    // Live Combat Smartwatch Telemetry Update
+    this.updateWatchTelemetry(dt);
+
     // Melee Timer
     if (this.isMeleeing) {
       this.meleeTimer -= dt;
@@ -1455,12 +1604,10 @@ export class FPSController {
     const opticCfg = OPTIC_REGISTRY[currentOptic];
     let targetFov = this.settings.fieldOfView || 85;
 
-    const isFullScope = this.isAiming && !this.isTacStance && Boolean(opticCfg?.hasFullScopeOverlay || (opticCfg?.magnification && opticCfg.magnification >= 3.0));
+    const isFullScope = this.isAiming && Boolean(opticCfg?.hasFullScopeOverlay || (opticCfg?.magnification && opticCfg.magnification >= 3.0));
 
     if (this.isAiming) {
-      if (this.isTacStance) {
-        targetFov = targetFov - 10;
-      } else if (opticCfg?.variableZoomSteps && opticCfg.variableZoomSteps.length > 0) {
+      if (opticCfg?.variableZoomSteps && opticCfg.variableZoomSteps.length > 0) {
         const mag = opticCfg.variableZoomSteps[this.opticZoomStepIndex % opticCfg.variableZoomSteps.length];
         if (mag >= 10) {
           targetFov = 11; // 12X Extreme Sniper Zoom
@@ -1678,7 +1825,7 @@ export class FPSController {
 
   private updateLaserSight() {
     if (!this.laserDot || !this.laserBeam) return;
-    const shouldBeActive = this.laserActive || this.isTacStance;
+    const shouldBeActive = this.laserActive;
 
     if (!shouldBeActive) {
       this.laserDot.visible = false;
@@ -1769,7 +1916,7 @@ export class FPSController {
     this.currentEyeHeight = THREE.MathUtils.lerp(this.currentEyeHeight, this.targetEyeHeight, dt * 16);
 
     let baseSpeed = 6.0;
-    if (this.isAiming) baseSpeed = this.isTacStance ? 4.2 : 3.0;
+    if (this.isAiming) baseSpeed = 3.0;
     else if (Math.abs(this.currentLeanFactor) > 0.15) baseSpeed = 3.6; // Tactical controlled peek stride
     else if (this.isCrouching) baseSpeed = 3.2;
     else if (this.isTacSprinting) baseSpeed = 13.0; // COD super sprint velocity
@@ -1961,101 +2108,89 @@ export class FPSController {
     // Choose base target offset based on active stance
     let targetOffset = { ...offsetCfg.hip };
     if (this.isMounted) {
-      // Stabilized Weapon Mount against cover
+      // Stabilized Weapon Mount against cover (level upright sight alignment)
       if (this.mountType === 'top') {
         targetOffset = {
           x: 0,
-          y: -0.06,
-          z: -0.22,
-          rx: 0.02,
+          y: -0.11,
+          z: -0.26,
+          rx: 0,
           ry: 0,
           rz: 0,
         };
       } else if (this.mountType === 'left') {
         targetOffset = {
-          x: -0.12,
+          x: -0.04,
           y: -0.12,
-          z: -0.24,
-          rx: 0.02,
-          ry: 0.15,
-          rz: 0.22, // Canted side-mount
+          z: -0.26,
+          rx: 0,
+          ry: 0,
+          rz: 0,
         };
       } else {
         targetOffset = {
-          x: 0.12,
+          x: 0.04,
           y: -0.12,
-          z: -0.24,
-          rx: 0.02,
-          ry: -0.15,
-          rz: -0.22,
+          z: -0.26,
+          rx: 0,
+          ry: 0,
+          rz: 0,
         };
       }
     } else if (this.isAiming) {
-      if (this.isTacStance) {
-        // Tactical Stance (Canted Weapon ADS)
-        targetOffset = {
-          x: 0.06,
-          y: -0.16,
-          z: -0.32,
-          rx: 0.05,
-          ry: 0.22,
-          rz: -0.68, // Canted ~39 degrees
-        };
-      } else {
-        targetOffset = { ...offsetCfg.ads };
-        // Optic elevation and depth alignment: aligns 3D reticle / front post directly with camera optical axis
-        if (currentOptic === 'reflex_dot' || currentOptic === 'red_dot_micro') {
-          if (this.currentWeapon === 'm4') { targetOffset.y = -0.143; targetOffset.z = -0.32; }
-          else if (this.currentWeapon === 'mp5') { targetOffset.y = -0.123; targetOffset.z = -0.30; }
-          else if (this.currentWeapon === 'shotgun') { targetOffset.y = -0.123; targetOffset.z = -0.31; }
-          else if (this.currentWeapon === 'deagle') { targetOffset.y = -0.136; targetOffset.z = -0.28; }
-          else if (this.currentWeapon === 'sniper') { targetOffset.y = -0.143; targetOffset.z = -0.34; }
-          else if (this.currentWeapon === 'ak47') { targetOffset.y = -0.148; targetOffset.z = -0.33; }
-          else if (this.currentWeapon === 'scar') { targetOffset.y = -0.144; targetOffset.z = -0.32; }
-          else if (this.currentWeapon === 'vector') { targetOffset.y = -0.138; targetOffset.z = -0.31; }
-        } else if (currentOptic === 'holo_553') {
-          if (this.currentWeapon === 'm4') { targetOffset.y = -0.147; targetOffset.z = -0.32; }
-          else if (this.currentWeapon === 'mp5') { targetOffset.y = -0.127; targetOffset.z = -0.30; }
-          else if (this.currentWeapon === 'shotgun') { targetOffset.y = -0.127; targetOffset.z = -0.31; }
-          else if (this.currentWeapon === 'deagle') { targetOffset.y = -0.140; targetOffset.z = -0.28; }
-          else if (this.currentWeapon === 'sniper') { targetOffset.y = -0.147; targetOffset.z = -0.34; }
-          else if (this.currentWeapon === 'ak47') { targetOffset.y = -0.152; targetOffset.z = -0.33; }
-          else if (this.currentWeapon === 'scar') { targetOffset.y = -0.148; targetOffset.z = -0.32; }
-          else if (this.currentWeapon === 'vector') { targetOffset.y = -0.142; targetOffset.z = -0.31; }
-        } else if (currentOptic === 'iron_sight') {
-          if (this.currentWeapon === 'm4') { targetOffset.y = -0.121; targetOffset.z = -0.32; }
-          else if (this.currentWeapon === 'mp5') { targetOffset.y = -0.056; targetOffset.z = -0.30; }
-          else if (this.currentWeapon === 'shotgun') { targetOffset.y = -0.054; targetOffset.z = -0.32; }
-          else if (this.currentWeapon === 'deagle') { targetOffset.y = -0.094; targetOffset.z = -0.28; }
-          else if (this.currentWeapon === 'sniper') { targetOffset.y = -0.121; targetOffset.z = -0.34; }
-          else if (this.currentWeapon === 'ak47') { targetOffset.y = -0.124; targetOffset.z = -0.33; }
-          else if (this.currentWeapon === 'scar') { targetOffset.y = -0.122; targetOffset.z = -0.32; }
-          else if (this.currentWeapon === 'vector') { targetOffset.y = -0.116; targetOffset.z = -0.31; }
-        } else if (currentOptic === 'acog_4x') {
-          if (this.currentWeapon === 'm4') { targetOffset.y = -0.140; targetOffset.z = -0.33; }
-          else if (this.currentWeapon === 'mp5') { targetOffset.y = -0.120; targetOffset.z = -0.31; }
-          else if (this.currentWeapon === 'deagle') { targetOffset.y = -0.133; targetOffset.z = -0.29; }
-          else if (this.currentWeapon === 'sniper') { targetOffset.y = -0.140; targetOffset.z = -0.35; }
-          else if (this.currentWeapon === 'ak47') { targetOffset.y = -0.145; targetOffset.z = -0.34; }
-          else if (this.currentWeapon === 'scar') { targetOffset.y = -0.142; targetOffset.z = -0.33; }
-          else if (this.currentWeapon === 'vector') { targetOffset.y = -0.136; targetOffset.z = -0.32; }
-        } else if (currentOptic === 'thermal_flir' || currentOptic === 'thermal_ir') {
-          if (this.currentWeapon === 'm4') { targetOffset.y = -0.143; targetOffset.z = -0.34; }
-          else if (this.currentWeapon === 'mp5') { targetOffset.y = -0.123; targetOffset.z = -0.32; }
-          else if (this.currentWeapon === 'deagle') { targetOffset.y = -0.136; targetOffset.z = -0.30; }
-          else if (this.currentWeapon === 'sniper') { targetOffset.y = -0.143; targetOffset.z = -0.36; }
-          else if (this.currentWeapon === 'ak47') { targetOffset.y = -0.148; targetOffset.z = -0.35; }
-          else if (this.currentWeapon === 'scar') { targetOffset.y = -0.145; targetOffset.z = -0.34; }
-          else if (this.currentWeapon === 'vector') { targetOffset.y = -0.140; targetOffset.z = -0.33; }
-        } else if (currentOptic === 'sniper_variable') {
-          targetOffset.y = -0.175;
-          targetOffset.z = -0.36;
-        }
-        targetOffset.x = 0.0;
-        targetOffset.rx = 0.0;
-        targetOffset.ry = 0.0;
-        targetOffset.rz = 0.0;
+      targetOffset = { ...offsetCfg.ads };
+      // Optic elevation and depth alignment: aligns 3D reticle / front post directly with camera optical axis
+      if (currentOptic === 'reflex_dot' || currentOptic === 'red_dot_micro') {
+        if (this.currentWeapon === 'm4') { targetOffset.y = -0.143; targetOffset.z = -0.32; }
+        else if (this.currentWeapon === 'mp5') { targetOffset.y = -0.123; targetOffset.z = -0.30; }
+        else if (this.currentWeapon === 'shotgun') { targetOffset.y = -0.123; targetOffset.z = -0.31; }
+        else if (this.currentWeapon === 'deagle') { targetOffset.y = -0.136; targetOffset.z = -0.28; }
+        else if (this.currentWeapon === 'sniper') { targetOffset.y = -0.143; targetOffset.z = -0.34; }
+        else if (this.currentWeapon === 'ak47') { targetOffset.y = -0.148; targetOffset.z = -0.33; }
+        else if (this.currentWeapon === 'scar') { targetOffset.y = -0.144; targetOffset.z = -0.32; }
+        else if (this.currentWeapon === 'vector') { targetOffset.y = -0.138; targetOffset.z = -0.31; }
+      } else if (currentOptic === 'holo_553') {
+        if (this.currentWeapon === 'm4') { targetOffset.y = -0.147; targetOffset.z = -0.32; }
+        else if (this.currentWeapon === 'mp5') { targetOffset.y = -0.127; targetOffset.z = -0.30; }
+        else if (this.currentWeapon === 'shotgun') { targetOffset.y = -0.127; targetOffset.z = -0.31; }
+        else if (this.currentWeapon === 'deagle') { targetOffset.y = -0.140; targetOffset.z = -0.28; }
+        else if (this.currentWeapon === 'sniper') { targetOffset.y = -0.147; targetOffset.z = -0.34; }
+        else if (this.currentWeapon === 'ak47') { targetOffset.y = -0.152; targetOffset.z = -0.33; }
+        else if (this.currentWeapon === 'scar') { targetOffset.y = -0.148; targetOffset.z = -0.32; }
+        else if (this.currentWeapon === 'vector') { targetOffset.y = -0.142; targetOffset.z = -0.31; }
+      } else if (currentOptic === 'iron_sight') {
+        if (this.currentWeapon === 'm4') { targetOffset.y = -0.121; targetOffset.z = -0.32; }
+        else if (this.currentWeapon === 'mp5') { targetOffset.y = -0.056; targetOffset.z = -0.30; }
+        else if (this.currentWeapon === 'shotgun') { targetOffset.y = -0.054; targetOffset.z = -0.32; }
+        else if (this.currentWeapon === 'deagle') { targetOffset.y = -0.094; targetOffset.z = -0.28; }
+        else if (this.currentWeapon === 'sniper') { targetOffset.y = -0.121; targetOffset.z = -0.34; }
+        else if (this.currentWeapon === 'ak47') { targetOffset.y = -0.124; targetOffset.z = -0.33; }
+        else if (this.currentWeapon === 'scar') { targetOffset.y = -0.122; targetOffset.z = -0.32; }
+        else if (this.currentWeapon === 'vector') { targetOffset.y = -0.116; targetOffset.z = -0.31; }
+      } else if (currentOptic === 'acog_4x') {
+        if (this.currentWeapon === 'm4') { targetOffset.y = -0.140; targetOffset.z = -0.33; }
+        else if (this.currentWeapon === 'mp5') { targetOffset.y = -0.120; targetOffset.z = -0.31; }
+        else if (this.currentWeapon === 'deagle') { targetOffset.y = -0.133; targetOffset.z = -0.29; }
+        else if (this.currentWeapon === 'sniper') { targetOffset.y = -0.140; targetOffset.z = -0.35; }
+        else if (this.currentWeapon === 'ak47') { targetOffset.y = -0.145; targetOffset.z = -0.34; }
+        else if (this.currentWeapon === 'scar') { targetOffset.y = -0.142; targetOffset.z = -0.33; }
+        else if (this.currentWeapon === 'vector') { targetOffset.y = -0.136; targetOffset.z = -0.32; }
+      } else if (currentOptic === 'thermal_flir' || currentOptic === 'thermal_ir') {
+        if (this.currentWeapon === 'm4') { targetOffset.y = -0.143; targetOffset.z = -0.34; }
+        else if (this.currentWeapon === 'mp5') { targetOffset.y = -0.123; targetOffset.z = -0.32; }
+        else if (this.currentWeapon === 'deagle') { targetOffset.y = -0.136; targetOffset.z = -0.30; }
+        else if (this.currentWeapon === 'sniper') { targetOffset.y = -0.143; targetOffset.z = -0.36; }
+        else if (this.currentWeapon === 'ak47') { targetOffset.y = -0.148; targetOffset.z = -0.35; }
+        else if (this.currentWeapon === 'scar') { targetOffset.y = -0.145; targetOffset.z = -0.34; }
+        else if (this.currentWeapon === 'vector') { targetOffset.y = -0.140; targetOffset.z = -0.33; }
+      } else if (currentOptic === 'sniper_variable') {
+        targetOffset.y = -0.175;
+        targetOffset.z = -0.36;
       }
+      targetOffset.x = 0.0;
+      targetOffset.rx = 0.0;
+      targetOffset.ry = 0.0;
+      targetOffset.rz = 0.0;
     } else if (this.isDiving) {
       // Dolphin Dive Weapon Position: pushed forward horizontally flat against chest
       targetOffset = {
@@ -2086,7 +2221,7 @@ export class FPSController {
     const steadyAimMult = this.isHoldingBreath ? 0.05 : (this.isHyperventilating ? 2.2 : 1.0);
 
     this.swayTime += dt * (this.isMounted ? wpnCfg.swaySpeed * 0.3 : (this.isHoldingBreath ? wpnCfg.swaySpeed * 0.15 : wpnCfg.swaySpeed));
-    const baseSwayAmp = this.isMounted ? wpnCfg.swayAmplitude * 0.08 : this.isAiming ? (this.isTacStance ? wpnCfg.swayAmplitude * 0.35 : wpnCfg.swayAmplitude * 0.15) : wpnCfg.swayAmplitude;
+    const baseSwayAmp = this.isMounted ? wpnCfg.swayAmplitude * 0.08 : this.isAiming ? wpnCfg.swayAmplitude * 0.15 : wpnCfg.swayAmplitude;
     const swayAmp = baseSwayAmp * opticSwayMult * steadyAimMult;
     const swayX = Math.cos(this.swayTime * 0.8) * swayAmp;
     const swayY = Math.sin(this.swayTime * 1.6) * swayAmp;
@@ -2492,11 +2627,12 @@ export class FPSController {
     this.weaponMesh.position.y = THREE.MathUtils.lerp(this.weaponMesh.position.y, finalY, dt * 20);
     this.weaponMesh.position.z = THREE.MathUtils.lerp(this.weaponMesh.position.z, finalZ, dt * 25);
 
-    const finalRotX = targetOffset.rx + runRotX + this.weaponKickRotX - this.swayInertiaY * 1.5 + reloadRotX + meleeRotX + inspectRotX + mantleRotX + drawRotX;
-    const finalRotY = targetOffset.ry + runRotY + this.swayInertiaX * 1.5 + reloadRotY + meleeRotY + inspectRotY;
-    // Natural weapon lean reaction when hipfiring; in ADS keep optical reticle dead-centered
+    const motionDamp = this.isAiming ? 0 : 1;
+    const finalRotX = targetOffset.rx + runRotX * motionDamp + this.weaponKickRotX - (this.isAiming ? this.swayInertiaY * 0.15 : this.swayInertiaY * 1.5) + reloadRotX + (meleeRotX + inspectRotX) * motionDamp + mantleRotX + drawRotX;
+    const finalRotY = targetOffset.ry + runRotY * motionDamp + (this.isAiming ? this.swayInertiaX * 0.15 : this.swayInertiaX * 1.5) + reloadRotY + (meleeRotY + inspectRotY) * motionDamp;
+    // Natural weapon lean reaction when hipfiring; in ADS keep optical reticle dead-centered and upright
     const weaponLeanRoll = !this.isAiming ? (-this.currentLeanFactor * 0.07) : 0;
-    const finalRotZ = targetOffset.rz + runRotZ + strafeRoll + reloadRotZ + meleeRotZ + inspectRotZ + weaponLeanRoll;
+    const finalRotZ = targetOffset.rz + runRotZ * motionDamp + strafeRoll * motionDamp + reloadRotZ + (meleeRotZ + inspectRotZ) * motionDamp + weaponLeanRoll;
 
     this.weaponMesh.rotation.x = THREE.MathUtils.lerp(this.weaponMesh.rotation.x, finalRotX, dt * 20);
     this.weaponMesh.rotation.y = THREE.MathUtils.lerp(this.weaponMesh.rotation.y, finalRotY, dt * 20);
@@ -2511,63 +2647,116 @@ export class FPSController {
       const rightArm = this.armsMesh.getObjectByName('right_arm_group');
 
       if (leftArm && rightArm) {
-        const targetLeftPos = new THREE.Vector3(-0.17, -0.17, -0.14);
-        const targetLeftRot = new THREE.Vector3(0, 0, 0);
-        const targetRightPos = new THREE.Vector3(0.19, -0.19, 0.22);
-        const targetRightRot = new THREE.Vector3(0, 0, 0);
+        // Per-weapon base grip & handguard anchors matching ModelFactory firearm geometry
+        let baseRightX = 0.018;
+        let baseRightY = -0.105;
+        let baseRightZ = 0.125;
+        let baseLeftX = -0.026;
+        let baseLeftY = -0.042;
+        let baseLeftZ = -0.30;
+
+        switch (this.currentWeapon) {
+          case 'ak47':
+            baseLeftY = -0.025;
+            baseLeftZ = -0.28;
+            break;
+          case 'scar':
+            baseLeftY = -0.020;
+            baseLeftZ = -0.24;
+            break;
+          case 'mp5':
+            baseLeftX = -0.024;
+            baseLeftY = -0.035;
+            baseLeftZ = -0.22;
+            break;
+          case 'vector':
+            baseLeftX = -0.024;
+            baseLeftY = -0.080;
+            baseLeftZ = -0.20;
+            break;
+          case 'shotgun':
+            baseLeftY = -0.035;
+            baseLeftZ = -0.34;
+            break;
+          case 'sniper':
+            baseRightY = -0.115;
+            baseRightZ = 0.155;
+            baseLeftX = -0.028;
+            baseLeftY = -0.045;
+            baseLeftZ = -0.28;
+            break;
+          case 'deagle':
+            // Two-handed Weaver pistol stance: left palm cups under/around right trigger hand
+            baseRightX = 0.012;
+            baseRightY = -0.095;
+            baseRightZ = 0.065;
+            baseLeftX = -0.024;
+            baseLeftY = -0.100;
+            baseLeftZ = 0.070;
+            break;
+          case 'm4':
+          default:
+            break;
+        }
+
+        const targetLeftPos = this._vmTargetLeftPos.set(baseLeftX, baseLeftY, baseLeftZ);
+        const targetLeftRot = this._vmTargetLeftRot.set(0, 0, 0);
+        const targetRightPos = this._vmTargetRightPos.set(baseRightX, baseRightY, baseRightZ);
+        const targetRightRot = this._vmTargetRightRot.set(0, 0, 0);
 
         if (this.isMantling) {
           // Arms reach out and push down against the ledge
           const mp = 1 - (this.mantleTimer / this.mantleDuration);
           const reach = Math.sin(mp * Math.PI);
-          targetLeftPos.set(-0.2 + reach * 0.05, -0.05 + reach * 0.22, -0.35 - reach * 0.2);
-          targetLeftRot.set(-reach * 0.6, 0, reach * 0.3);
-          targetRightPos.set(0.2 - reach * 0.05, -0.05 + reach * 0.22, -0.35 - reach * 0.2);
-          targetRightRot.set(-reach * 0.6, 0, -reach * 0.3);
+          targetLeftPos.set(baseLeftX - 0.05 + reach * 0.04, baseLeftY + 0.04 + reach * 0.16, baseLeftZ - 0.08 - reach * 0.18);
+          targetLeftRot.set(-reach * 0.55, 0, reach * 0.25);
+          targetRightPos.set(baseRightX + 0.08 - reach * 0.04, baseRightY + 0.06 + reach * 0.16, baseRightZ - 0.22 - reach * 0.18);
+          targetRightRot.set(-reach * 0.55, 0, -reach * 0.25);
         } else if (this.isDiving) {
-          // Arms extended forward cushioning dive
-          targetLeftPos.set(-0.22, -0.22, -0.38);
-          targetLeftRot.set(0.35, 0.1, -0.25);
-          targetRightPos.set(0.22, -0.22, -0.38);
-          targetRightRot.set(0.35, -0.1, 0.25);
+          // Arms extended forward cushioning dive while retaining grip
+          targetLeftPos.set(baseLeftX - 0.04, baseLeftY - 0.04, baseLeftZ - 0.10);
+          targetLeftRot.set(0.28, 0.08, -0.22);
+          targetRightPos.set(baseRightX + 0.04, baseRightY - 0.04, baseRightZ - 0.10);
+          targetRightRot.set(0.28, -0.08, 0.22);
         } else if (this.isReloading) {
           const p = Math.max(0, Math.min(1, 1 - (this.reloadTimer / this.reloadDuration)));
           if (p < 0.45) {
-            // Phase 1: Left arm breaks grip, reaches down to plate carrier pouch
+            // Phase 1: Left arm breaks handguard grip, reaches down to plate carrier pouch
             const sub = p / 0.45;
             const reachCurve = Math.sin(sub * Math.PI * 0.5);
-            targetLeftPos.set(-0.17 - reachCurve * 0.05, -0.17 - reachCurve * 0.22, -0.14 - reachCurve * 0.15);
-            targetLeftRot.set(reachCurve * 0.45, 0, -reachCurve * 0.2);
+            targetLeftPos.set(baseLeftX - reachCurve * 0.06, baseLeftY - reachCurve * 0.24, baseLeftZ + reachCurve * 0.16);
+            targetLeftRot.set(reachCurve * 0.48, 0, -reachCurve * 0.25);
           } else if (p < 0.78) {
-            // Phase 2: Insert fresh magazine with forceful palm thrust
+            // Phase 2: Insert fresh magazine upward into magwell
             const sub = (p - 0.45) / 0.33;
-            targetLeftPos.set(-0.22 + sub * 0.05, -0.39 + sub * 0.22, -0.29 + sub * 0.15);
-            targetLeftRot.set(0.45 * (1 - sub), 0, -0.2 * (1 - sub));
+            targetLeftPos.set(baseLeftX - 0.06 + sub * 0.06, baseLeftY - 0.24 + sub * 0.16, baseLeftZ + 0.16 - sub * 0.04);
+            targetLeftRot.set(0.48 * (1 - sub), 0, -0.25 * (1 - sub));
           } else {
-            // Phase 3: Chamber round / slap bolt and return to handguard
-            targetLeftPos.set(-0.17, -0.17, -0.14);
+            // Phase 3: Slap bolt/pump and return cleanly to handguard
+            const sub = (p - 0.78) / 0.22;
+            targetLeftPos.set(baseLeftX, baseLeftY - 0.08 * (1 - sub), baseLeftZ + 0.12 * (1 - sub));
             targetLeftRot.set(0, 0, 0);
           }
         } else if (this.isTacSprinting) {
           // High-speed one-handed tactical sprint carry (left arm pumps naturally in rhythm with stride)
           const leftArmPumpY = Math.sin(this.runCycle) * 0.06 * this.runningWeight;
           const leftArmPumpZ = Math.cos(this.runCycle) * 0.08 * this.runningWeight;
-          targetLeftPos.set(-0.22, -0.28 + leftArmPumpY, -0.06 + leftArmPumpZ);
+          targetLeftPos.set(baseLeftX - 0.12, baseLeftY - 0.16 + leftArmPumpY, baseLeftZ + 0.18 + leftArmPumpZ);
           targetLeftRot.set(-0.35 + leftArmPumpY * 1.2, 0.15, -0.25);
 
-          const rightArmBounceY = Math.abs(Math.sin(this.runCycle)) * -0.02 * this.runningWeight;
-          targetRightPos.set(0.18, -0.18 + rightArmBounceY, 0.2);
-          targetRightRot.set(0.12, -0.05, 0.08);
+          const rightArmBounceY = Math.abs(Math.sin(this.runCycle)) * -0.015 * this.runningWeight;
+          targetRightPos.set(baseRightX, baseRightY + rightArmBounceY, baseRightZ);
+          targetRightRot.set(0.08, -0.04, 0.06);
         } else if (this.isSprinting) {
-          // Standard sprint carry: both hands stay securely locked to rifle, flexing with the stride
-          const sprintArmFlex = Math.sin(this.runCycle) * 0.02 * this.runningWeight;
-          targetLeftPos.set(-0.17 + sprintArmFlex, -0.17, -0.14);
-          targetLeftRot.set(sprintArmFlex * 0.5, 0, 0);
-          targetRightPos.set(0.19 - sprintArmFlex, -0.19, 0.22);
-          targetRightRot.set(sprintArmFlex * 0.5, 0, 0);
+          // Standard sprint carry: both hands stay securely locked to rifle, flexing slightly with stride
+          const sprintArmFlex = Math.sin(this.runCycle) * 0.012 * this.runningWeight;
+          targetLeftPos.set(baseLeftX + sprintArmFlex, baseLeftY, baseLeftZ);
+          targetLeftRot.set(sprintArmFlex * 0.4, 0, 0);
+          targetRightPos.set(baseRightX - sprintArmFlex, baseRightY, baseRightZ);
+          targetRightRot.set(sprintArmFlex * 0.4, 0, 0);
         }
 
-        // Smoothly lerp arm joints to completely prevent popping, jittering, or hand-gun separation
+        // Smoothly lerp arm joints to prevent popping, jittering, or hand-gun separation
         leftArm.position.lerp(targetLeftPos, dt * 18);
         leftArm.rotation.x = THREE.MathUtils.lerp(leftArm.rotation.x, targetLeftRot.x, dt * 18);
         leftArm.rotation.y = THREE.MathUtils.lerp(leftArm.rotation.y, targetLeftRot.y, dt * 18);
@@ -2580,7 +2769,7 @@ export class FPSController {
       }
 
       // Ensure viewmodel rig is completely hidden when aiming down high-power optical scopes
-      const isFullScope = this.isAiming && !this.isTacStance && Boolean(opticCfg?.hasFullScopeOverlay || (opticCfg?.magnification && opticCfg.magnification >= 3.0));
+      const isFullScope = this.isAiming && Boolean(opticCfg?.hasFullScopeOverlay || (opticCfg?.magnification && opticCfg.magnification >= 3.0));
       if (this.viewmodelRig && isFullScope) {
         this.viewmodelRig.visible = false;
         if (this.laserBeam) this.laserBeam.visible = false;
@@ -2605,15 +2794,15 @@ export class FPSController {
       feetY,
       this.position.z + this.currentLeanOffset.z * 0.4
     );
-    this.playerShadowMesh.rotation.y = this.yaw;
+    this.playerShadowMesh.rotation.y = this.yaw + Math.PI;
 
     // Movement speed & directional analysis
     const horizSpeed = Math.hypot(this.velocity.x, this.velocity.z);
     const isMoving = horizSpeed > 0.35 && this.isGrounded;
 
-    // Compute forward/backward and strafe velocity in player local space
-    const forward = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw);
-    const right = new THREE.Vector3(1, 0, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw);
+    // Compute forward/backward and strafe velocity in player local space (zero-GC)
+    const forward = this._shadowFwd.set(0, 0, -1).applyAxisAngle(this._shadowUpAxis, this.yaw);
+    const right = this._shadowRight.set(1, 0, 0).applyAxisAngle(this._shadowUpAxis, this.yaw);
     const fwdVelocity = this.velocity.dot(forward);
     const strafeVelocity = this.velocity.dot(right);
 
@@ -2797,109 +2986,104 @@ export class FPSController {
       upperBody.rotation.z = THREE.MathUtils.lerp(upperBody.rotation.z, targetUpperRoll, dt * 16);
     }
 
-    // --- 3. ARMS & WEAPON KINEMATICS ---
-    let leftShoulderRotX = 0.55;
-    let leftShoulderRotY = -0.22;
-    let leftShoulderRotZ = 0.15;
-    let leftElbowRotX = -0.75;
+    // --- 3. ARMS & WEAPON KINEMATICS (Negative -X shoulder angles reach forward +Z toward held firearm) ---
+    let leftShoulderRotX = -0.62;
+    let leftShoulderRotY = 0.28;
+    let leftShoulderRotZ = 0.14;
+    let leftElbowRotX = -0.78;
 
-    let rightShoulderRotX = 0.65;
-    let rightShoulderRotY = 0.12;
-    let rightShoulderRotZ = -0.15;
-    let rightElbowRotX = -0.65;
+    let rightShoulderRotX = -0.58;
+    let rightShoulderRotY = -0.18;
+    let rightShoulderRotZ = -0.14;
+    let rightElbowRotX = -0.82;
 
     let weaponPosZ = 0.34;
     let weaponPosY = 0.32;
     let weaponRotX = 0;
     let weaponRotZ = 0;
 
-    // Apply gunshot recoil kick
-    weaponPosZ -= this.shadowRecoilKick * 0.12;
-    weaponPosY += this.shadowRecoilKick * 0.06;
-    weaponRotX += this.shadowRecoilKick * 0.35;
-    rightShoulderRotX += this.shadowRecoilKick * 0.2;
-    leftShoulderRotX += this.shadowRecoilKick * 0.15;
+    // Apply gunshot recoil kick (muzzle pitches up)
+    weaponPosZ -= this.shadowRecoilKick * 0.10;
+    weaponPosY += this.shadowRecoilKick * 0.05;
+    weaponRotX -= this.shadowRecoilKick * 0.30;
+    rightShoulderRotX -= this.shadowRecoilKick * 0.18;
+    leftShoulderRotX -= this.shadowRecoilKick * 0.14;
 
     if (this.isMeleeing) {
-      // Tactical knife slash: Right arm swipes across in aggressive arc
-      rightShoulderRotX = 1.35;
+      // Tactical knife slash: Right arm swipes forward & across
+      rightShoulderRotX = -1.35;
       rightShoulderRotY = -0.45;
       rightShoulderRotZ = 0.35;
       rightElbowRotX = -0.25;
-      leftShoulderRotX = 0.25;
+      leftShoulderRotX = -0.35;
     } else if (this.isReloading) {
       // Tactical Reload Animation: Weapon tilts up, left arm reaches to plate carrier pouch and drives fresh mag
       const reloadPct = Math.max(0, Math.min(1, 1 - (this.reloadTimer / Math.max(0.1, this.reloadDuration))));
       weaponRotZ = -0.25;
-      weaponRotX = 0.22;
+      weaponRotX = -0.22;
 
       if (reloadPct < 0.45) {
         // Dip down to chest pouch
         const sub = reloadPct / 0.45;
         const reachCurve = Math.sin(sub * Math.PI * 0.5);
-        leftShoulderRotX = 0.2 - reachCurve * 0.35;
-        leftShoulderRotY = 0.1;
-        leftElbowRotX = -0.3 + reachCurve * 0.4;
+        leftShoulderRotX = -0.25 + reachCurve * 0.25;
+        leftShoulderRotY = -0.10;
+        leftElbowRotX = -0.35 + reachCurve * 0.35;
       } else if (reloadPct < 0.78) {
-        // Slam fresh magazine into receiver
+        // Slam fresh magazine up into receiver
         const sub = (reloadPct - 0.45) / 0.33;
-        leftShoulderRotX = -0.15 + sub * 0.7;
-        leftShoulderRotY = -0.2;
-        leftElbowRotX = 0.1 - sub * 0.85;
+        leftShoulderRotX = -0.05 - sub * 0.58;
+        leftShoulderRotY = 0.22;
+        leftElbowRotX = -0.15 - sub * 0.65;
       } else {
         // Return hand to handguard
-        leftShoulderRotX = 0.55;
-        leftElbowRotX = -0.75;
+        leftShoulderRotX = -0.62;
+        leftElbowRotX = -0.78;
       }
     } else if (this.isTacSprinting) {
       // Tactical Sprint: Weapon carried high-ready in right hand, left arm pumps in athletic stride
-      rightShoulderRotX = 0.45;
+      rightShoulderRotX = -0.48;
       rightShoulderRotY = -0.15;
-      rightShoulderRotZ = 0.25;
+      rightShoulderRotZ = 0.20;
       rightElbowRotX = -0.85;
 
       weaponPosZ = 0.26;
       weaponPosY = 0.38;
-      weaponRotX = 0.45; // Gun pointed upward in high-ready
+      weaponRotX = -0.42; // Gun angled upward in high-ready
       weaponRotZ = 0.22;
 
       // Left arm natural running counter-swing
       const armPump = Math.sin(this.shadowLocomotionPhase) * 0.55;
-      leftShoulderRotX = -0.15 + armPump;
-      leftShoulderRotY = 0.1;
-      leftShoulderRotZ = -0.25;
+      leftShoulderRotX = 0.15 + armPump;
+      leftShoulderRotY = 0.10;
+      leftShoulderRotZ = -0.22;
       leftElbowRotX = -0.95;
     } else if (this.isSprinting) {
       // Standard Sprint: Low-ready carry across chest
-      rightShoulderRotX = 0.48;
-      rightShoulderRotY = 0.08;
-      rightElbowRotX = -0.72;
+      rightShoulderRotX = -0.52;
+      rightShoulderRotY = -0.12;
+      rightElbowRotX = -0.78;
 
-      leftShoulderRotX = 0.42;
-      leftShoulderRotY = -0.18;
-      leftElbowRotX = -0.68;
+      leftShoulderRotX = -0.48;
+      leftShoulderRotY = 0.24;
+      leftElbowRotX = -0.72;
 
       weaponPosY = 0.26;
-      weaponRotX = -0.15;
+      weaponRotX = 0.15;
     } else if (this.isAiming) {
       // ADS Aim Down Sights: Weapon locked tight to eye line and shoulder pocket
-      rightShoulderRotX = 0.72;
-      rightShoulderRotY = 0.05;
+      rightShoulderRotX = -0.74;
+      rightShoulderRotY = -0.10;
       rightShoulderRotZ = -0.08;
-      rightElbowRotX = -0.82;
+      rightElbowRotX = -0.86;
 
-      leftShoulderRotX = 0.62;
-      leftShoulderRotY = -0.15;
+      leftShoulderRotX = -0.68;
+      leftShoulderRotY = 0.24;
       leftShoulderRotZ = 0.08;
-      leftElbowRotX = -0.78;
+      leftElbowRotX = -0.82;
 
       weaponPosZ = 0.38;
       weaponPosY = 0.36;
-    } else if (this.isTacStance) {
-      // Tactical Stance (Canted Weapon Angle)
-      weaponRotZ = 0.42;
-      rightShoulderRotZ = 0.12;
-      leftShoulderRotZ = 0.18;
     }
 
     if (leftShoulder) {

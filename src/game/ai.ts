@@ -109,6 +109,10 @@ export class BotManager {
     });
   }
 
+  public rebuildAllBotMeshes() {
+    this.bots.forEach(b => b.rebuildMesh());
+  }
+
   // --- NEAR-MISS BULLET SUPPRESSION ---
   public notifyNearMiss(bulletPos: THREE.Vector3, dir: THREE.Vector3) {
     this.bots.forEach(bot => {
@@ -456,11 +460,20 @@ export class BotController {
   public headMesh: THREE.Object3D | null = null;
   public torsoMesh: THREE.Object3D | null = null;
   public leftArmMesh: THREE.Object3D | null = null;
+  public leftElbowMesh: THREE.Object3D | null = null;
   public rightArmMesh: THREE.Object3D | null = null;
+  public rightElbowMesh: THREE.Object3D | null = null;
   public leftLegMesh: THREE.Object3D | null = null;
   public rightLegMesh: THREE.Object3D | null = null;
   public botWeaponMesh: THREE.Object3D | null = null;
   public sniperLaserMesh: THREE.Line | null = null;
+  // 3D Skeletal Animation Mixer
+  public mixer: THREE.AnimationMixer | null = null;
+  public animations: THREE.AnimationClip[] = [];
+  public idleAction: THREE.AnimationAction | null = null;
+  public runAction: THREE.AnimationAction | null = null;
+  public walkAction: THREE.AnimationAction | null = null;
+  public currentAction: THREE.AnimationAction | null = null;
 
   // Procedural Weapon Recoil & Physical Reactions
   public weaponRecoilKick: number = 0;
@@ -648,7 +661,9 @@ export class BotController {
     this.headMesh = this.group.getObjectByName('bot_head') || null;
     this.torsoMesh = this.group.getObjectByName('bot_torso') || null;
     this.leftArmMesh = this.group.getObjectByName('bot_left_arm') || null;
+    this.leftElbowMesh = this.group.getObjectByName('bot_left_elbow') || null;
     this.rightArmMesh = this.group.getObjectByName('bot_right_arm') || null;
+    this.rightElbowMesh = this.group.getObjectByName('bot_right_elbow') || null;
     this.leftLegMesh = this.group.getObjectByName('bot_left_leg') || null;
     this.rightLegMesh = this.group.getObjectByName('bot_right_leg') || null;
     this.botWeaponMesh = this.group.getObjectByName('bot_weapon') || null;
@@ -660,6 +675,25 @@ export class BotController {
       this.sniperLaserMesh = new THREE.Line(laserGeo, laserMat);
       this.sniperLaserMesh.visible = false;
       this.group.add(this.sniperLaserMesh);
+    }
+
+    // Initialize 3D Skeletal Animation Mixer if the model has animations (Soldier, Michelle, X-Bot, etc.)
+    if (this.group.userData.animations && this.group.userData.animations.length > 0) {
+      this.mixer = new THREE.AnimationMixer(this.group);
+      this.animations = this.group.userData.animations;
+
+      const idleClip = this.animations.find(a => a.name.toLowerCase().includes('idle'));
+      const runClip = this.animations.find(a => a.name.toLowerCase().includes('run'));
+      const walkClip = this.animations.find(a => a.name.toLowerCase().includes('walk'));
+
+      if (idleClip) this.idleAction = this.mixer.clipAction(idleClip);
+      if (runClip) this.runAction = this.mixer.clipAction(runClip);
+      if (walkClip) this.walkAction = this.mixer.clipAction(walkClip);
+
+      if (this.idleAction) {
+        this.idleAction.play();
+        this.currentAction = this.idleAction;
+      }
     }
 
     this.pickNextWaypoint();
@@ -872,8 +906,8 @@ export class BotController {
     // Interrupt current burst when taking heavy fire
     this.burstPauseTimer = Math.max(this.burstPauseTimer, 0.45);
 
-    if (this.leftArmMesh) this.leftArmMesh.rotation.x -= 0.6 * dmgScale;
-    if (this.rightArmMesh) this.rightArmMesh.rotation.x -= 0.7 * dmgScale;
+    if (this.leftArmMesh) this.leftArmMesh.rotation.x += 0.35 * dmgScale;
+    if (this.rightArmMesh) this.rightArmMesh.rotation.x += 0.40 * dmgScale;
 
     // Vocal radio alert when pinned down by heavy fire
     if (this.health < 48 && this.health > 0) {
@@ -954,8 +988,8 @@ export class BotController {
     this.ragdollTorsoPitch = forwardDot > 0 ? Math.PI / 2 : -Math.PI / 2;
     this.ragdollTorsoRoll = rightDot > 0 ? 0.45 : -0.45;
 
-    // Drop and tumble weapon to the ground
-    if (this.botWeaponMesh) {
+    // Drop and tumble weapon to the ground (procedural / non-bone-attached weapons)
+    if (this.botWeaponMesh && !this.botWeaponMesh.userData.isBoneAttached) {
       this.isWeaponDropped = true;
       this.droppedWeaponPos.copy(this.botWeaponMesh.position);
       this.droppedWeaponVel.set(
@@ -985,19 +1019,28 @@ export class BotController {
     this.state = 'patrol';
     this.alertLevel = 'unalerted';
 
-    // Reset all joint and limb angles to upright combat stance
+    // Reset all joint and limb angles to upright combat weapon-holding stance
     if (this.headMesh) this.headMesh.rotation.set(0, 0, 0);
     if (this.torsoMesh) this.torsoMesh.rotation.set(0, 0, 0);
-    if (this.leftArmMesh) this.leftArmMesh.rotation.set(0.5, 0, 0);
-    if (this.rightArmMesh) this.rightArmMesh.rotation.set(0.7, 0, 0);
+    if (this.leftArmMesh) this.leftArmMesh.rotation.set(-0.72, 0.42, 0.16);
+    if (this.leftElbowMesh) this.leftElbowMesh.rotation.set(-0.78, 0, 0);
+    if (this.rightArmMesh) this.rightArmMesh.rotation.set(-0.55, -0.22, -0.14);
+    if (this.rightElbowMesh) this.rightElbowMesh.rotation.set(-0.92, 0, 0);
     if (this.leftLegMesh) this.leftLegMesh.rotation.set(0, 0, 0);
     if (this.rightLegMesh) this.rightLegMesh.rotation.set(0, 0, 0);
 
     // Reset Weapon to Hand
     if (this.botWeaponMesh) {
       this.isWeaponDropped = false;
-      this.botWeaponMesh.position.set(0.18, 1.15, 0.35);
-      this.botWeaponMesh.rotation.set(0, Math.PI, 0);
+      if (this.botWeaponMesh.userData.isBoneAttached) {
+        ModelFactory.alignHandWeaponSocket(this.group, 0, 0, {
+          stance: 'ready',
+          weaponType: this.weapon,
+        });
+      } else {
+        this.botWeaponMesh.position.set(0.14, 1.24, 0.34);
+        this.botWeaponMesh.rotation.set(0.06, Math.PI + 0.18, 0);
+      }
     }
 
     // Designated Team Spawn Points
@@ -1010,6 +1053,15 @@ export class BotController {
     this.group.position.copy(this.position);
     this.group.rotation.set(0, 0, 0);
     this.currentCover = null;
+
+    if (this.idleAction) {
+      if (this.currentAction && this.currentAction !== this.idleAction) {
+        this.currentAction.stop();
+      }
+      this.idleAction.reset().fadeIn(0.15).play();
+      this.currentAction = this.idleAction;
+    }
+
     this.pickNextWaypoint();
   }
 
@@ -1325,6 +1377,27 @@ export class BotController {
       this.torsoMesh.position.x = this.currentLeanFactor * 0.22; // Physical torso lean offset around corner
     }
 
+    // 3D Skeletal Animation Playback (Runs, Walks, Idles on GLTF Models)
+    if (this.mixer) {
+      this.mixer.update(dt);
+      if (this.isDead) {
+        if (this.currentAction) this.currentAction.fadeOut(0.2);
+      } else if (isMoving) {
+        const nextAction = (moveSpeed > 3.2 && this.runAction) ? this.runAction : (this.walkAction || this.runAction);
+        if (nextAction && this.currentAction !== nextAction) {
+          if (this.currentAction) this.currentAction.fadeOut(0.2);
+          nextAction.reset().fadeIn(0.2).play();
+          this.currentAction = nextAction;
+        }
+      } else {
+        if (this.idleAction && this.currentAction !== this.idleAction) {
+          if (this.currentAction) this.currentAction.fadeOut(0.2);
+          this.idleAction.reset().fadeIn(0.2).play();
+          this.currentAction = this.idleAction;
+        }
+      }
+    }
+
     // 2. Head Look & Flinch with matching lean
     if (this.headMesh) {
       const headLeanZ = this.currentLeanFactor * 0.22;
@@ -1351,48 +1424,91 @@ export class BotController {
       this.rightLegMesh.rotation.z = this.flinchRoll * 0.25;
     }
 
-    // 4. Arms & Weapon Posing (Aim Ready vs Stride Swing vs Reload Gesture + Flinch Disrupt)
+    // 4. Arms & Weapon Posing (Negative -X shoulder bends reach forward +Z to hold rifle cleanly)
     if (this.leftArmMesh && this.rightArmMesh) {
+      const recoilOffset = this.weaponRecoilKick;
       if (this.isBlindFiring) {
         // High blind-firing arm gesture over cover
-        this.rightArmMesh.rotation.x = 1.35;
-        this.leftArmMesh.rotation.x = 1.15;
+        this.rightArmMesh.rotation.set(-1.35, -0.12, -0.10);
+        if (this.rightElbowMesh) this.rightElbowMesh.rotation.set(-0.55, 0, 0);
+        this.leftArmMesh.rotation.set(-1.20, 0.35, 0.10);
+        if (this.leftElbowMesh) this.leftElbowMesh.rotation.set(-0.60, 0, 0);
       } else if (this.isReloading) {
-        // Tactical Reloading Gesture: Lower weapon, left arm dips to chest pouch and slaps back
+        // Tactical Reloading Gesture: weapon canted, left hand dips to chest pouch and slaps magwell
         const reloadProgress = 1 - (this.reloadTimer / Math.max(0.1, this.reloadTotalTime));
         const magPull = Math.sin(reloadProgress * Math.PI);
-        this.rightArmMesh.rotation.x = 0.45 - this.flinchArmDisrupt * 0.4;
-        this.leftArmMesh.rotation.x = 0.2 + magPull * 0.6 - this.flinchArmDisrupt * 0.4;
-        this.leftArmMesh.rotation.y = -0.3 + magPull * 0.4;
+        this.rightArmMesh.rotation.set(-0.52 + this.flinchArmDisrupt * 0.25, -0.18, -0.22);
+        if (this.rightElbowMesh) this.rightElbowMesh.rotation.set(-0.95, 0, 0);
+        this.leftArmMesh.rotation.set(-0.38 - magPull * 0.25 + this.flinchArmDisrupt * 0.25, 0.25 + magPull * 0.20, 0.15);
+        if (this.leftElbowMesh) this.leftElbowMesh.rotation.set(-0.45 - magPull * 0.50, 0, 0);
       } else if (isCombat) {
-        // High-Ready Aim Stance with Recoil Kick & Flinch Disruption
-        const recoilOffset = this.weaponRecoilKick;
-        this.rightArmMesh.rotation.x = 0.75 + recoilOffset * 0.4 - this.flinchArmDisrupt * 0.6;
-        this.leftArmMesh.rotation.x = 0.55 + recoilOffset * 0.3 - this.flinchArmDisrupt * 0.5;
-        this.leftArmMesh.rotation.y = -0.4;
+        // Shouldered high-ready combat aim stance with recoil kick & flinch disruption
+        this.rightArmMesh.rotation.set(
+          -0.68 - recoilOffset * 0.25 + this.flinchArmDisrupt * 0.35,
+          -0.16,
+          -0.10
+        );
+        if (this.rightElbowMesh) this.rightElbowMesh.rotation.set(-0.92, 0, 0);
+        this.leftArmMesh.rotation.set(
+          -0.82 - recoilOffset * 0.20 + this.flinchArmDisrupt * 0.30,
+          0.46,
+          0.14
+        );
+        if (this.leftElbowMesh) this.leftElbowMesh.rotation.set(-0.68, 0, 0);
       } else if (isMoving) {
-        // Natural arm counter-swing during patrol / sprint
-        const armSwing = Math.sin(this.animTimer) * 0.35;
-        this.rightArmMesh.rotation.x = 0.6 + armSwing * 0.5 - this.flinchArmDisrupt * 0.4;
-        this.leftArmMesh.rotation.x = 0.4 - armSwing * 0.5 - this.flinchArmDisrupt * 0.4;
+        // Patrol / tactical jog keeping both hands gripping weapon across chest
+        const armSwing = Math.sin(this.animTimer) * 0.12;
+        this.rightArmMesh.rotation.set(-0.58 + armSwing * 0.3 + this.flinchArmDisrupt * 0.3, -0.20, -0.14);
+        if (this.rightElbowMesh) this.rightElbowMesh.rotation.set(-0.92, 0, 0);
+        this.leftArmMesh.rotation.set(-0.74 - armSwing * 0.3 + this.flinchArmDisrupt * 0.3, 0.42, 0.16);
+        if (this.leftElbowMesh) this.leftElbowMesh.rotation.set(-0.78, 0, 0);
       } else {
-        // Idle combat patrol stance
-        this.rightArmMesh.rotation.x = 0.65 - this.flinchArmDisrupt * 0.4;
-        this.leftArmMesh.rotation.x = 0.45 - this.flinchArmDisrupt * 0.4;
-        this.leftArmMesh.rotation.y = -0.35;
+        // Idle combat low-ready patrol stance
+        this.rightArmMesh.rotation.set(-0.55 + this.flinchArmDisrupt * 0.3, -0.22, -0.14);
+        if (this.rightElbowMesh) this.rightElbowMesh.rotation.set(-0.92, 0, 0);
+        this.leftArmMesh.rotation.set(-0.72 + this.flinchArmDisrupt * 0.3, 0.42, 0.16);
+        if (this.leftElbowMesh) this.leftElbowMesh.rotation.set(-0.78, 0, 0);
       }
 
-      // Arms tilt smoothly with the tactical lean
-      this.leftArmMesh.rotation.z = this.currentLeanFactor * 0.28;
-      this.rightArmMesh.rotation.z = this.currentLeanFactor * 0.28;
+      // Arms tilt smoothly with tactical lean
+      this.leftArmMesh.rotation.z += this.currentLeanFactor * 0.22;
+      this.rightArmMesh.rotation.z += this.currentLeanFactor * 0.22;
     }
 
-    // 5. Bot Weapon Recoil Kick, Jolt & Canted Lean
+    // 5. Bot Weapon Two-Bone IK Alignment (GLTF) or Chest-Ready Alignment (Procedural)
     if (this.botWeaponMesh) {
-      this.botWeaponMesh.position.z = 0.35 - this.weaponRecoilKick * 0.08;
-      this.botWeaponMesh.position.x = 0.18 + this.currentLeanFactor * 0.20;
-      this.botWeaponMesh.rotation.x = this.weaponRecoilKick * 0.35;
-      this.botWeaponMesh.rotation.z = this.currentLeanFactor * 0.34;
+      if (this.botWeaponMesh.userData.isBoneAttached) {
+        const reloadProgress = this.isReloading
+          ? 1 - this.reloadTimer / Math.max(0.1, this.reloadTotalTime)
+          : 0;
+        const stance = this.isReloading
+          ? 'reload'
+          : isCombat
+          ? 'combat'
+          : 'ready';
+        ModelFactory.alignHandWeaponSocket(
+          this.group,
+          -this.weaponRecoilKick * 0.28,
+          this.currentLeanFactor * 0.28,
+          {
+            stance,
+            weaponType: this.weapon,
+            reloadProgress,
+            recoilKick: this.weaponRecoilKick,
+          }
+        );
+      } else {
+        this.botWeaponMesh.position.set(
+          0.14 + this.currentLeanFactor * 0.18,
+          1.24 + (isCombat ? 0.06 : 0),
+          0.34 - this.weaponRecoilKick * 0.08
+        );
+        this.botWeaponMesh.rotation.set(
+          (isCombat ? -0.02 : 0.06) - this.weaponRecoilKick * 0.28,
+          Math.PI + (isCombat ? 0.08 : 0.18),
+          -this.currentLeanFactor * 0.34
+        );
+      }
     }
 
     // Apply world position clamped firmly to ground, factoring crouch elevation
@@ -2131,7 +2247,58 @@ export class BotController {
     };
   }
 
+  public rebuildMesh() {
+    this.scene.remove(this.group);
+    if (this.mixer) {
+      this.mixer.stopAllAction();
+      this.mixer = null;
+    }
+    this.group = ModelFactory.createBotMesh(this.team, this.archetype, this.weapon);
+    this.group.position.copy(this.position);
+    this.scene.add(this.group);
+
+    this.headMesh = this.group.getObjectByName('bot_head') || null;
+    this.torsoMesh = this.group.getObjectByName('bot_torso') || null;
+    this.leftArmMesh = this.group.getObjectByName('bot_left_arm') || null;
+    this.leftElbowMesh = this.group.getObjectByName('bot_left_elbow') || null;
+    this.rightArmMesh = this.group.getObjectByName('bot_right_arm') || null;
+    this.rightElbowMesh = this.group.getObjectByName('bot_right_elbow') || null;
+    this.leftLegMesh = this.group.getObjectByName('bot_left_leg') || null;
+    this.rightLegMesh = this.group.getObjectByName('bot_right_leg') || null;
+    this.botWeaponMesh = this.group.getObjectByName('bot_weapon') || null;
+
+    if (this.archetype === 'sniper') {
+      const laserGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, 0, -45)]);
+      const laserMat = new THREE.LineBasicMaterial({ color: 0xef4444, transparent: true, opacity: 0.75 });
+      this.sniperLaserMesh = new THREE.Line(laserGeo, laserMat);
+      this.sniperLaserMesh.visible = false;
+      this.group.add(this.sniperLaserMesh);
+    }
+
+    if (this.group.userData.animations && this.group.userData.animations.length > 0) {
+      this.mixer = new THREE.AnimationMixer(this.group);
+      this.animations = this.group.userData.animations;
+
+      const idleClip = this.animations.find(a => a.name.toLowerCase().includes('idle'));
+      const runClip = this.animations.find(a => a.name.toLowerCase().includes('run'));
+      const walkClip = this.animations.find(a => a.name.toLowerCase().includes('walk'));
+
+      if (idleClip) this.idleAction = this.mixer.clipAction(idleClip);
+      if (runClip) this.runAction = this.mixer.clipAction(runClip);
+      if (walkClip) this.walkAction = this.mixer.clipAction(walkClip);
+
+      if (this.idleAction) {
+        this.idleAction.play();
+        this.currentAction = this.idleAction;
+      }
+    }
+  }
+
   public destroy() {
+    if (this.mixer) {
+      this.mixer.stopAllAction();
+      this.mixer = null;
+    }
     this.scene.remove(this.group);
   }
 }

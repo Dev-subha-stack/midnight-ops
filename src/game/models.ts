@@ -1,11 +1,163 @@
 import * as THREE from 'three';
 import { OpticType, ReticleColor, ReticleStyle, WeaponCamo, WeaponType } from '../types';
 import { TextureGenerator } from './textures';
+import { CharacterModelLoader } from './character_loader';
 
 // 3D Procedural Weapon Geometry & Viewmodel Builder
 // Crafts AAA quality firearm meshes with modular attachments, materials, and optic reticles
 
+export interface WeaponHoldMetrics {
+  scale: number;
+  gripLocal: THREE.Vector3;
+  foregripLocal: THREE.Vector3;
+  isPistol: boolean;
+}
+
+export interface WeaponHoldPoseOptions {
+  stance?: 'ready' | 'combat' | 'reload' | 'dead';
+  weaponType?: WeaponType;
+  reloadProgress?: number;
+  recoilKick?: number;
+}
+
+interface CachedHandBasis {
+  middleBone: THREE.Object3D;
+  e1: THREE.Vector3;
+  e2: THREE.Vector3;
+  e3: THREE.Vector3;
+  hasFullBasis: boolean;
+}
+
+interface WeaponHoldRig {
+  hips?: THREE.Object3D;
+  spine2?: THREE.Object3D;
+  head?: THREE.Object3D;
+  rightShoulder?: THREE.Object3D;
+  rightArm?: THREE.Object3D;
+  rightForeArm?: THREE.Object3D;
+  rightHand?: THREE.Object3D;
+  leftShoulder?: THREE.Object3D;
+  leftArm?: THREE.Object3D;
+  leftForeArm?: THREE.Object3D;
+  leftHand?: THREE.Object3D;
+  rightHandBasis?: CachedHandBasis;
+  leftHandBasis?: CachedHandBasis;
+  handSocket?: THREE.Object3D;
+  botWeapon?: THREE.Object3D;
+  initialized: boolean;
+}
+
+// Reusable scratch math objects for zero-GC per-frame Two-Bone IK & weapon alignment
+const _ikRootPos = new THREE.Vector3();
+const _ikRootQuat = new THREE.Quaternion();
+const _ikRootScale = new THREE.Vector3();
+const _ikCharFwd = new THREE.Vector3();
+const _ikCharUp = new THREE.Vector3();
+const _ikCharRight = new THREE.Vector3();
+const _ikCharLeft = new THREE.Vector3();
+const _ikRShoulderPos = new THREE.Vector3();
+const _ikRElbowPos = new THREE.Vector3();
+const _ikRWristPos = new THREE.Vector3();
+const _ikLShoulderPos = new THREE.Vector3();
+const _ikLElbowPos = new THREE.Vector3();
+const _ikLWristPos = new THREE.Vector3();
+const _ikShoulderMid = new THREE.Vector3();
+const _ikShoulderSpanVec = new THREE.Vector3();
+const _ikWeaponQuat = new THREE.Quaternion();
+const _ikLocalOffsetQuat = new THREE.Quaternion();
+const _ikEuler = new THREE.Euler(0, 0, 0, 'YXZ');
+const _ikWeaponFwd = new THREE.Vector3();
+const _ikWeaponUp = new THREE.Vector3();
+const _ikWeaponRight = new THREE.Vector3();
+const _ikRTarget = new THREE.Vector3();
+const _ikLTarget = new THREE.Vector3();
+const _ikForegripSocket = new THREE.Vector3();
+const _ikForegripWorld = new THREE.Vector3();
+const _ikRPole = new THREE.Vector3();
+const _ikLPole = new THREE.Vector3();
+const _ikToTarget = new THREE.Vector3();
+const _ikDirST = new THREE.Vector3();
+const _ikBendDir = new THREE.Vector3();
+const _ikElbowTarget = new THREE.Vector3();
+const _ikCurDir = new THREE.Vector3();
+const _ikDesDir = new THREE.Vector3();
+const _ikDeltaQuat = new THREE.Quaternion();
+const _ikBoneWorldQuat = new THREE.Quaternion();
+const _ikParentWorldQuat = new THREE.Quaternion();
+const _ikChildWorldPos = new THREE.Vector3();
+const _ikTargetWorldPos = new THREE.Vector3();
+const _ikW1 = new THREE.Vector3();
+const _ikW2 = new THREE.Vector3();
+const _ikW3 = new THREE.Vector3();
+const _ikSocketWorld = new THREE.Vector3();
+const _ikLeftFingerDir = new THREE.Vector3();
+const _ikRightFingerDir = new THREE.Vector3();
+const _ikMatWorld = new THREE.Matrix4();
+const _ikMatLocal = new THREE.Matrix4();
+const _ikMatRot = new THREE.Matrix4();
+
 export class ModelFactory {
+  public static getWeaponHoldMetrics(weaponType: WeaponType = 'm4'): WeaponHoldMetrics {
+    switch (weaponType) {
+      case 'ak47':
+        return {
+          scale: 0.84,
+          gripLocal: new THREE.Vector3(0, -0.075, 0.14),
+          foregripLocal: new THREE.Vector3(0, -0.005, -0.30),
+          isPistol: false,
+        };
+      case 'scar':
+        return {
+          scale: 0.84,
+          gripLocal: new THREE.Vector3(0, -0.075, 0.13),
+          foregripLocal: new THREE.Vector3(0, 0.005, -0.25),
+          isPistol: false,
+        };
+      case 'mp5':
+        return {
+          scale: 0.86,
+          gripLocal: new THREE.Vector3(0, -0.075, 0.10),
+          foregripLocal: new THREE.Vector3(0, -0.015, -0.22),
+          isPistol: false,
+        };
+      case 'vector':
+        return {
+          scale: 0.86,
+          gripLocal: new THREE.Vector3(0, -0.08, 0.15),
+          foregripLocal: new THREE.Vector3(0, -0.07, -0.20),
+          isPistol: false,
+        };
+      case 'shotgun':
+        return {
+          scale: 0.84,
+          gripLocal: new THREE.Vector3(0, -0.075, 0.13),
+          foregripLocal: new THREE.Vector3(0, -0.02, -0.34),
+          isPistol: false,
+        };
+      case 'sniper':
+        return {
+          scale: 0.80,
+          gripLocal: new THREE.Vector3(0, -0.085, 0.16),
+          foregripLocal: new THREE.Vector3(0, -0.025, -0.30),
+          isPistol: false,
+        };
+      case 'deagle':
+        return {
+          scale: 0.90,
+          gripLocal: new THREE.Vector3(0, -0.065, 0.06),
+          foregripLocal: new THREE.Vector3(0.02, -0.072, 0.04),
+          isPistol: true,
+        };
+      case 'm4':
+      default:
+        return {
+          scale: 0.84,
+          gripLocal: new THREE.Vector3(0, -0.075, 0.12),
+          foregripLocal: new THREE.Vector3(0, -0.025, -0.31),
+          isPistol: false,
+        };
+    }
+  }
   // --- MODULAR OPTIC MESH BUILDER ---
   public static createOpticMesh(
     optic: OpticType = 'holo_553',
@@ -1167,18 +1319,21 @@ export class ModelFactory {
   }
 
   // --- AAA VIEWMODEL ARMS & ARTICULATED TACTICAL OPERATOR GLOVES ---
-  public static createViewmodelArms(): THREE.Group {
+  // --- AAA VIEWMODEL ARMS & ARTICULATED TACTICAL OPERATOR GLOVES ---
+  public static createViewmodelArms(
+    camoVariant: 'allies_multicam' | 'axis_shadow' | 'spec_ops' | 'desert_tan' = 'allies_multicam'
+  ): THREE.Group {
     const armsGroup = new THREE.Group();
     armsGroup.name = 'viewmodel_arms';
 
     const gloveTexture = TextureGenerator.createTacticalGloveTexture();
-    const sleeveTexture = TextureGenerator.createOperatorUniformTexture('allies_multicam');
+    const sleeveTexture = TextureGenerator.createOperatorUniformTexture(camoVariant);
     const watchTexture = TextureGenerator.createSmartWatchTexture('10:42:15', 118);
 
     const gloveMat = new THREE.MeshStandardMaterial({
       map: gloveTexture,
-      roughness: 0.68,
-      metalness: 0.12,
+      roughness: 0.65,
+      metalness: 0.15,
     });
 
     const knuckleMat = new THREE.MeshStandardMaterial({
@@ -1191,6 +1346,12 @@ export class ModelFactory {
       map: sleeveTexture,
       roughness: 0.78,
       metalness: 0.05,
+    });
+
+    const skinMat = new THREE.MeshStandardMaterial({
+      color: 0xd4a373,
+      roughness: 0.64,
+      metalness: 0.04,
     });
 
     const underlayerMat = new THREE.MeshStandardMaterial({
@@ -1282,72 +1443,84 @@ export class ModelFactory {
     };
 
     // --- RIGHT ARM (TRIGGER ARM & FIRING CONTROL) ---
+    // Positioned at rifle pistol grip (0.018, -0.105, 0.125) so gloved fingers wrap the grip cleanly
     const rightArmGroup = new THREE.Group();
     rightArmGroup.name = 'right_arm_group';
-    rightArmGroup.position.set(0.19, -0.19, 0.22);
+    rightArmGroup.position.set(0.018, -0.105, 0.125);
 
-    // Anatomical Forearm & Multicam Sleeve
-    const rightSleeve = new THREE.Mesh(new THREE.CylinderGeometry(0.058, 0.068, 0.38, 14), sleeveMat);
-    rightSleeve.position.set(0, -0.12, 0.15);
-    rightSleeve.rotation.x = 0.82;
-    rightSleeve.rotation.z = -0.08;
+    // Anatomical Forearm & Multicam Sleeve angling down-right back toward operator shoulder
+    const rightSleeve = new THREE.Mesh(new THREE.CylinderGeometry(0.056, 0.068, 0.36, 14), sleeveMat);
+    rightSleeve.position.set(0.11, -0.15, 0.22);
+    rightSleeve.rotation.x = 0.92;
+    rightSleeve.rotation.y = 0.28;
+    rightSleeve.rotation.z = -0.38;
     rightArmGroup.add(rightSleeve);
 
-    // Compression sleeve underlayer visible at wrist
-    const rightUnderlayer = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.048, 0.06, 12), underlayerMat);
-    rightUnderlayer.position.set(0, -0.02, 0.03);
-    rightUnderlayer.rotation.x = 0.82;
-    rightArmGroup.add(rightUnderlayer);
-
-    // Rolled Sleeve Fabric Cuff Fold
-    const rightCuffFold = new THREE.Mesh(new THREE.TorusGeometry(0.06, 0.012, 8, 16), sleeveMat);
-    rightCuffFold.position.set(0, -0.035, 0.05);
-    rightCuffFold.rotation.x = 0.82;
+    // Rolled Sleeve Fabric Cuff Fold (Triple rolled combat shirt sleeve)
+    const rightCuffFold = new THREE.Mesh(new THREE.TorusGeometry(0.060, 0.015, 10, 20), sleeveMat);
+    rightCuffFold.position.set(0.062, -0.082, 0.12);
+    rightCuffFold.rotation.x = 0.92;
+    rightCuffFold.rotation.y = 0.28;
+    rightCuffFold.rotation.z = -0.38;
     rightArmGroup.add(rightCuffFold);
 
-    // Right Hand
+    // Exposed Muscular Forearm between sleeve and glove
+    const rightForearmSkin = new THREE.Mesh(new THREE.CylinderGeometry(0.044, 0.040, 0.11, 14), skinMat);
+    rightForearmSkin.position.set(0.032, -0.042, 0.065);
+    rightForearmSkin.rotation.x = 0.92;
+    rightForearmSkin.rotation.y = 0.28;
+    rightForearmSkin.rotation.z = -0.38;
+    rightArmGroup.add(rightForearmSkin);
+
+    // Right Hand wrapped naturally around pistol grip
     const rightHand = createArticulatedHand(false);
     rightHand.position.set(0, 0, 0);
+    rightHand.rotation.set(0.24, -0.15, -0.45);
     rightArmGroup.add(rightHand);
 
     // --- LEFT ARM (TACTICAL FOREGRIP / C-CLAMP SUPPORT) ---
+    // Positioned at rifle handguard / AFG (-0.026, -0.042, -0.30)
     const leftArmGroup = new THREE.Group();
     leftArmGroup.name = 'left_arm_group';
-    leftArmGroup.position.set(-0.17, -0.17, -0.14);
+    leftArmGroup.position.set(-0.026, -0.042, -0.30);
 
-    // Forearm & Sleeve
-    const leftSleeve = new THREE.Mesh(new THREE.CylinderGeometry(0.058, 0.068, 0.42, 14), sleeveMat);
-    leftSleeve.position.set(-0.06, -0.13, 0.2);
-    leftSleeve.rotation.x = 0.64;
-    leftSleeve.rotation.y = -0.42;
-    leftSleeve.rotation.z = 0.12;
+    // Forearm & Sleeve angling back-left toward left chest/shoulder
+    const leftSleeve = new THREE.Mesh(new THREE.CylinderGeometry(0.056, 0.068, 0.40, 14), sleeveMat);
+    leftSleeve.position.set(-0.14, -0.16, 0.26);
+    leftSleeve.rotation.x = 0.84;
+    leftSleeve.rotation.y = -0.48;
+    leftSleeve.rotation.z = 0.34;
     leftArmGroup.add(leftSleeve);
 
-    const leftUnderlayer = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.048, 0.06, 12), underlayerMat);
-    leftUnderlayer.position.set(-0.02, -0.02, 0.04);
-    leftUnderlayer.rotation.x = 0.64;
-    leftUnderlayer.rotation.y = -0.42;
-    leftArmGroup.add(leftUnderlayer);
-
-    const leftCuffFold = new THREE.Mesh(new THREE.TorusGeometry(0.06, 0.012, 8, 16), sleeveMat);
-    leftCuffFold.position.set(-0.02, -0.04, 0.06);
-    leftCuffFold.rotation.x = 0.64;
-    leftCuffFold.rotation.y = -0.42;
+    // Rolled Sleeve Fabric Cuff Fold
+    const leftCuffFold = new THREE.Mesh(new THREE.TorusGeometry(0.060, 0.015, 10, 20), sleeveMat);
+    leftCuffFold.position.set(-0.075, -0.088, 0.13);
+    leftCuffFold.rotation.x = 0.84;
+    leftCuffFold.rotation.y = -0.48;
+    leftCuffFold.rotation.z = 0.34;
     leftArmGroup.add(leftCuffFold);
 
-    // Left Hand
+    // Exposed Muscular Forearm
+    const leftForearmSkin = new THREE.Mesh(new THREE.CylinderGeometry(0.044, 0.040, 0.11, 14), skinMat);
+    leftForearmSkin.position.set(-0.036, -0.044, 0.065);
+    leftForearmSkin.rotation.x = 0.84;
+    leftForearmSkin.rotation.y = -0.48;
+    leftForearmSkin.rotation.z = 0.34;
+    leftArmGroup.add(leftForearmSkin);
+
+    // Left Hand cupping handguard from underneath-left
     const leftHand = createArticulatedHand(true);
     leftHand.position.set(0, 0, 0);
-    leftHand.rotation.y = 0.28;
-    leftHand.rotation.x = 0.1;
+    leftHand.rotation.set(0.18, 0.38, -1.05);
     leftArmGroup.add(leftHand);
 
     // --- HIGH-TECH TACTICAL SMARTWATCH ON LEFT WRIST ---
     const watchGroup = new THREE.Group();
     watchGroup.name = 'smartwatch_display';
-    watchGroup.position.set(-0.01, 0.038, 0.065);
-    watchGroup.rotation.x = Math.PI / 2;
-    watchGroup.rotation.y = 0.25;
+    watchGroup.position.set(-0.045, -0.015, 0.075);
+    watchGroup.rotation.x = Math.PI / 2.2;
+    watchGroup.rotation.y = 0.35;
+    watchGroup.rotation.z = -0.25;
 
     // Bezel housing
     const watchCase = new THREE.Mesh(
@@ -1355,6 +1528,15 @@ export class ModelFactory {
       new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.28, metalness: 0.88 })
     );
     watchGroup.add(watchCase);
+
+    // Raised knurled titanium pushers
+    const pusher1 = new THREE.Mesh(new THREE.CylinderGeometry(0.0035, 0.0035, 0.008, 8), knuckleMat);
+    pusher1.position.set(0.029, 0.002, 0.012);
+    pusher1.rotation.z = Math.PI / 2;
+    const pusher2 = new THREE.Mesh(new THREE.CylinderGeometry(0.0035, 0.0035, 0.008, 8), knuckleMat);
+    pusher2.position.set(0.029, 0.002, -0.012);
+    pusher2.rotation.z = Math.PI / 2;
+    watchGroup.add(pusher1, pusher2);
 
     // Illuminated OLED Screen
     const watchScreen = new THREE.Mesh(
@@ -1364,14 +1546,15 @@ export class ModelFactory {
         roughness: 0.08,
         metalness: 0.2,
         emissive: 0x0284c7,
-        emissiveIntensity: 0.5,
+        emissiveIntensity: 0.55,
       })
     );
+    watchScreen.name = 'smartwatch_screen_mesh';
     watchScreen.position.y = 0.007;
     watchScreen.rotation.x = -Math.PI / 2;
     watchGroup.add(watchScreen);
 
-    // Tactical Silicone Watch Strap
+    // Tactical Silicone / Ballistic Nylon Watch Strap
     const watchStrap = new THREE.Mesh(
       new THREE.BoxGeometry(0.032, 0.008, 0.09),
       new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.6 })
@@ -1383,35 +1566,580 @@ export class ModelFactory {
 
     // Tactical CAT Gen 7 Combat Application Tourniquet on Left Forearm
     const tqBand = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.063, 0.063, 0.038, 14),
+      new THREE.CylinderGeometry(0.059, 0.059, 0.038, 14),
       new THREE.MeshStandardMaterial({ color: 0x18181b, roughness: 0.85 })
     );
-    tqBand.position.set(-0.04, -0.08, 0.12);
-    tqBand.rotation.x = 0.64;
-    tqBand.rotation.y = -0.42;
+    tqBand.position.set(-0.095, -0.105, 0.165);
+    tqBand.rotation.x = 0.84;
+    tqBand.rotation.y = -0.48;
+    tqBand.rotation.z = 0.34;
     const tqWindlass = new THREE.Mesh(
       new THREE.BoxGeometry(0.012, 0.012, 0.065),
       new THREE.MeshStandardMaterial({ color: 0xd97706, roughness: 0.4 })
     );
-    tqWindlass.position.set(-0.08, -0.06, 0.12);
+    tqWindlass.position.set(-0.125, -0.085, 0.165);
     leftArmGroup.add(tqBand, tqWindlass);
 
     // Tactical Mil-Spec Paracord Survival Bracelet on Right Wrist
     const bracelet = new THREE.Mesh(
-      new THREE.TorusGeometry(0.044, 0.007, 8, 18),
+      new THREE.TorusGeometry(0.042, 0.007, 8, 18),
       new THREE.MeshStandardMaterial({ color: 0x3f3f46, roughness: 0.82 })
     );
-    bracelet.position.set(0, -0.04, 0.07);
-    bracelet.rotation.x = 0.82;
+    bracelet.position.set(0.038, -0.048, 0.072);
+    bracelet.rotation.x = 0.92;
+    bracelet.rotation.y = 0.28;
     const buckle = new THREE.Mesh(
       new THREE.BoxGeometry(0.018, 0.012, 0.024),
       knuckleMat
     );
-    buckle.position.set(0.038, -0.04, 0.07);
+    buckle.position.set(0.068, -0.048, 0.072);
     rightArmGroup.add(bracelet, buckle);
 
     armsGroup.add(rightArmGroup, leftArmGroup);
     return armsGroup;
+  }
+
+  private static findSkeletonBone(root: THREE.Object3D, patterns: RegExp[]): THREE.Object3D | undefined {
+    let found: THREE.Object3D | undefined;
+    for (const pat of patterns) {
+      root.traverse((child) => {
+        if (!found && child.name && pat.test(child.name)) {
+          found = child;
+        }
+      });
+      if (found) return found;
+    }
+    return undefined;
+  }
+
+  private static buildHandBasis(hand: THREE.Object3D, side: 'Left' | 'Right'): CachedHandBasis | undefined {
+    const middleBone = ModelFactory.findSkeletonBone(hand, [
+      new RegExp(`${side}HandMiddle1$`, 'i'),
+      new RegExp(`${side}.*Middle1`, 'i'),
+      new RegExp(`${side}HandIndex1$`, 'i'),
+      new RegExp(`${side}.*Index1`, 'i'),
+    ]);
+    if (!middleBone) return undefined;
+
+    const indexBone = ModelFactory.findSkeletonBone(hand, [
+      new RegExp(`${side}HandIndex1$`, 'i'),
+      new RegExp(`${side}.*Index1`, 'i'),
+    ]);
+    const pinkyBone = ModelFactory.findSkeletonBone(hand, [
+      new RegExp(`${side}HandPinky1$`, 'i'),
+      new RegExp(`${side}.*Pinky1`, 'i'),
+      new RegExp(`${side}HandRing1$`, 'i'),
+    ]);
+
+    const e1 = middleBone.position.clone();
+    if (e1.lengthSq() < 1e-6) return undefined;
+    e1.normalize();
+
+    if (indexBone && pinkyBone) {
+      const across = pinkyBone.position.clone().sub(indexBone.position);
+      if (across.lengthSq() > 1e-6) {
+        const e3 = new THREE.Vector3().crossVectors(e1, across);
+        if (e3.lengthSq() > 1e-6) {
+          e3.normalize();
+          const e2 = new THREE.Vector3().crossVectors(e3, e1).normalize();
+          return { middleBone, e1, e2, e3, hasFullBasis: true };
+        }
+      }
+    }
+
+    return {
+      middleBone,
+      e1,
+      e2: new THREE.Vector3(),
+      e3: new THREE.Vector3(),
+      hasFullBasis: false,
+    };
+  }
+
+  private static getOrCacheWeaponHoldRig(botRoot: THREE.Object3D): WeaponHoldRig {
+    if (botRoot.userData.__weaponHoldRig) {
+      return botRoot.userData.__weaponHoldRig as WeaponHoldRig;
+    }
+
+    const rightHand = ModelFactory.findSkeletonBone(botRoot, [
+      /RightHand$/i,
+      /Right_Hand$/i,
+      /hand_r$/i,
+      /R_Hand$/i,
+      /Bip01 R Hand$/i,
+    ]);
+    const leftHand = ModelFactory.findSkeletonBone(botRoot, [
+      /LeftHand$/i,
+      /Left_Hand$/i,
+      /hand_l$/i,
+      /L_Hand$/i,
+      /Bip01 L Hand$/i,
+    ]);
+
+    const rightForeArm = ModelFactory.findSkeletonBone(botRoot, [
+      /RightForeArm$/i,
+      /Right_ForeArm$/i,
+      /lowerarm_r$/i,
+      /Bip01 R Forearm$/i,
+    ]);
+    const leftForeArm = ModelFactory.findSkeletonBone(botRoot, [
+      /LeftForeArm$/i,
+      /Left_ForeArm$/i,
+      /lowerarm_l$/i,
+      /Bip01 L Forearm$/i,
+    ]);
+
+    const rightArm = ModelFactory.findSkeletonBone(botRoot, [
+      /RightArm$/i,
+      /Right_Arm$/i,
+      /upperarm_r$/i,
+      /Bip01 R UpperArm$/i,
+    ]);
+    const leftArm = ModelFactory.findSkeletonBone(botRoot, [
+      /LeftArm$/i,
+      /Left_Arm$/i,
+      /upperarm_l$/i,
+      /Bip01 L UpperArm$/i,
+    ]);
+
+    const rig: WeaponHoldRig = {
+      hips: ModelFactory.findSkeletonBone(botRoot, [/Hips$/i, /Pelvis$/i]),
+      spine2: ModelFactory.findSkeletonBone(botRoot, [/Spine2$/i, /Chest$/i, /Spine1$/i, /Spine$/i]),
+      head: ModelFactory.findSkeletonBone(botRoot, [/Head$/i]),
+      rightShoulder: ModelFactory.findSkeletonBone(botRoot, [/RightShoulder$/i, /clavicle_r$/i]),
+      rightArm,
+      rightForeArm,
+      rightHand,
+      leftShoulder: ModelFactory.findSkeletonBone(botRoot, [/LeftShoulder$/i, /clavicle_l$/i]),
+      leftArm,
+      leftForeArm,
+      leftHand,
+      rightHandBasis: rightHand ? ModelFactory.buildHandBasis(rightHand, 'Right') : undefined,
+      leftHandBasis: leftHand ? ModelFactory.buildHandBasis(leftHand, 'Left') : undefined,
+      handSocket: botRoot.getObjectByName('hand_weapon_socket') || undefined,
+      botWeapon: botRoot.getObjectByName('bot_weapon') || undefined,
+      initialized: true,
+    };
+
+    botRoot.userData.__weaponHoldRig = rig;
+    return rig;
+  }
+
+  private static rotateBoneWorldDelta(
+    bone: THREE.Object3D,
+    deltaWorldQuat: THREE.Quaternion
+  ): void {
+    if (!bone.parent) return;
+    bone.getWorldQuaternion(_ikBoneWorldQuat);
+    bone.parent.getWorldQuaternion(_ikParentWorldQuat);
+    _ikBoneWorldQuat.premultiply(deltaWorldQuat);
+    _ikParentWorldQuat.invert();
+    bone.quaternion.copy(_ikParentWorldQuat).multiply(_ikBoneWorldQuat).normalize();
+    bone.updateMatrixWorld(true);
+  }
+
+  private static solveTwoBoneArmIK(
+    upperArm: THREE.Object3D,
+    foreArm: THREE.Object3D,
+    hand: THREE.Object3D,
+    targetWristWorld: THREE.Vector3,
+    poleDirWorld: THREE.Vector3,
+    fallbackUp: THREE.Vector3
+  ): void {
+    upperArm.getWorldPosition(_ikRShoulderPos);
+    foreArm.getWorldPosition(_ikRElbowPos);
+    hand.getWorldPosition(_ikRWristPos);
+
+    const l1 = _ikRShoulderPos.distanceTo(_ikRElbowPos);
+    const l2 = _ikRElbowPos.distanceTo(_ikRWristPos);
+    if (l1 < 0.02 || l2 < 0.02) return;
+
+    _ikToTarget.subVectors(targetWristWorld, _ikRShoulderPos);
+    const rawDist = _ikToTarget.length();
+    if (rawDist < 1e-4) return;
+
+    const minDist = Math.abs(l1 - l2) + 0.015;
+    const maxDist = (l1 + l2) * 0.985;
+    const d = Math.max(minDist, Math.min(maxDist, rawDist));
+
+    _ikDirST.copy(_ikToTarget).divideScalar(rawDist);
+    const cosAlpha = THREE.MathUtils.clamp((l1 * l1 + d * d - l2 * l2) / (2 * l1 * d), -1, 1);
+    const sinAlpha = Math.sqrt(Math.max(0, 1 - cosAlpha * cosAlpha));
+
+    // Project elbow pole perpendicular to shoulder->wrist line
+    _ikBendDir.copy(poleDirWorld).addScaledVector(_ikDirST, -poleDirWorld.dot(_ikDirST));
+    if (_ikBendDir.lengthSq() < 1e-4) {
+      _ikBendDir.copy(fallbackUp).negate().addScaledVector(_ikDirST, -fallbackUp.dot(_ikDirST) * -1);
+    }
+    if (_ikBendDir.lengthSq() < 1e-4) {
+      _ikBendDir.set(0, -1, 0);
+    } else {
+      _ikBendDir.normalize();
+    }
+
+    _ikElbowTarget
+      .copy(_ikRShoulderPos)
+      .addScaledVector(_ikDirST, l1 * cosAlpha)
+      .addScaledVector(_ikBendDir, l1 * sinAlpha);
+
+    // 1. Aim upper arm bone toward computed elbow target
+    _ikCurDir.subVectors(_ikRElbowPos, _ikRShoulderPos);
+    if (_ikCurDir.lengthSq() > 1e-6) {
+      _ikCurDir.normalize();
+      _ikDesDir.subVectors(_ikElbowTarget, _ikRShoulderPos).normalize();
+      _ikDeltaQuat.setFromUnitVectors(_ikCurDir, _ikDesDir);
+      ModelFactory.rotateBoneWorldDelta(upperArm, _ikDeltaQuat);
+    }
+
+    // 2. Aim forearm bone toward exact wrist target
+    foreArm.getWorldPosition(_ikRElbowPos);
+    hand.getWorldPosition(_ikRWristPos);
+    _ikCurDir.subVectors(_ikRWristPos, _ikRElbowPos);
+    if (_ikCurDir.lengthSq() > 1e-6) {
+      _ikCurDir.normalize();
+      _ikDesDir.subVectors(targetWristWorld, _ikRElbowPos);
+      if (_ikDesDir.lengthSq() > 1e-6) {
+        _ikDesDir.normalize();
+        _ikDeltaQuat.setFromUnitVectors(_ikCurDir, _ikDesDir);
+        ModelFactory.rotateBoneWorldDelta(foreArm, _ikDeltaQuat);
+      }
+    }
+  }
+
+  private static orientHandToBasis(
+    hand: THREE.Object3D,
+    basis: CachedHandBasis | undefined,
+    desiredFingerDirWorld: THREE.Vector3,
+    desiredIndexToPinkyWorld: THREE.Vector3
+  ): void {
+    if (!basis || !hand.parent) return;
+
+    if (basis.hasFullBasis) {
+      _ikW1.copy(desiredFingerDirWorld).normalize();
+      _ikW3.crossVectors(_ikW1, desiredIndexToPinkyWorld);
+      if (_ikW3.lengthSq() < 1e-6) {
+        basis.middleBone.getWorldPosition(_ikChildWorldPos);
+        hand.getWorldPosition(_ikTargetWorldPos);
+        _ikCurDir.subVectors(_ikChildWorldPos, _ikTargetWorldPos).normalize();
+        _ikDeltaQuat.setFromUnitVectors(_ikCurDir, _ikW1);
+        ModelFactory.rotateBoneWorldDelta(hand, _ikDeltaQuat);
+        return;
+      }
+      _ikW3.normalize();
+      _ikW2.crossVectors(_ikW3, _ikW1).normalize();
+
+      _ikMatWorld.makeBasis(_ikW1, _ikW2, _ikW3);
+      _ikMatLocal.makeBasis(basis.e1, basis.e2, basis.e3);
+      _ikMatLocal.transpose();
+      _ikMatRot.multiplyMatrices(_ikMatWorld, _ikMatLocal);
+
+      _ikBoneWorldQuat.setFromRotationMatrix(_ikMatRot);
+      hand.parent.getWorldQuaternion(_ikParentWorldQuat);
+      _ikParentWorldQuat.invert();
+      hand.quaternion.copy(_ikParentWorldQuat).multiply(_ikBoneWorldQuat).normalize();
+      hand.updateMatrixWorld(true);
+    } else {
+      basis.middleBone.getWorldPosition(_ikChildWorldPos);
+      hand.getWorldPosition(_ikTargetWorldPos);
+      _ikCurDir.subVectors(_ikChildWorldPos, _ikTargetWorldPos);
+      if (_ikCurDir.lengthSq() > 1e-6) {
+        _ikCurDir.normalize();
+        _ikDesDir.copy(desiredFingerDirWorld).normalize();
+        _ikDeltaQuat.setFromUnitVectors(_ikCurDir, _ikDesDir);
+        ModelFactory.rotateBoneWorldDelta(hand, _ikDeltaQuat);
+      }
+    }
+  }
+
+  /**
+   * Solves upper-body combat weapon-holding IK (shoulders, elbows, hands, and torso shoulder-pocket cant)
+   * and aligns hand_weapon_socket so the held firearm sits naturally gripped with barrel aimed forward (+Z).
+   */
+  public static alignHandWeaponSocket(
+    botRoot: THREE.Object3D,
+    pitchOffset: number = 0,
+    rollOffset: number = 0,
+    options?: WeaponHoldPoseOptions
+  ): void {
+    const rig = ModelFactory.getOrCacheWeaponHoldRig(botRoot);
+    const socket = rig.handSocket;
+    if (!socket || !socket.parent) return;
+
+    const stance = options?.stance || 'ready';
+    if (stance === 'dead') return;
+
+    const weaponType: WeaponType = options?.weaponType || botRoot.userData.weaponType || 'm4';
+    const metrics = ModelFactory.getWeaponHoldMetrics(weaponType);
+    const recoilKick = options?.recoilKick || 0;
+    const reloadProgress = options?.reloadProgress || 0;
+
+    botRoot.updateMatrixWorld(true);
+    botRoot.matrixWorld.decompose(_ikRootPos, _ikRootQuat, _ikRootScale);
+
+    // Character anatomical basis in world space (+Z forward, +Y up, -X character right, +X character left)
+    _ikCharFwd.set(0, 0, 1).applyQuaternion(_ikRootQuat).normalize();
+    _ikCharUp.set(0, 1, 0).applyQuaternion(_ikRootQuat).normalize();
+    _ikCharRight.set(-1, 0, 0).applyQuaternion(_ikRootQuat).normalize();
+
+    const hasFullArmIK = Boolean(
+      rig.rightArm &&
+        rig.rightForeArm &&
+        rig.rightHand &&
+        rig.leftArm &&
+        rig.leftForeArm &&
+        rig.leftHand
+    );
+
+    if (hasFullArmIK) {
+      // Auto-verify anatomical right vs left from actual arm positions in character space
+      rig.rightArm!.getWorldPosition(_ikRShoulderPos);
+      rig.leftArm!.getWorldPosition(_ikLShoulderPos);
+      _ikShoulderSpanVec.subVectors(_ikRShoulderPos, _ikLShoulderPos);
+      if (_ikShoulderSpanVec.dot(_ikCharRight) < 0) {
+        _ikCharRight.negate();
+      }
+      _ikCharLeft.copy(_ikCharRight).negate();
+
+      // Rotate upper chest (bladed tactical shooter stance) so left support shoulder moves forward toward handguard
+      if (!metrics.isPistol && rig.spine2) {
+        const chestYaw = stance === 'combat' ? 0.38 : stance === 'reload' ? 0.24 : 0.32;
+        _ikDeltaQuat.setFromAxisAngle(_ikCharUp, chestYaw);
+        ModelFactory.rotateBoneWorldDelta(rig.spine2, _ikDeltaQuat);
+
+        // Counter-rotate head so operator looks straight downrange toward target
+        if (rig.head) {
+          _ikDeltaQuat.setFromAxisAngle(_ikCharUp, -chestYaw * 0.88);
+          ModelFactory.rotateBoneWorldDelta(rig.head, _ikDeltaQuat);
+        }
+      }
+
+      // Refresh shoulder positions after spine twist
+      rig.rightArm!.getWorldPosition(_ikRShoulderPos);
+      rig.leftArm!.getWorldPosition(_ikLShoulderPos);
+      _ikShoulderMid.addVectors(_ikRShoulderPos, _ikLShoulderPos).multiplyScalar(0.5);
+
+      // Desired weapon world orientation in character space
+      let yawOffset = 0;
+      let stancePitch = 0;
+      let stanceRoll = 0;
+      let gripRight = 0.095;
+      let gripUp = -0.115;
+      let gripFwd = 0.145;
+
+      if (metrics.isPistol) {
+        // Two-handed tactical Weaver pistol stance
+        if (stance === 'combat') {
+          yawOffset = 0.04;
+          stancePitch = -0.02 + pitchOffset;
+          stanceRoll = rollOffset;
+          gripRight = 0.04;
+          gripUp = -0.055;
+          gripFwd = 0.32 - recoilKick * 0.04;
+        } else if (stance === 'reload') {
+          yawOffset = 0.32;
+          stancePitch = -0.28;
+          stanceRoll = 0.35;
+          gripRight = 0.07;
+          gripUp = -0.08;
+          gripFwd = 0.22;
+        } else {
+          // Low-ready patrol pistol hold
+          yawOffset = 0.06;
+          stancePitch = 0.24 + pitchOffset;
+          stanceRoll = rollOffset;
+          gripRight = 0.05;
+          gripUp = -0.13;
+          gripFwd = 0.26;
+        }
+      } else {
+        // Long-gun shouldered tactical hold (M4, AK, SCAR, MP5, Vector, Shotgun, Sniper)
+        if (stance === 'combat') {
+          // Shouldered high-aiming combat stance: buttstock tucked in right shoulder pocket, barrel forward
+          yawOffset = 0.32;
+          stancePitch = -0.02 + pitchOffset;
+          stanceRoll = 0.04 + rollOffset;
+          gripRight = 0.09;
+          gripUp = -0.095;
+          gripFwd = 0.115 - recoilKick * 0.035;
+        } else if (stance === 'reload') {
+          // Tilted magwell-exposed reload cant
+          yawOffset = 0.56;
+          stancePitch = -0.22;
+          stanceRoll = 0.44;
+          gripRight = 0.09;
+          gripUp = -0.10;
+          gripFwd = 0.145;
+        } else {
+          // Iconic COD tactical low-ready carry across chest
+          yawOffset = 0.58;
+          stancePitch = 0.20 + pitchOffset;
+          stanceRoll = 0.08 + rollOffset;
+          gripRight = 0.105;
+          gripUp = -0.14;
+          gripFwd = 0.13;
+        }
+      }
+
+      // Compute exact world quaternion for weapon (barrel along +Z of this quaternion)
+      _ikEuler.set(stancePitch, yawOffset, stanceRoll, 'YXZ');
+      _ikLocalOffsetQuat.setFromEuler(_ikEuler);
+      _ikWeaponQuat.copy(_ikRootQuat).multiply(_ikLocalOffsetQuat);
+
+      _ikWeaponFwd.set(0, 0, 1).applyQuaternion(_ikWeaponQuat).normalize();
+      _ikWeaponUp.set(0, 1, 0).applyQuaternion(_ikWeaponQuat).normalize();
+      _ikWeaponRight.set(-1, 0, 0).applyQuaternion(_ikWeaponQuat).normalize();
+
+      // Desired right-hand & left-hand palm/finger wrap directions in world space
+      _ikRightFingerDir
+        .copy(_ikWeaponFwd)
+        .multiplyScalar(0.84)
+        .addScaledVector(_ikWeaponUp, -0.48)
+        .addScaledVector(_ikWeaponRight, -0.22)
+        .normalize();
+
+      if (metrics.isPistol) {
+        _ikLeftFingerDir
+          .copy(_ikWeaponRight)
+          .multiplyScalar(0.82)
+          .addScaledVector(_ikWeaponFwd, 0.48)
+          .addScaledVector(_ikWeaponUp, -0.22)
+          .normalize();
+      } else {
+        _ikLeftFingerDir
+          .copy(_ikWeaponRight)
+          .multiplyScalar(0.78)
+          .addScaledVector(_ikWeaponUp, 0.56)
+          .addScaledVector(_ikWeaponFwd, 0.24)
+          .normalize();
+      }
+
+      // Compute right-hand pistol grip world target & shift back ~3.8cm along finger axis so palm center holds the grip
+      _ikRTarget
+        .copy(_ikShoulderMid)
+        .addScaledVector(_ikCharRight, gripRight)
+        .addScaledVector(_ikCharUp, gripUp)
+        .addScaledVector(_ikCharFwd, gripFwd)
+        .addScaledVector(_ikRightFingerDir, -0.038);
+
+      // Clamp right hand strictly inside right arm max reach
+      rig.rightForeArm!.getWorldPosition(_ikRElbowPos);
+      rig.rightHand!.getWorldPosition(_ikRWristPos);
+      const rMaxReach =
+        (_ikRShoulderPos.distanceTo(_ikRElbowPos) + _ikRElbowPos.distanceTo(_ikRWristPos)) * 0.94;
+      _ikToTarget.subVectors(_ikRTarget, _ikRShoulderPos);
+      const rDist = _ikToTarget.length();
+      if (rDist > rMaxReach && rDist > 1e-4) {
+        _ikRTarget.copy(_ikRShoulderPos).addScaledVector(_ikToTarget, rMaxReach / rDist);
+      }
+
+      // Solve Right Arm IK -> orient right hand -> align hand_weapon_socket -> derive Left Hand target from placed gun
+      _ikRPole
+        .copy(_ikCharRight)
+        .multiplyScalar(0.65)
+        .addScaledVector(_ikCharUp, -0.85)
+        .addScaledVector(_ikCharFwd, -0.22)
+        .normalize();
+      ModelFactory.solveTwoBoneArmIK(
+        rig.rightArm!,
+        rig.rightForeArm!,
+        rig.rightHand!,
+        _ikRTarget,
+        _ikRPole,
+        _ikCharUp
+      );
+
+      // Orient right hand so fingers wrap cleanly around pistol grip
+      _ikBendDir.copy(_ikWeaponUp).negate();
+      ModelFactory.orientHandToBasis(rig.rightHand!, rig.rightHandBasis, _ikRightFingerDir, _ikBendDir);
+
+      // Align hand_weapon_socket upright & forward in world space (locked to weaponWorldQuat)
+      socket.parent.getWorldQuaternion(_ikParentWorldQuat);
+      _ikParentWorldQuat.invert();
+      socket.quaternion.copy(_ikParentWorldQuat).multiply(_ikWeaponQuat).normalize();
+      socket.updateMatrixWorld(true);
+      socket.getWorldPosition(_ikSocketWorld);
+
+      // Left-hand foregrip target derived directly from actual placed hand_weapon_socket in world space
+      if (stance === 'reload') {
+        const magDip = Math.sin(reloadProgress * Math.PI);
+        _ikLTarget
+          .copy(_ikShoulderMid)
+          .addScaledVector(_ikCharLeft, 0.08 - magDip * 0.04)
+          .addScaledVector(_ikCharUp, -0.22 - magDip * 0.14)
+          .addScaledVector(_ikCharFwd, 0.18 - magDip * 0.06);
+      } else {
+        const s = metrics.scale;
+        _ikForegripSocket.set(
+          (metrics.gripLocal.x - metrics.foregripLocal.x) * s,
+          (metrics.foregripLocal.y - metrics.gripLocal.y) * s,
+          (metrics.gripLocal.z - metrics.foregripLocal.z) * s
+        );
+        _ikForegripSocket.applyQuaternion(_ikWeaponQuat);
+
+        // Seat left palm center under handguard/foregrip (-0.036 along left finger wrap axis)
+        _ikForegripWorld
+          .copy(_ikSocketWorld)
+          .add(_ikForegripSocket)
+          .addScaledVector(_ikWeaponRight, -0.015)
+          .addScaledVector(_ikLeftFingerDir, -0.036);
+
+        rig.leftForeArm!.getWorldPosition(_ikLElbowPos);
+        rig.leftHand!.getWorldPosition(_ikLWristPos);
+        const lMaxReach =
+          (_ikLShoulderPos.distanceTo(_ikLElbowPos) + _ikLElbowPos.distanceTo(_ikLWristPos)) * 0.96;
+
+        _ikToTarget.subVectors(_ikForegripWorld, _ikLShoulderPos);
+        const lDist = _ikToTarget.length();
+        if (lDist > lMaxReach && lDist > 1e-4 && !metrics.isPistol) {
+          // Slide support grip rearward along the rifle's own handguard/magwell axis so the hand stays ON the gun
+          _ikForegripWorld
+            .copy(_ikSocketWorld)
+            .addScaledVector(_ikForegripSocket, 0.58)
+            .addScaledVector(_ikWeaponRight, -0.015)
+            .addScaledVector(_ikLeftFingerDir, -0.036);
+          _ikToTarget.subVectors(_ikForegripWorld, _ikLShoulderPos);
+          const slidDist = _ikToTarget.length();
+          if (slidDist > lMaxReach && slidDist > 1e-4) {
+            _ikLTarget.copy(_ikLShoulderPos).addScaledVector(_ikToTarget, lMaxReach / slidDist);
+          } else {
+            _ikLTarget.copy(_ikForegripWorld);
+          }
+        } else if (lDist > lMaxReach && lDist > 1e-4) {
+          _ikLTarget.copy(_ikLShoulderPos).addScaledVector(_ikToTarget, lMaxReach / lDist);
+        } else {
+          _ikLTarget.copy(_ikForegripWorld);
+        }
+      }
+
+      // Solve Left Arm IK to clasp the handguard / foregrip
+      _ikLPole
+        .copy(_ikCharLeft)
+        .multiplyScalar(0.38)
+        .addScaledVector(_ikCharUp, -0.92)
+        .addScaledVector(_ikCharFwd, -0.15)
+        .normalize();
+      ModelFactory.solveTwoBoneArmIK(
+        rig.leftArm!,
+        rig.leftForeArm!,
+        rig.leftHand!,
+        _ikLTarget,
+        _ikLPole,
+        _ikCharUp
+      );
+
+      if (stance !== 'reload') {
+        _ikBendDir.copy(metrics.isPistol ? _ikWeaponUp : _ikWeaponFwd).negate();
+        ModelFactory.orientHandToBasis(rig.leftHand!, rig.leftHandBasis, _ikLeftFingerDir, _ikBendDir);
+      }
+      return;
+    }
+
+    // Fallback: simple socket upright alignment if skeleton lacks standard arm bones
+    _ikEuler.set(pitchOffset, 0, rollOffset, 'YXZ');
+    _ikLocalOffsetQuat.setFromEuler(_ikEuler);
+    _ikWeaponQuat.copy(_ikRootQuat).multiply(_ikLocalOffsetQuat);
+    socket.parent.getWorldQuaternion(_ikParentWorldQuat);
+    socket.quaternion.copy(_ikParentWorldQuat.invert().multiply(_ikWeaponQuat));
   }
 
   // --- AAA 3D ENEMY COMBAT OPERATOR MODEL (FACTION & ARCHETYPE DIVERSITY) ---
@@ -1420,6 +2148,85 @@ export class ModelFactory {
     archetype: 'assault' | 'heavy' | 'sniper' | 'flanker' = 'assault',
     weaponType: WeaponType = 'm4'
   ): THREE.Group {
+    const custom3DModel = CharacterModelLoader.getActiveCustomModel();
+    if (custom3DModel) {
+      custom3DModel.name = `bot_${team}_${archetype}`;
+      custom3DModel.userData.weaponType = weaponType;
+      custom3DModel.updateMatrixWorld(true);
+
+      // Attach weapon to right hand bone if found
+      const rightHand = ModelFactory.findSkeletonBone(custom3DModel, [
+        /RightHand$/i,
+        /Right_Hand$/i,
+        /hand_r$/i,
+        /R_Hand$/i,
+        /Bip01 R Hand$/i,
+      ]);
+
+      const botWeapon = ModelFactory.createWeaponMesh(weaponType, team === 'axis' ? 'obsidian' : 'standard');
+      botWeapon.name = 'bot_weapon';
+      botWeapon.traverse((child) => {
+        if (child instanceof THREE.Mesh) {
+          child.castShadow = true;
+          child.receiveShadow = true;
+        }
+      });
+
+      const metrics = ModelFactory.getWeaponHoldMetrics(weaponType);
+
+      if (rightHand) {
+        // Compensate for GLB Armature/Character scale (often 0.01 cm-to-m in Mixamo/Sketchfab models)
+        const handWorldScale = new THREE.Vector3();
+        rightHand.getWorldScale(handWorldScale);
+        const avgScale = (Math.abs(handWorldScale.x) + Math.abs(handWorldScale.y) + Math.abs(handWorldScale.z)) / 3;
+        const invScale = avgScale > 0.0001 ? 1 / avgScale : 1;
+
+        const handSocket = new THREE.Group();
+        handSocket.name = 'hand_weapon_socket';
+        handSocket.scale.setScalar(invScale);
+
+        const rightPalmBone = ModelFactory.findSkeletonBone(rightHand, [
+          /RightHandMiddle1$/i,
+          /Middle1$/i,
+          /RightHandIndex1$/i,
+        ]);
+        if (rightPalmBone && rightPalmBone.position.lengthSq() > 1e-6) {
+          handSocket.position.copy(rightPalmBone.position).multiplyScalar(0.42);
+        }
+
+        // Seat the weapon's pistol grip center right at (0, 0, 0) in handSocket (right palm)
+        const s = metrics.scale;
+        botWeapon.scale.setScalar(s);
+        botWeapon.position.set(
+          metrics.gripLocal.x * s,
+          -metrics.gripLocal.y * s,
+          metrics.gripLocal.z * s
+        );
+        botWeapon.rotation.set(0, Math.PI, 0);
+        botWeapon.userData.isBoneAttached = true;
+
+        handSocket.add(botWeapon);
+        rightHand.add(handSocket);
+
+        // Immediately solve Two-Bone IK & align socket upright & forward for frame-0 visibility
+        ModelFactory.alignHandWeaponSocket(custom3DModel, 0, 0, { stance: 'ready', weaponType });
+      } else {
+        botWeapon.userData.isBoneAttached = false;
+        botWeapon.scale.setScalar(metrics.scale);
+        botWeapon.position.set(-0.14, 1.24, 0.34);
+        botWeapon.rotation.set(0, Math.PI, 0);
+        custom3DModel.add(botWeapon);
+      }
+
+      // Add tactical faction recognition beacon
+      const beaconMat = new THREE.MeshBasicMaterial({ color: team === 'axis' ? 0xef4444 : 0x06b6d4 });
+      const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.025, 8, 8), beaconMat);
+      beacon.position.set(0, 1.78, 0);
+      custom3DModel.add(beacon);
+
+      return custom3DModel;
+    }
+
     const botGroup = new THREE.Group();
     botGroup.name = `bot_${team}_${archetype}`;
 
@@ -1792,60 +2599,61 @@ export class ModelFactory {
 
     botGroup.add(battleBelt, cobraBuckle, dropHolster, sidearmGrip, dumpPouch, tourniquet);
 
-    // 4. ARTICULATED ARMS & COMBAT GLOVES
-    // Left Arm (Shoulder socket at -0.28, 1.38, 0.04)
+    // 4. ARTICULATED ARMS & COMBAT GLOVES (Shoulder -> Upper Arm -> Elbow -> Forearm -> Glove)
+    // Negative X rotation swings -Y arms FORWARD (+Z) toward the held weapon!
+    // Left Arm (Shoulder socket at -0.26, 1.38, 0.04)
     const leftArm = new THREE.Group();
     leftArm.name = 'bot_left_arm';
-    leftArm.position.set(-0.28, 1.38, 0.04);
-    leftArm.rotation.x = 0.5;
+    leftArm.position.set(-0.26, 1.38, 0.04);
+    leftArm.rotation.set(-0.72, 0.42, 0.16);
 
-    // Upper arm sleeve
     const leftUpperArm = new THREE.Mesh(new THREE.CylinderGeometry(0.068, 0.062, 0.24, 12), uniformMat);
     leftUpperArm.position.set(0, -0.12, 0);
     leftArm.add(leftUpperArm);
 
-    // Tactical Elbow Pad with molded strike cap
-    const leftElbowPad = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, 0.11, 10), armorPlateMat);
-    leftElbowPad.position.set(0, -0.24, -0.02);
-    leftArm.add(leftElbowPad);
+    const leftElbow = new THREE.Group();
+    leftElbow.name = 'bot_left_elbow';
+    leftElbow.position.set(0, -0.24, 0);
+    leftElbow.rotation.set(-0.78, 0, 0);
 
-    // Forearm
-    const leftForearm = new THREE.Mesh(new THREE.CylinderGeometry(0.062, 0.055, 0.24, 12), uniformMat);
-    leftForearm.position.set(0, -0.36, 0.02);
-    leftArm.add(leftForearm);
-
-    // Tactical Operator Glove with Carbon Knuckle Protector
-    const leftHand = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.06, 0.11), gloveMat);
-    leftHand.position.set(0, -0.48, 0.03);
-    const leftKnuckle = new THREE.Mesh(new THREE.BoxGeometry(0.068, 0.02, 0.04), armorPlateMat);
-    leftKnuckle.position.set(0, -0.46, 0.08);
-    leftArm.add(leftHand, leftKnuckle);
+    const leftElbowPad = new THREE.Mesh(new THREE.CylinderGeometry(0.072, 0.072, 0.09, 10), armorPlateMat);
+    leftElbowPad.position.set(0, 0, -0.02);
+    const leftForearm = new THREE.Mesh(new THREE.CylinderGeometry(0.060, 0.052, 0.24, 12), uniformMat);
+    leftForearm.position.set(0, -0.12, 0);
+    const leftHand = new THREE.Mesh(new THREE.BoxGeometry(0.072, 0.06, 0.105), gloveMat);
+    leftHand.position.set(0, -0.24, 0.02);
+    const leftKnuckle = new THREE.Mesh(new THREE.BoxGeometry(0.064, 0.02, 0.038), armorPlateMat);
+    leftKnuckle.position.set(0, -0.22, 0.065);
+    leftElbow.add(leftElbowPad, leftForearm, leftHand, leftKnuckle);
+    leftArm.add(leftElbow);
 
     botGroup.add(leftArm);
 
-    // Right Arm (Shoulder socket at 0.28, 1.38, 0.04)
+    // Right Arm (Shoulder socket at 0.26, 1.38, 0.04)
     const rightArm = new THREE.Group();
     rightArm.name = 'bot_right_arm';
-    rightArm.position.set(0.28, 1.38, 0.04);
-    rightArm.rotation.x = 0.7;
+    rightArm.position.set(0.26, 1.38, 0.04);
+    rightArm.rotation.set(-0.55, -0.22, -0.14);
 
     const rightUpperArm = new THREE.Mesh(new THREE.CylinderGeometry(0.068, 0.062, 0.24, 12), uniformMat);
     rightUpperArm.position.set(0, -0.12, 0);
     rightArm.add(rightUpperArm);
 
-    const rightElbowPad = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, 0.11, 10), armorPlateMat);
-    rightElbowPad.position.set(0, -0.24, -0.02);
-    rightArm.add(rightElbowPad);
+    const rightElbow = new THREE.Group();
+    rightElbow.name = 'bot_right_elbow';
+    rightElbow.position.set(0, -0.24, 0);
+    rightElbow.rotation.set(-0.92, 0, 0);
 
-    const rightForearm = new THREE.Mesh(new THREE.CylinderGeometry(0.062, 0.055, 0.24, 12), uniformMat);
-    rightForearm.position.set(0, -0.36, 0.02);
-    rightArm.add(rightForearm);
-
-    const rightHand = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.06, 0.11), gloveMat);
-    rightHand.position.set(0, -0.48, 0.03);
-    const rightKnuckle = new THREE.Mesh(new THREE.BoxGeometry(0.068, 0.02, 0.04), armorPlateMat);
-    rightKnuckle.position.set(0, -0.46, 0.08);
-    rightArm.add(rightHand, rightKnuckle);
+    const rightElbowPad = new THREE.Mesh(new THREE.CylinderGeometry(0.072, 0.072, 0.09, 10), armorPlateMat);
+    rightElbowPad.position.set(0, 0, -0.02);
+    const rightForearm = new THREE.Mesh(new THREE.CylinderGeometry(0.060, 0.052, 0.24, 12), uniformMat);
+    rightForearm.position.set(0, -0.12, 0);
+    const rightHand = new THREE.Mesh(new THREE.BoxGeometry(0.072, 0.06, 0.105), gloveMat);
+    rightHand.position.set(0, -0.24, 0.02);
+    const rightKnuckle = new THREE.Mesh(new THREE.BoxGeometry(0.064, 0.02, 0.038), armorPlateMat);
+    rightKnuckle.position.set(0, -0.22, 0.065);
+    rightElbow.add(rightElbowPad, rightForearm, rightHand, rightKnuckle);
+    rightArm.add(rightElbow);
 
     botGroup.add(rightArm);
 
@@ -1927,11 +2735,11 @@ export class ModelFactory {
 
     botGroup.add(rightLeg);
 
-    // 6. EQUIPPED FIREARM IN HANDS
+    // 6. EQUIPPED FIREARM IN HANDS (Seated in right hand pistol grip & supported by left hand)
     const botRifle = ModelFactory.createWeaponMesh(weaponType, team === 'axis' ? 'standard' : 'woodland');
-    botRifle.scale.set(0.72, 0.72, 0.72);
-    botRifle.position.set(0.18, 1.15, 0.35);
-    botRifle.rotation.y = Math.PI;
+    botRifle.scale.set(0.76, 0.76, 0.76);
+    botRifle.position.set(0.14, 1.24, 0.34);
+    botRifle.rotation.set(0.06, Math.PI + 0.18, 0);
     botRifle.name = 'bot_weapon';
     botGroup.add(botRifle);
 

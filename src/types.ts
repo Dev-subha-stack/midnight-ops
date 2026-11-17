@@ -2,6 +2,8 @@ export type WeaponType = 'm4' | 'mp5' | 'sniper' | 'shotgun' | 'deagle' | 'ak47'
 
 export type WeaponCamo = 'standard' | 'damascus' | 'gold' | 'woodland' | 'carbon' | 'obsidian';
 
+export type OperatorCamo = 'allies_multicam' | 'axis_shadow' | 'spec_ops' | 'desert_tan';
+
 export type OpticType = 'iron_sight' | 'reflex_dot' | 'red_dot_micro' | 'holo_553' | 'acog_4x' | 'sniper_variable' | 'thermal_flir' | 'thermal_ir';
 
 export type ReticleColor = 'red' | 'green' | 'amber' | 'cyan';
@@ -88,7 +90,6 @@ export interface PlayerStats {
   shotsHit: number;
   tacSprintStamina?: number; // 0 to 1
   isTacSprinting?: boolean;
-  isTacStance?: boolean;
   isMantling?: boolean;
   // Dynamic Scope & Steady Aim Telemetry
   breathStamina?: number; // 0 to 1
