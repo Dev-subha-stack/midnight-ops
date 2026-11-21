@@ -153,9 +153,25 @@ input[type="range"]:active {
   touch-action: none;
 }
 
-.Gamepad-controller.is-active {
+.Gamepad-controller:not(.Gamepad-fire-draggable).is-active {
   box-shadow: 0 0 22px currentColor;
   transform: translate(-50%, -50%) scale(0.95) !important;
+}
+
+.Gamepad-fire-knob {
+  background: radial-gradient(circle at 35% 35%, rgba(248, 113, 113, 0.92), rgba(185, 28, 28, 0.88));
+  border: 2px solid rgba(254, 202, 202, 0.9);
+  box-shadow: 0 0 14px rgba(239, 68, 68, 0.55);
+}
+
+.Gamepad-controller.Gamepad-fire-draggable.is-active {
+  box-shadow: 0 0 28px rgba(239, 68, 68, 0.55);
+  border-color: rgba(252, 165, 165, 0.95) !important;
+}
+
+.Gamepad-controller.Gamepad-fire-draggable.is-active .Gamepad-fire-knob {
+  background: radial-gradient(circle at 35% 35%, rgba(254, 202, 202, 0.98), rgba(220, 38, 38, 0.95));
+  box-shadow: 0 0 24px rgba(248, 113, 113, 0.95);
 }
 
 .Gamepad-joystick-handle {

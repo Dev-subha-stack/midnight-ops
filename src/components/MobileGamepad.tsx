@@ -180,8 +180,9 @@ export const MobileGamepad: React.FC<MobileGamepadProps> = ({
       );
     }
 
-    // 3. Primary Right-Thumb Fire Button (supports Drag-to-Aim while holding fire)
+    // 3. Primary Right-Thumb Draggable Fire Button (Free Fire drag-shot / drag-headshot style)
     const fireCfg = layoutConfig.controls.fire;
+    const fireRadiusPx = radiusFor('fire', 26);
     activeControllers.push(
       new Button({
         id: 'fire',
@@ -189,14 +190,16 @@ export const MobileGamepad: React.FC<MobileGamepadProps> = ({
         parent: overlayEl,
         fixed: true,
         spring: true,
-        radius: radiusFor('fire', 26),
+        draggableHandle: true,
+        dragRadius: Math.round(fireRadiusPx * 1.25),
+        radius: fireRadiusPx,
         text: '<span class="gp-label-lg">FIRE</span>',
         position: posFor('fire'),
         style: {
           pointerEvents: 'auto',
           color: '#ef4444',
-          background: 'rgba(185, 28, 28, 0.34)',
-          border: '2.5px solid rgba(248, 113, 113, 0.92)',
+          background: 'rgba(127, 29, 29, 0.22)',
+          border: '2px dashed rgba(248, 113, 113, 0.78)',
           opacity: String(fireCfg.opacity),
         },
         onDragMove(dx, dy) {

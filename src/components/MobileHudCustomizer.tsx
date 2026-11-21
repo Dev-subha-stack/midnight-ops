@@ -190,7 +190,19 @@ export const MobileHudCustomizer: React.FC<MobileHudCustomizerProps> = ({
                 <span className="text-[10px] font-bold text-white">{ctrl.shortLabel}</span>
               </div>
             )}
-            {!isJoystick && (
+            {ctrl.id === 'fire' && (
+              <div
+                style={{
+                  width: `${Math.round(radiusPx * 1.48)}px`,
+                  height: `${Math.round(radiusPx * 1.48)}px`,
+                }}
+                className="rounded-full bg-red-600/75 border border-red-200/85 flex flex-col items-center justify-center pointer-events-none"
+              >
+                <span className="text-[10px] font-bold leading-none text-white">{ctrl.shortLabel}</span>
+                <span className="text-[8px] leading-none text-red-100/80 mt-0.5">DRAG</span>
+              </div>
+            )}
+            {!isJoystick && ctrl.id !== 'fire' && (
               <span className="text-[10px] leading-none tracking-wider text-zinc-100 pointer-events-none">
                 {ctrl.shortLabel}
               </span>

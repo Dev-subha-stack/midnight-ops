@@ -62,7 +62,7 @@ import {
 import { soundManager } from './game/audio';
 import { DEFAULT_WEAPON_OPTICS, OPTIC_REGISTRY, WEAPON_REGISTRY } from './game/weapons';
 
-const GAME_VERSION_NUM = '3.4';
+const GAME_VERSION_NUM = '3.5';
 const GAME_VERSION = `v${GAME_VERSION_NUM}`;
 
 export default function App() {

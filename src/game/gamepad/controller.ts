@@ -19,6 +19,8 @@ export interface ControllerOptions<T extends Controller = Controller> {
   style?: ControllerStyle;
   fixed?: boolean;
   spring?: boolean;
+  draggableHandle?: boolean;
+  dragRadius?: number;
   deadZone?: number;
   directionsTot?: number;
   isPress?: boolean;
@@ -64,6 +66,8 @@ export class Controller {
   public style: ControllerStyle;
   public fixed = true;
   public spring = true;
+  public draggableHandle = false;
+  public dragRadius = 40;
   public isPress = false;
   public isActive = false;
   public isDrag = false;
@@ -97,7 +101,10 @@ export class Controller {
       ...(options.style || {}),
     } as ControllerStyle;
     this.#isTouchMovable =
-      this.type === 'joystick' || this.type === 'dpad' || Boolean(options.onDragMove);
+      this.type === 'joystick' ||
+      this.type === 'dpad' ||
+      Boolean(options.onDragMove) ||
+      Boolean(options.draggableHandle);
   }
 
   public get element(): HTMLDivElement | null {
