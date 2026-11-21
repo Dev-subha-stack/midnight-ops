@@ -1,5 +1,5 @@
 import React from 'react';
-import { Play, Sliders, RotateCcw, Crosshair, Home, Sparkles, Sun } from 'lucide-react';
+import { Play, Sliders, RotateCcw, Crosshair, Home, Sparkles, Sun, Gamepad2 } from 'lucide-react';
 import { GameMode, WeatherType, GraphicsMode } from '../types';
 
 interface PauseMenuProps {
@@ -9,6 +9,7 @@ interface PauseMenuProps {
   onResume: () => void;
   onOpenGunsmith: () => void;
   onOpenSettings: () => void;
+  onOpenHudCustomizer?: () => void;
   onRestart: () => void;
   onReturnToHome?: () => void;
   onChangeMode: (mode: GameMode) => void;
@@ -23,6 +24,7 @@ export const PauseMenu: React.FC<PauseMenuProps> = ({
   onResume,
   onOpenGunsmith,
   onOpenSettings,
+  onOpenHudCustomizer,
   onRestart,
   onReturnToHome,
   onSelectWeather,
@@ -82,6 +84,19 @@ export const PauseMenu: React.FC<PauseMenuProps> = ({
                 <Sliders className="w-4 h-4 text-zinc-300" /> Settings & Sensitivity
               </span>
             </button>
+
+            {onOpenHudCustomizer && (
+              <button
+                id="btn-pause-custom-hud"
+                onClick={onOpenHudCustomizer}
+                className="w-full py-2.5 px-4 bg-[#151921] hover:bg-[#1E242E] text-[#A3E635] font-semibold text-xs uppercase tracking-wider rounded-sm border border-[#A3E635]/30 hover:border-[#A3E635] transition-all flex items-center justify-between cursor-pointer font-mono"
+              >
+                <span className="flex items-center gap-2.5">
+                  <Gamepad2 className="w-4 h-4 text-[#A3E635]" /> Customize Controls HUD
+                </span>
+                <span className="text-[10px] text-zinc-400">TOUCH</span>
+              </button>
+            )}
 
             <button
               onClick={onRestart}

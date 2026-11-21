@@ -102,6 +102,7 @@ interface HUDProps {
   onActivateStreak: (id: 'uav' | 'airstrike' | 'sentry' | 'nuke') => void;
   onOpenGunsmith: () => void;
   onOpenSettings: () => void;
+  mobileControlsActive?: boolean;
 }
 
 export const HUD: React.FC<HUDProps> = ({
@@ -116,6 +117,7 @@ export const HUD: React.FC<HUDProps> = ({
   ammoInMag,
   ammoReserve,
   grenadesCount,
+  mobileControlsActive = false,
   tacticalCount = 2,
   tacticalType = 'smoke',
   laserActive,
@@ -398,7 +400,12 @@ export const HUD: React.FC<HUDProps> = ({
       )}
 
       {/* TOP-CENTER: COD SCORE STRIP & COMPASS TAPE */}
-      <div id="hud-top-center" className="absolute top-3 left-0 right-0 flex flex-col items-center pointer-events-none z-30">
+      <div
+        id="hud-top-center"
+        className={`absolute top-2.5 left-0 right-0 flex flex-col items-center pointer-events-none z-30 ${
+          mobileControlsActive ? 'scale-[0.82] origin-top max-sm:scale-[0.72]' : ''
+        }`}
+      >
         {gameMode === 'battleroyale' && battleRoyaleState ? (
           <div className="flex items-center gap-4 bg-[#0A0C10]/88 backdrop-blur-md px-5 py-1.5 rounded-sm border border-white/15 tabular-nums">
             <div className="flex items-center gap-2 pr-3 border-r border-white/10">
@@ -512,7 +519,12 @@ export const HUD: React.FC<HUDProps> = ({
       </div>
 
       {/* TOP-LEFT: COD MINIMAP & RADIO */}
-      <div id="hud-top-left" className="absolute top-3 left-4 flex flex-col gap-1.5 pointer-events-none z-20">
+      <div
+        id="hud-top-left"
+        className={`absolute top-2.5 left-3 flex flex-col gap-1.5 pointer-events-none z-20 ${
+          mobileControlsActive ? 'scale-[0.76] origin-top-left' : ''
+        }`}
+      >
         <Minimap
           playerPos={playerPos}
           playerYaw={playerYaw}
@@ -522,21 +534,23 @@ export const HUD: React.FC<HUDProps> = ({
           shape={minimapShape}
         />
 
-        <div className="flex items-center gap-2 text-[10px] font-mono text-zinc-400 bg-[#0A0C10]/80 px-2 py-0.5 rounded-sm border border-white/10 w-fit">
-          <span>
-            <b className="text-zinc-200">TAB</b> Score
-          </span>
-          <span className="text-zinc-600">·</span>
-          <span>
-            <b className="text-zinc-200">B</b> Gunsmith
-          </span>
-          <span className="text-zinc-600">·</span>
-          <span>
-            <b className="text-zinc-200">ESC</b> Pause
-          </span>
-        </div>
+        {!mobileControlsActive && (
+          <div className="flex items-center gap-2 text-[10px] font-mono text-zinc-400 bg-[#0A0C10]/80 px-2 py-0.5 rounded-sm border border-white/10 w-fit">
+            <span>
+              <b className="text-zinc-200">TAB</b> Score
+            </span>
+            <span className="text-zinc-600">·</span>
+            <span>
+              <b className="text-zinc-200">B</b> Gunsmith
+            </span>
+            <span className="text-zinc-600">·</span>
+            <span>
+              <b className="text-zinc-200">ESC</b> Pause
+            </span>
+          </div>
+        )}
 
-        {environment && (
+        {environment && !mobileControlsActive && (
           <div
             id="hud-environmental-telemetry"
             onClick={onToggleWeather}
@@ -559,7 +573,7 @@ export const HUD: React.FC<HUDProps> = ({
           </div>
         )}
 
-        {activeRadioBark && (
+        {activeRadioBark && !mobileControlsActive && (
           <div className="flex items-start gap-2 max-w-[270px] bg-[#0A0C10]/92 backdrop-blur-md px-3 py-2 rounded-sm border border-white/15 text-[11px] font-mono pointer-events-none">
             <Radio className="w-3.5 h-3.5 text-[#A3E635] mt-0.5 shrink-0" />
             <div className="flex flex-col overflow-hidden">
@@ -577,10 +591,17 @@ export const HUD: React.FC<HUDProps> = ({
       </div>
 
       {/* TOP-RIGHT: TELEMETRY & KILLFEED */}
-      <div id="hud-top-right" className="absolute top-3 right-4 flex flex-col items-end gap-1.5 pointer-events-none w-72 z-20">
-        <div className="text-[10px] font-mono text-zinc-400 bg-[#0A0C10]/80 px-2.5 py-0.5 rounded-sm border border-white/10 tabular-nums">
-          <span className="text-[#A3E635] font-semibold">128-TICK</span> · 12 MS
-        </div>
+      <div
+        id="hud-top-right"
+        className={`absolute right-3 flex flex-col items-end gap-1.5 pointer-events-none z-20 ${
+          mobileControlsActive ? 'top-[178px] w-48 scale-[0.82] origin-top-right' : 'top-3 right-4 w-72'
+        }`}
+      >
+        {!mobileControlsActive && (
+          <div className="text-[10px] font-mono text-zinc-400 bg-[#0A0C10]/80 px-2.5 py-0.5 rounded-sm border border-white/10 tabular-nums">
+            <span className="text-[#A3E635] font-semibold">128-TICK</span> · 12 MS
+          </div>
+        )}
         <Killfeed items={killfeed} />
       </div>
 
@@ -903,8 +924,15 @@ export const HUD: React.FC<HUDProps> = ({
         </div>
       )}
 
-      {/* BOTTOM-LEFT: COD WARZONE / MW3 OPERATOR PLATE & HEALTH STACK */}
-      <div id="hud-bottom-left" className="absolute bottom-4 left-4 flex flex-col gap-1 pointer-events-none z-20">
+      {/* BOTTOM-LEFT (DESKTOP) OR UPPER-LEFT BELOW MINIMAP (MOBILE): COD WARZONE / MW3 OPERATOR PLATE & HEALTH STACK */}
+      <div
+        id="hud-bottom-left"
+        className={`absolute flex flex-col gap-1 pointer-events-none z-20 ${
+          mobileControlsActive
+            ? 'top-[132px] left-3 scale-[0.78] origin-top-left'
+            : 'bottom-4 left-4'
+        }`}
+      >
         <div className="flex items-center gap-2 text-[10px] font-mono text-zinc-300 bg-[#0A0C10]/85 px-2.5 py-0.5 rounded-sm border border-white/10 w-fit tabular-nums">
           <span className="text-white font-bold">GHOST</span>
           <span className="text-zinc-600">·</span>
@@ -916,7 +944,7 @@ export const HUD: React.FC<HUDProps> = ({
           {leanState !== 'none' && <span className="text-sky-400 font-bold">PEEK {leanState.toUpperCase()}</span>}
         </div>
 
-        <div className="bg-[#0A0C10]/88 backdrop-blur-md px-3.5 py-2.5 rounded-sm border border-white/12 flex flex-col gap-2 w-64 cod-chamfer-sm tabular-nums">
+        <div className={`bg-[#0A0C10]/88 backdrop-blur-md px-3.5 py-2.5 rounded-sm border border-white/12 flex flex-col gap-2 cod-chamfer-sm tabular-nums ${mobileControlsActive ? 'w-52' : 'w-64'}`}>
           {stats.tacSprintStamina !== undefined && stats.tacSprintStamina < 0.98 && (
             <div className="w-full h-1 bg-zinc-900 overflow-hidden">
               <div className="h-full bg-[#A3E635] transition-all" style={{ width: `${Math.max(4, stats.tacSprintStamina * 100)}%` }} />
@@ -1021,10 +1049,17 @@ export const HUD: React.FC<HUDProps> = ({
         </div>
       </div>
 
-      {/* BOTTOM-RIGHT: COD WEAPON TRAY & SCORESTREAKS */}
-      <div id="hud-bottom-right" className="absolute bottom-4 right-4 flex items-end gap-3 pointer-events-none z-20">
+      {/* BOTTOM-RIGHT (DESKTOP) OR TOP-RIGHT UNDER BUTTONS (MOBILE): COD WEAPON TRAY & SCORESTREAKS */}
+      <div
+        id="hud-bottom-right"
+        className={`absolute flex items-end gap-3 pointer-events-none z-20 ${
+          mobileControlsActive
+            ? 'top-14 right-3 flex-col scale-[0.78] origin-top-right z-35'
+            : 'bottom-4 right-4'
+        }`}
+      >
         {/* Vertical Scorestreaks */}
-        <div className="flex flex-col gap-1 items-end">
+        <div className={`flex flex-col gap-1 items-end ${mobileControlsActive ? 'order-2' : ''}`}>
           {streaks.map((s, idx) => (
             <div
               key={s.id}
@@ -1032,6 +1067,8 @@ export const HUD: React.FC<HUDProps> = ({
               className={`flex items-center gap-2 px-2.5 py-1 rounded-sm text-[10px] font-mono tracking-wider transition-all border pointer-events-auto cursor-pointer ${
                 s.ready
                   ? 'bg-[#1D2413] border-[#A3E635] text-[#A3E635]'
+                  : mobileControlsActive
+                  ? 'hidden'
                   : 'bg-[#0A0C10]/75 border-white/10 text-zinc-500 hover:border-white/25'
               }`}
             >
@@ -1043,7 +1080,7 @@ export const HUD: React.FC<HUDProps> = ({
         </div>
 
         {/* COD Weapon & Ammo Tray */}
-        <div className="bg-[#0A0C10]/88 backdrop-blur-md px-4 py-3 rounded-sm border border-white/12 flex flex-col gap-1.5 min-w-[230px] cod-chamfer-sm tabular-nums">
+        <div className={`bg-[#0A0C10]/88 backdrop-blur-md rounded-sm border border-white/12 flex flex-col gap-1.5 cod-chamfer-sm tabular-nums ${mobileControlsActive ? 'px-3 py-2 min-w-[175px]' : 'px-4 py-3 min-w-[230px]'}`}>
           <div className="flex items-center justify-between text-[10px] font-mono text-zinc-400 uppercase">
             <span>{wpnCfg.category}</span>
             <span className="text-[#A3E635] font-bold">{wpnCfg.fullAuto ? 'FULL AUTO' : 'SEMI'}</span>
@@ -1130,10 +1167,12 @@ export const HUD: React.FC<HUDProps> = ({
         </div>
       </div>
 
-      {/* BOTTOM-CENTER: PUBG PEEK CONTROLS */}
+      {/* BOTTOM-CENTER (DESKTOP) OR TOP-CENTER (MOBILE): PUBG PEEK CONTROLS */}
       <div
         id="pubg-peek-controls"
-        className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-2 z-30 pointer-events-auto select-none"
+        className={`absolute left-1/2 -translate-x-1/2 flex items-center gap-2 z-40 pointer-events-auto select-none ${
+          mobileControlsActive ? 'top-[76px] scale-90' : 'bottom-4'
+        }`}
       >
         <button
           id="btn-lean-left"
@@ -1143,13 +1182,15 @@ export const HUD: React.FC<HUDProps> = ({
             onToggleLean?.('left');
           }}
           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-sm backdrop-blur-md transition-all font-mono border cursor-pointer text-[10px] font-bold uppercase ${
+            mobileControlsActive ? 'min-h-[38px]' : ''
+          } ${
             leanState === 'left'
               ? 'bg-[#1D2413] border-[#A3E635] text-[#A3E635]'
               : 'bg-[#0A0C10]/80 border-white/12 text-zinc-300 hover:text-white'
           }`}
         >
           <span>◄ Peek L</span>
-          <span className="opacity-60">[&lt;]</span>
+          {!mobileControlsActive && <span className="opacity-60">[&lt;]</span>}
         </button>
 
         <button
@@ -1160,12 +1201,14 @@ export const HUD: React.FC<HUDProps> = ({
             onToggleLean?.('right');
           }}
           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-sm backdrop-blur-md transition-all font-mono border cursor-pointer text-[10px] font-bold uppercase ${
+            mobileControlsActive ? 'min-h-[38px]' : ''
+          } ${
             leanState === 'right'
               ? 'bg-[#1D2413] border-[#A3E635] text-[#A3E635]'
               : 'bg-[#0A0C10]/80 border-white/12 text-zinc-300 hover:text-white'
           }`}
         >
-          <span className="opacity-60">[&gt;]</span>
+          {!mobileControlsActive && <span className="opacity-60">[&gt;]</span>}
           <span>Peek R ►</span>
         </button>
       </div>

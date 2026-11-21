@@ -221,11 +221,20 @@ export class FPSController {
   public yaw: number = 0;
   public pitch: number = 0;
 
-  // Key tracking
+  // Key tracking & Mobile Touch Input State
   private keys: Record<string, boolean> = {};
   public isLocked: boolean = false;
   public isDead: boolean = false;
   public health: number = 100;
+  public mobileControlsEnabled: boolean = false;
+  private mobileMoveX: number = 0;
+  private mobileMoveY: number = 0;
+  private mobileForceSprint: boolean = false;
+  private mobileForceTacSprint: boolean = false;
+  private mobileAutoRun: boolean = false;
+  private mobileCrouchToggled: boolean = false;
+  private mobileHoldBreathRequested: boolean = false;
+  public mobileLookSensitivity: number = 1.0;
 
   public setDeadState(dead: boolean) {
     this.isDead = dead;
@@ -241,11 +250,187 @@ export class FPSController {
       this.isSprinting = false;
       this.isTacSprinting = false;
       this.isHoldingBreath = false;
+      this.mobileMoveX = 0;
+      this.mobileMoveY = 0;
+      this.mobileForceSprint = false;
+      this.mobileForceTacSprint = false;
+      this.mobileAutoRun = false;
+      this.mobileCrouchToggled = false;
+      this.mobileHoldBreathRequested = false;
       this.setLean('none');
       this.targetEyeHeight = 0.35; // Collapse toward ground on elimination
     } else {
       this.targetEyeHeight = 1.7;
     }
+  }
+
+  public setMobileControlsEnabled(enabled: boolean) {
+    this.mobileControlsEnabled = enabled;
+    if (!enabled) {
+      this.mobileMoveX = 0;
+      this.mobileMoveY = 0;
+      this.mobileForceSprint = false;
+      this.mobileForceTacSprint = false;
+      this.mobileAutoRun = false;
+      this.mobileCrouchToggled = false;
+      this.mobileHoldBreathRequested = false;
+    }
+  }
+
+  public setMobileAutoRun(enabled: boolean) {
+    if (this.isDead) {
+      this.mobileAutoRun = false;
+      return;
+    }
+    this.mobileAutoRun = enabled;
+    if (enabled) {
+      this.mobileCrouchToggled = false;
+      this.isAiming = false;
+      this.setLean('none');
+    }
+  }
+
+  public toggleMobileAutoRun(): boolean {
+    this.setMobileAutoRun(!this.mobileAutoRun);
+    return this.mobileAutoRun;
+  }
+
+  public isMobileAutoRun(): boolean {
+    return this.mobileAutoRun;
+  }
+
+  public setMobileMoveInput(x: number, y: number, sprint: boolean = false, tacSprint: boolean = false) {
+    this.mobileMoveX = Math.max(-1, Math.min(1, x));
+    this.mobileMoveY = Math.max(-1, Math.min(1, y));
+    if (this.mobileMoveY < -0.35 && this.mobileAutoRun) {
+      this.mobileAutoRun = false;
+    }
+    const autoSprint = this.mobileAutoRun && this.mobileMoveY >= -0.2;
+    this.mobileForceSprint = (sprint && this.mobileMoveY > 0.25 && !this.isAiming) || (autoSprint && !this.isAiming);
+    this.mobileForceTacSprint =
+      tacSprint && this.mobileForceSprint && this.tacSprintStamina > 0.2 && !this.mobileCrouchToggled;
+    if (this.mobileForceSprint && this.mobileCrouchToggled) {
+      this.mobileCrouchToggled = false;
+    }
+  }
+
+  public applyTouchLookDelta(deltaX: number, deltaY: number) {
+    if (this.isDead) return;
+    // Scale slightly when ADS / scoped so thumb aiming remains surgical
+    const currentOptic = this.equippedOptics[this.currentWeapon] || DEFAULT_WEAPON_OPTICS[this.currentWeapon] || 'holo_553';
+    const opticCfg = OPTIC_REGISTRY[currentOptic];
+    const adsPrecisionScale = this.isAiming
+      ? Math.max(0.28, 1 / Math.sqrt(Math.max(1, opticCfg?.magnification || 1.35)))
+      : 1.0;
+    const lookMult = Math.max(0.4, Math.min(2.5, this.mobileLookSensitivity || 1.0));
+    this.applyLookDelta(deltaX * 1.45 * adsPrecisionScale * lookMult, deltaY * 1.35 * adsPrecisionScale * lookMult);
+  }
+
+  public setMobileFire(pressed: boolean) {
+    soundManager.init();
+    this.isShooting = pressed;
+    if (pressed && !this.isDead) {
+      this.tryShoot();
+    }
+  }
+
+  public setMobileAim(aiming: boolean) {
+    if (this.isDead) return;
+    if (aiming) {
+      this.isAiming = true;
+      this.isInspecting = false;
+      this.isMeleeing = false;
+      this.isSprinting = false;
+      this.isTacSprinting = false;
+      this.mobileForceSprint = false;
+      this.mobileForceTacSprint = false;
+      this.mobileAutoRun = false;
+      soundManager.playScopeRaise();
+    } else {
+      this.isAiming = false;
+      this.mobileHoldBreathRequested = false;
+      if (this.isHoldingBreath) {
+        this.isHoldingBreath = false;
+        soundManager.playExhale();
+      }
+      if (this.isMounted) {
+        this.isMounted = false;
+      }
+    }
+  }
+
+  public triggerMobileJump() {
+    if (this.isDead) return;
+    if (this.isSliding || this.isDiving) {
+      this.cancelSlide(true);
+      return;
+    }
+    if (!this.isMantling && this.tryLedgeMantle()) {
+      return;
+    }
+    if (this.isGrounded) {
+      this.mobileCrouchToggled = false;
+      this.velocity.y = 6.2;
+      this.isGrounded = false;
+      soundManager.playJump();
+    }
+  }
+
+  public triggerMobileCrouchOrSlide() {
+    if (this.isDead) return;
+    if (this.isSliding || this.isDiving) {
+      this.cancelSlide(false);
+      return;
+    }
+    if (this.isGrounded) {
+      if (this.isTacSprinting) {
+        this.mobileAutoRun = false;
+        this.startDolphinDive();
+        return;
+      }
+      if (this.isSprinting) {
+        this.mobileAutoRun = false;
+        this.startSlide();
+        return;
+      }
+    }
+    this.mobileAutoRun = false;
+    this.mobileCrouchToggled = !this.mobileCrouchToggled;
+  }
+
+  public setMobileHoldBreath(holding: boolean) {
+    this.mobileHoldBreathRequested = holding;
+  }
+
+  public cycleWeapon(dir: 1 | -1 = 1) {
+    if (this.isDead) return;
+    const weapons: WeaponType[] = ['m4', 'ak47', 'scar', 'mp5', 'vector', 'shotgun', 'sniper', 'deagle'];
+    const currentIndex = weapons.indexOf(this.currentWeapon);
+    const nextIndex = (currentIndex + dir + weapons.length) % weapons.length;
+    this.equipWeapon(weapons[nextIndex]);
+  }
+
+  public cycleOpticZoomOrMelee() {
+    if (this.isDead || this.isMeleeing) return;
+    if (this.isAiming) {
+      const currentOptic = this.equippedOptics[this.currentWeapon] || 'holo_553';
+      const opticCfg = OPTIC_REGISTRY[currentOptic];
+      if (opticCfg?.variableZoomSteps && opticCfg.variableZoomSteps.length > 1) {
+        this.opticZoomStepIndex = (this.opticZoomStepIndex + 1) % opticCfg.variableZoomSteps.length;
+        soundManager.playOpticZoomClick();
+        return;
+      }
+      if (opticCfg?.hasThermalVision) {
+        this.isThermalEnabled = !this.isThermalEnabled;
+        soundManager.playThermalToggle();
+        return;
+      }
+    }
+    this.performMelee();
+  }
+
+  public isMobileCrouched(): boolean {
+    return this.mobileCrouchToggled;
   }
 
   // Event Callbacks
@@ -768,6 +953,10 @@ export class FPSController {
       lastX = e.clientX;
       lastY = e.clientY;
 
+      if (this.mobileControlsEnabled) {
+        return;
+      }
+
       if (!this.isLocked) {
         try {
           this.domElement.requestPointerLock();
@@ -801,9 +990,14 @@ export class FPSController {
       this.isShooting = false;
       this.isHoldingBreath = false;
       this.keys = {};
+      this.mobileMoveX = 0;
+      this.mobileMoveY = 0;
+      this.mobileForceSprint = false;
+      this.mobileForceTacSprint = false;
     });
 
     window.addEventListener('mouseup', e => {
+      if (this.mobileControlsEnabled) return;
       if (e.button === 0) {
         this.isShooting = false;
       } else if (e.button === 2) {
@@ -821,7 +1015,7 @@ export class FPSController {
     window.addEventListener('mousemove', e => {
       // Support pointer lock or dragging inside studio preview iframe
       const isDragging = (e.buttons & 1) === 1 || (e.buttons & 2) === 2;
-      if (!this.isLocked && !isDragging) {
+      if (!this.isLocked && (!isDragging || this.mobileControlsEnabled)) {
         lastX = e.clientX;
         lastY = e.clientY;
         return;
@@ -832,27 +1026,31 @@ export class FPSController {
       lastX = e.clientX;
       lastY = e.clientY;
 
-      if (!movementX && !movementY) return;
-
-      const sens = (this.settings.mouseSensitivity || 1.0) * 0.0022;
-      const invert = this.settings.invertY ? -1 : 1;
-
-      this.yaw -= movementX * sens;
-      this.pitch -= movementY * sens * invert;
-      this.pitch = Math.max(-Math.PI / 2.05, Math.min(Math.PI / 2.05, this.pitch));
-
-      // Viewmodel mouse inertia lag (amplified during sprint for realistic physical weapon weight)
-      const sprintInertiaBoost = this.isTacSprinting ? 2.4 : this.isSprinting ? 1.7 : 1.0;
-      const inertiaMult = (this.isAiming ? 0.0003 : 0.0012) * sprintInertiaBoost;
-      this.swayInertiaX -= movementX * inertiaMult;
-      this.swayInertiaY += movementY * inertiaMult;
-      this.swayInertiaX = Math.max(-0.08, Math.min(0.08, this.swayInertiaX));
-      this.swayInertiaY = Math.max(-0.08, Math.min(0.08, this.swayInertiaY));
+      this.applyLookDelta(movementX, movementY);
     });
 
     document.addEventListener('pointerlockchange', () => {
       this.isLocked = document.pointerLockElement === this.domElement || document.pointerLockElement === this.domElement.parentElement;
     });
+  }
+
+  private applyLookDelta(movementX: number, movementY: number) {
+    if (!movementX && !movementY) return;
+
+    const sens = (this.settings.mouseSensitivity || 1.0) * 0.0022;
+    const invert = this.settings.invertY ? -1 : 1;
+
+    this.yaw -= movementX * sens;
+    this.pitch -= movementY * sens * invert;
+    this.pitch = Math.max(-Math.PI / 2.05, Math.min(Math.PI / 2.05, this.pitch));
+
+    // Viewmodel mouse inertia lag (amplified during sprint for realistic physical weapon weight)
+    const sprintInertiaBoost = this.isTacSprinting ? 2.4 : this.isSprinting ? 1.7 : 1.0;
+    const inertiaMult = (this.isAiming ? 0.0003 : 0.0012) * sprintInertiaBoost;
+    this.swayInertiaX -= movementX * inertiaMult;
+    this.swayInertiaY += movementY * inertiaMult;
+    this.swayInertiaX = Math.max(-0.08, Math.min(0.08, this.swayInertiaX));
+    this.swayInertiaY = Math.max(-0.08, Math.min(0.08, this.swayInertiaY));
   }
 
   private toggleMount() {
@@ -1529,7 +1727,8 @@ export class FPSController {
 
   // --- FRAME UPDATE ---
   public update(dt: number) {
-    if (!this.isLocked || this.isDead) {
+    const canControl = this.isLocked || this.mobileControlsEnabled;
+    if (!canControl || this.isDead) {
       if (this.playerShadowMesh) this.playerShadowMesh.visible = false;
       return;
     }
@@ -1655,7 +1854,7 @@ export class FPSController {
     }
 
     // Steady Aim / Breath Mechanics Update
-    const holdingShift = this.keys['ShiftLeft'] || this.keys['ShiftRight'];
+    const holdingShift = this.keys['ShiftLeft'] || this.keys['ShiftRight'] || this.mobileHoldBreathRequested;
     const canHoldBreath = this.isAiming && opticCfg && (opticCfg.magnification >= 2.0 || opticCfg.variableZoomSteps);
 
     if (holdingShift && canHoldBreath && !this.isHyperventilating && this.breathStamina > 0.04) {
@@ -1799,6 +1998,7 @@ export class FPSController {
     let targetRoll = 0;
     if (this.keys['KeyA'] || this.keys['ArrowLeft']) targetRoll += 0.038;
     if (this.keys['KeyD'] || this.keys['ArrowRight']) targetRoll -= 0.038;
+    if (Math.abs(this.mobileMoveX) > 0.05) targetRoll -= this.mobileMoveX * 0.038;
     if (this.isSliding) targetRoll += 0.085;
     // PUBG/BGMI Tactical Lean: ~15.5 deg (0.27 rad) head tilt
     const leanRoll = -this.currentLeanFactor * 0.27;
@@ -1881,15 +2081,18 @@ export class FPSController {
       return;
     }
 
-    this.isCrouching = this.keys['KeyC'] || this.keys['ControlLeft'];
+    this.isCrouching = this.keys['KeyC'] || this.keys['ControlLeft'] || this.mobileCrouchToggled;
     
     // Sprint and Tactical Sprint state resolution
-    const movingForward = (this.keys['KeyW'] || this.keys['ArrowUp']) && !this.keys['KeyS'] && !this.keys['ArrowDown'];
-    const holdingShift = this.keys['ShiftLeft'] || this.keys['ShiftRight'];
+    const autoRunForward = this.mobileAutoRun && !this.isAiming && !this.isCrouching;
+    const keyboardMovingForward = (this.keys['KeyW'] || this.keys['ArrowUp']) && !this.keys['KeyS'] && !this.keys['ArrowDown'];
+    const movingForward = keyboardMovingForward || this.mobileMoveY > 0.25 || autoRunForward;
+    const holdingShift = this.keys['ShiftLeft'] || this.keys['ShiftRight'] || this.mobileForceSprint || autoRunForward;
 
     if (holdingShift && movingForward && !this.isCrouching && !this.isAiming) {
-      if (this.isTacSprinting && this.tacSprintStamina > 0.05) {
+      if ((this.isTacSprinting || this.mobileForceTacSprint) && this.tacSprintStamina > 0.05) {
         // Continue Tactical Sprint
+        this.isTacSprinting = true;
         this.tacSprintStamina = Math.max(0, this.tacSprintStamina - dt * 0.28);
         this.isSprinting = true;
       } else {
@@ -1952,6 +2155,7 @@ export class FPSController {
     }
 
     const moveVector = new THREE.Vector3();
+    let analogMagnitude = 1.0;
     if (this.isDiving) {
       // In dive, player commits to forward camera trajectory
       moveVector.z -= 1;
@@ -1960,13 +2164,27 @@ export class FPSController {
       if (this.keys['KeyS'] || this.keys['ArrowDown']) moveVector.z += 1;
       if (this.keys['KeyA'] || this.keys['ArrowLeft']) moveVector.x -= 1;
       if (this.keys['KeyD'] || this.keys['ArrowRight']) moveVector.x += 1;
+
+      if (Math.abs(this.mobileMoveX) > 0.01 || Math.abs(this.mobileMoveY) > 0.01) {
+        const keyActive = moveVector.lengthSq() > 0;
+        moveVector.x += this.mobileMoveX;
+        moveVector.z -= this.mobileMoveY;
+        if (autoRunForward && this.mobileMoveY <= 0.15 && !this.keys['KeyS'] && !this.keys['ArrowDown']) {
+          moveVector.z -= 1;
+        } else if (!keyActive && !autoRunForward) {
+          analogMagnitude = Math.min(1, Math.hypot(this.mobileMoveX, this.mobileMoveY));
+        }
+      } else if (autoRunForward && !this.keys['KeyS'] && !this.keys['ArrowDown']) {
+        moveVector.z -= 1;
+      }
     }
 
-    if (moveVector.lengthSq() > 0) {
+    if (moveVector.lengthSq() > 0.0001) {
       moveVector.normalize();
       moveVector.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw);
-      this.velocity.x = moveVector.x * baseSpeed;
-      this.velocity.z = moveVector.z * baseSpeed;
+      const effectiveSpeed = baseSpeed * analogMagnitude;
+      this.velocity.x = moveVector.x * effectiveSpeed;
+      this.velocity.z = moveVector.z * effectiveSpeed;
 
       // Footstep audio (frequency increases with tactical sprint)
       const stepFreq = this.isTacSprinting ? 3.6 : this.isSprinting ? 2.8 : 1.8;
@@ -1988,6 +2206,7 @@ export class FPSController {
 
     // Jump & Gravity
     if (this.keys['Space'] && this.isGrounded && !this.isSliding && !this.isDiving) {
+      this.mobileCrouchToggled = false;
       this.velocity.y = 6.2;
       this.isGrounded = false;
       soundManager.playJump();
@@ -2008,7 +2227,7 @@ export class FPSController {
     }
 
     // Free Fire Glider / Parachute Descent Physics
-    if (!this.isGrounded && this.position.y > 6.0 && this.velocity.y < -3.0 && (this.keys['KeyW'] || this.keys['Space'])) {
+    if (!this.isGrounded && this.position.y > 6.0 && this.velocity.y < -3.0 && (this.keys['KeyW'] || this.keys['Space'] || this.mobileMoveY > 0.35)) {
       // Glider deployed: soft descent velocity and sustained aerodynamic lift
       this.velocity.y = Math.max(-4.2, this.velocity.y - 4.0 * dt);
       const glideDir = this.camera.getWorldDirection(new THREE.Vector3()).setY(0).normalize();
@@ -2279,7 +2498,12 @@ export class FPSController {
     const bobY = Math.sin(this.swayTime * 1.2) * bobMult;
 
     // Strafe banking roll
-    const strafeRoll = (this.keys['KeyA'] || this.keys['ArrowLeft']) ? 0.04 : (this.keys['KeyD'] || this.keys['ArrowRight']) ? -0.04 : 0;
+    const strafeRoll =
+      this.keys['KeyA'] || this.keys['ArrowLeft']
+        ? 0.04
+        : this.keys['KeyD'] || this.keys['ArrowRight']
+        ? -0.04
+        : -this.mobileMoveX * 0.04;
 
     // --- PROCEDURAL ANIMATIONS (RELOAD, MELEE, INSPECT, MANTLE, DRAW) ---
     let reloadOffX = 0, reloadOffY = 0, reloadOffZ = 0;

@@ -70,7 +70,7 @@ export const GunsmithModal: React.FC<GunsmithModalProps> = ({
   const [selectedTactical, setSelectedTactical] = useState<TacticalType>(currentTactical);
   const [selectedOperatorCamo, setSelectedOperatorCamo] = useState<OperatorCamo>(currentOperatorCamo);
 
-  const [activeTab, setActiveTab] = useState<'specs' | 'optics' | 'camo' | 'tactical' | 'operator'>('operator');
+  const [activeTab, setActiveTab] = useState<'specs' | 'optics' | 'camo' | 'tactical' | 'operator'>('optics');
 
   const [customModelUrl, setCustomModelUrl] = useState('');
   const [isLoadingModel, setIsLoadingModel] = useState(false);
@@ -269,11 +269,11 @@ export const GunsmithModal: React.FC<GunsmithModalProps> = ({
           {/* Horizontal Tab Strip */}
           <div className="flex items-center gap-1 bg-[#12161C] p-1 rounded-sm border border-white/10 overflow-x-auto">
             {[
-              { id: 'operator', label: 'Operator 3D', icon: User },
               { id: 'optics', label: 'Optics', icon: ZoomIn },
               { id: 'camo', label: 'Camo', icon: Palette },
-              { id: 'tactical', label: 'Equipment', icon: Radio },
               { id: 'specs', label: 'Ballistics', icon: Target },
+              { id: 'tactical', label: 'Equipment', icon: Radio },
+              { id: 'operator', label: 'Operator Rig', icon: User },
             ].map(tab => {
               const Icon = tab.icon;
               const isActive = activeTab === tab.id;
@@ -365,15 +365,19 @@ export const GunsmithModal: React.FC<GunsmithModalProps> = ({
               </span>
             </div>
 
+            {/* Dedicated 3D Weapon Bench Preview (Gun Model Only) */}
+            <WeaponPreviewCanvas
+              weapon={selectedWeapon}
+              camo={selectedCamo}
+              optic={selectedOptic}
+              reticleColor={selectedReticleColor}
+              reticleStyle={selectedReticleStyle}
+              weaponLabel={activeCfg.name}
+            />
+
             {/* TAB: OPERATOR & 3D SKETCHFAB RIG */}
             {activeTab === 'operator' && (
               <div className="flex flex-col gap-4">
-                <OperatorPreviewCanvas
-                  camo={selectedOperatorCamo}
-                  weapon={selectedWeapon}
-                  activeModelName={activeModelName}
-                  modelRevision={modelRevision}
-                />
 
                 {/* Uniform / Faction Presets */}
                 <div className="flex flex-col gap-2">
@@ -769,156 +773,164 @@ export const GunsmithModal: React.FC<GunsmithModalProps> = ({
   );
 };
 
-const OperatorPreviewCanvas: React.FC<{
-  camo: OperatorCamo;
+const WeaponPreviewCanvas: React.FC<{
   weapon: WeaponType;
-  activeModelName: string;
-  modelRevision: number;
-}> = ({ camo, weapon, activeModelName, modelRevision }) => {
+  camo: WeaponCamo;
+  optic: OpticType;
+  reticleColor: ReticleColor;
+  reticleStyle: ReticleStyle;
+  weaponLabel: string;
+}> = ({ weapon, camo, optic, reticleColor, reticleStyle, weaponLabel }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const isDraggingRef = useRef(false);
   const prevMouseXRef = useRef(0);
-  const rotationYRef = useRef(0);
+  const prevMouseYRef = useRef(0);
+  const rotationYRef = useRef(-0.78);
+  const rotationXRef = useRef(0.14);
 
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
-    const width = container.clientWidth || 400;
-    const height = 240;
+    const width = container.clientWidth || 520;
+    const height = 220;
 
     const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(38, width / height, 0.1, 50);
-    camera.position.set(0, 1.15, 2.7);
+    const camera = new THREE.PerspectiveCamera(34, width / height, 0.05, 30);
+    camera.position.set(0, 0.16, 1.95);
+    camera.lookAt(0, 0, 0);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(width, height);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     container.innerHTML = '';
     container.appendChild(renderer.domElement);
 
-    const ambient = new THREE.AmbientLight(0xffffff, 1.1);
+    const ambient = new THREE.AmbientLight(0xe2e8f0, 1.15);
     scene.add(ambient);
 
-    const dirLight = new THREE.DirectionalLight(0xf1f5f9, 2.4);
-    dirLight.position.set(2, 4, 3);
-    dirLight.castShadow = true;
-    scene.add(dirLight);
+    const keyLight = new THREE.DirectionalLight(0xffffff, 2.6);
+    keyLight.position.set(2.2, 3.2, 2.8);
+    keyLight.castShadow = true;
+    scene.add(keyLight);
 
-    const rimLight = new THREE.DirectionalLight(0xa3e635, 1.6);
-    rimLight.position.set(-2, 2, -2);
-    scene.add(rimLight);
+    const limeRim = new THREE.DirectionalLight(0xa3e635, 1.45);
+    limeRim.position.set(-2.4, 1.4, -2.0);
+    scene.add(limeRim);
 
-    const platformGeo = new THREE.CylinderGeometry(0.65, 0.7, 0.04, 32);
-    const platformMat = new THREE.MeshStandardMaterial({
-      color: 0x11151c,
-      roughness: 0.35,
-      metalness: 0.85,
-    });
-    const platform = new THREE.Mesh(platformGeo, platformMat);
-    platform.position.y = -0.02;
-    platform.receiveShadow = true;
-    scene.add(platform);
+    const coolFill = new THREE.DirectionalLight(0x38bdf8, 0.9);
+    coolFill.position.set(1.8, -0.8, -2.2);
+    scene.add(coolFill);
 
-    const platformRing = new THREE.Mesh(
-      new THREE.RingGeometry(0.63, 0.66, 32),
-      new THREE.MeshBasicMaterial({ color: 0xa3e635, side: THREE.DoubleSide })
+    // Sleek Gunsmith Turntable Stand
+    const pedestal = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.68, 0.72, 0.03, 40),
+      new THREE.MeshStandardMaterial({ color: 0x0f1319, roughness: 0.4, metalness: 0.85 })
     );
-    platformRing.rotation.x = -Math.PI / 2;
-    platformRing.position.y = 0.001;
-    scene.add(platformRing);
+    pedestal.position.y = -0.34;
+    pedestal.receiveShadow = true;
+    scene.add(pedestal);
 
-    const charGroup = new THREE.Group();
-    scene.add(charGroup);
+    const pedestalRing = new THREE.Mesh(
+      new THREE.RingGeometry(0.66, 0.685, 40),
+      new THREE.MeshBasicMaterial({ color: 0xa3e635, side: THREE.DoubleSide, transparent: true, opacity: 0.65 })
+    );
+    pedestalRing.rotation.x = -Math.PI / 2;
+    pedestalRing.position.y = -0.323;
+    scene.add(pedestalRing);
 
-    let mixer: THREE.AnimationMixer | null = null;
-    const clock = new THREE.Clock();
+    const weaponPivot = new THREE.Group();
+    scene.add(weaponPivot);
 
-    const team = camo === 'axis_shadow' ? 'axis' : 'allies';
-    const archetype = camo === 'spec_ops' ? 'flanker' : camo === 'desert_tan' ? 'sniper' : 'assault';
-    const operatorMesh = ModelFactory.createBotMesh(team, archetype, weapon);
-    charGroup.add(operatorMesh);
-    if (operatorMesh.userData.animations && operatorMesh.userData.animations.length > 0) {
-      mixer = new THREE.AnimationMixer(operatorMesh);
-      const clips = operatorMesh.userData.animations as THREE.AnimationClip[];
-      const idleClip =
-        clips.find((a) => a.name.toLowerCase().includes('idle')) ||
-        clips.find((a) => a.name.toLowerCase().includes('tpose')) ||
-        clips.find((a) => !/dance|samba/i.test(a.name));
-      if (idleClip) {
-        mixer.clipAction(idleClip).play();
+    const weaponMesh = ModelFactory.createWeaponMesh(weapon, camo, optic, reticleColor, reticleStyle);
+    weaponMesh.traverse(child => {
+      if (child instanceof THREE.Mesh) {
+        child.castShadow = true;
+        child.receiveShadow = true;
       }
-    }
+    });
 
-    let animId: number;
+    // Center & auto-fit weapon geometry so pistols, SMGs, ARs, and long snipers fill the showcase cleanly
+    const box = new THREE.Box3().setFromObject(weaponMesh);
+    const center = new THREE.Vector3();
+    const size = new THREE.Vector3();
+    box.getCenter(center);
+    box.getSize(size);
+    weaponMesh.position.sub(center);
+
+    const maxDim = Math.max(size.x, size.y, size.z, 0.25);
+    const fitScale = (weapon === 'deagle' ? 0.85 : 1.38) / maxDim;
+    weaponPivot.scale.setScalar(fitScale);
+    weaponPivot.add(weaponMesh);
+
+    let animId = 0;
     let autoRotate = true;
 
-    const onMouseDown = (e: MouseEvent) => {
+    const onPointerDown = (e: PointerEvent) => {
       isDraggingRef.current = true;
       prevMouseXRef.current = e.clientX;
+      prevMouseYRef.current = e.clientY;
       autoRotate = false;
     };
-    const onMouseMove = (e: MouseEvent) => {
+    const onPointerMove = (e: PointerEvent) => {
       if (!isDraggingRef.current) return;
-      const deltaX = e.clientX - prevMouseXRef.current;
-      rotationYRef.current += deltaX * 0.015;
+      const dx = e.clientX - prevMouseXRef.current;
+      const dy = e.clientY - prevMouseYRef.current;
+      rotationYRef.current += dx * 0.014;
+      rotationXRef.current = THREE.MathUtils.clamp(rotationXRef.current + dy * 0.008, -0.55, 0.55);
       prevMouseXRef.current = e.clientX;
+      prevMouseYRef.current = e.clientY;
     };
-    const onMouseUp = () => {
+    const onPointerUp = () => {
+      if (!isDraggingRef.current) return;
       isDraggingRef.current = false;
       setTimeout(() => {
         autoRotate = true;
-      }, 1500);
+      }, 1600);
     };
 
-    container.addEventListener('mousedown', onMouseDown);
-    window.addEventListener('mousemove', onMouseMove);
-    window.addEventListener('mouseup', onMouseUp);
+    container.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
 
+    const clock = new THREE.Clock();
     const animate = () => {
       animId = requestAnimationFrame(animate);
-      const delta = clock.getDelta();
+      const t = clock.getElapsedTime();
       if (autoRotate) {
-        rotationYRef.current += 0.008;
+        rotationYRef.current += 0.0065;
+        rotationXRef.current = THREE.MathUtils.lerp(rotationXRef.current, 0.14, 0.04);
       }
-      charGroup.rotation.y = rotationYRef.current;
-      if (mixer) {
-        mixer.update(delta);
-      }
-      ModelFactory.alignHandWeaponSocket(operatorMesh, 0, 0, {
-        stance: 'ready',
-        weaponType: weapon,
-      });
+      weaponPivot.rotation.y = rotationYRef.current;
+      weaponPivot.rotation.x = rotationXRef.current;
+      weaponPivot.position.y = Math.sin(t * 1.6) * 0.012;
       renderer.render(scene, camera);
     };
     animate();
 
     return () => {
       cancelAnimationFrame(animId);
-      if (mixer) {
-        mixer.stopAllAction();
-      }
-      container.removeEventListener('mousedown', onMouseDown);
-      window.removeEventListener('mousemove', onMouseMove);
-      window.removeEventListener('mouseup', onMouseUp);
+      container.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
       renderer.dispose();
       if (container.contains(renderer.domElement)) {
         container.removeChild(renderer.domElement);
       }
     };
-  }, [camo, weapon, activeModelName, modelRevision]);
+  }, [weapon, camo, optic, reticleColor, reticleStyle]);
 
   return (
-    <div className="relative w-full h-60 rounded-sm bg-gradient-to-b from-[#131720] to-[#0A0C10] border border-white/10 overflow-hidden flex items-center justify-center cursor-grab active:cursor-grabbing">
-      <div ref={containerRef} className="w-full h-full" />
+    <div className="relative w-full h-56 rounded-sm bg-gradient-to-b from-[#131720] to-[#0A0C10] border border-white/10 overflow-hidden flex items-center justify-center cursor-grab active:cursor-grabbing touch-none">
+      <div ref={containerRef} className="w-full h-full touch-none" />
       <div className="absolute top-2.5 left-3 flex items-center gap-1.5 text-[10px] font-mono text-zinc-400">
         <Compass className="w-3.5 h-3.5 text-[#A3E635]" />
-        <span>DRAG TO ROTATE OPERATOR</span>
+        <span>DRAG TO INSPECT WEAPON</span>
       </div>
       <div className="absolute bottom-2.5 right-3 text-[10px] font-mono text-zinc-400 uppercase">
-        RIG: <b className="text-zinc-200">{activeModelName}</b>
+        PLATFORM: <b className="text-zinc-200">{weaponLabel}</b>
       </div>
     </div>
   );

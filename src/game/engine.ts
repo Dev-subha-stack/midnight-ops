@@ -292,6 +292,13 @@ export class GameEngine {
       this.botManager.spawnBots(0, settings.botDifficulty || 'regular', this.gameMode);
     } else {
       this.botManager.spawnBots(settings.botCount || 6, settings.botDifficulty || 'regular', this.gameMode);
+      CharacterModelLoader.preloadAllBotModels()
+        .then(() => {
+          if (!this.isDestroyed) {
+            this.botManager.rebuildAllBotMeshes(true);
+          }
+        })
+        .catch(() => {});
     }
 
     window.addEventListener('resize', this.onResize);

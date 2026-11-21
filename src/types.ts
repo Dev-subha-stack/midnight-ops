@@ -230,6 +230,7 @@ export interface GameSettings {
   realisticShadows?: boolean;
   leanMode?: 'toggle' | 'hold';
   minimapShape?: 'circular' | 'square';
+  touchControlsMode?: 'auto' | 'on' | 'off';
 }
 
 export interface ScorestreakItem {

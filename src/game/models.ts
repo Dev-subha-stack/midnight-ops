@@ -20,12 +20,27 @@ export interface WeaponHoldPoseOptions {
   recoilKick?: number;
 }
 
+export type BotModelVariant = 'auto' | 'active' | 'soldier' | 'michelle' | 'xbot' | 'procedural';
+export type BotSubStyle = 'default' | 'desert' | 'merc' | 'stealth' | 'cyber' | 'juggernaut';
+
+export interface BotMeshOptions {
+  variantIndex?: number;
+  modelPreference?: BotModelVariant;
+  subStyle?: BotSubStyle;
+}
+
 interface CachedHandBasis {
   middleBone: THREE.Object3D;
   e1: THREE.Vector3;
   e2: THREE.Vector3;
   e3: THREE.Vector3;
   hasFullBasis: boolean;
+}
+
+interface CachedLegJoint {
+  bone: THREE.Object3D;
+  restQuat: THREE.Quaternion;
+  localRightAxis: THREE.Vector3;
 }
 
 interface WeaponHoldRig {
@@ -42,12 +57,21 @@ interface WeaponHoldRig {
   leftHand?: THREE.Object3D;
   rightHandBasis?: CachedHandBasis;
   leftHandBasis?: CachedHandBasis;
+  leftUpLeg?: CachedLegJoint;
+  leftLeg?: CachedLegJoint;
+  rightUpLeg?: CachedLegJoint;
+  rightLeg?: CachedLegJoint;
   handSocket?: THREE.Object3D;
   botWeapon?: THREE.Object3D;
   initialized: boolean;
 }
 
-// Reusable scratch math objects for zero-GC per-frame Two-Bone IK & weapon alignment
+// Reusable scratch math objects for zero-GC per-frame Two-Bone IK, leg locomotion & weapon alignment
+const _legRotQuat = new THREE.Quaternion();
+const _legAxisTmp = new THREE.Vector3();
+const _legBoneQuatInv = new THREE.Quaternion();
+const _legPosL = new THREE.Vector3();
+const _legPosR = new THREE.Vector3();
 const _ikRootPos = new THREE.Vector3();
 const _ikRootQuat = new THREE.Quaternion();
 const _ikRootScale = new THREE.Vector3();
@@ -1702,6 +1726,59 @@ export class ModelFactory {
       /Bip01 L UpperArm$/i,
     ]);
 
+    const leftUpLegBone = ModelFactory.findSkeletonBone(botRoot, [
+      /LeftUpLeg$/i,
+      /thigh_l$/i,
+      /L_Thigh$/i,
+      /Bip01 L Thigh$/i,
+    ]);
+    const leftLegBone = ModelFactory.findSkeletonBone(botRoot, [
+      /LeftLeg$/i,
+      /calf_l$/i,
+      /shin_l$/i,
+      /L_Calf$/i,
+      /Bip01 L Calf$/i,
+    ]);
+    const rightUpLegBone = ModelFactory.findSkeletonBone(botRoot, [
+      /RightUpLeg$/i,
+      /thigh_r$/i,
+      /R_Thigh$/i,
+      /Bip01 R Thigh$/i,
+    ]);
+    const rightLegBone = ModelFactory.findSkeletonBone(botRoot, [
+      /RightLeg$/i,
+      /calf_r$/i,
+      /shin_r$/i,
+      /R_Calf$/i,
+      /Bip01 R Calf$/i,
+    ]);
+
+    botRoot.updateMatrixWorld(true);
+    if (leftUpLegBone && rightUpLegBone) {
+      rightUpLegBone.getWorldPosition(_legPosR);
+      leftUpLegBone.getWorldPosition(_legPosL);
+      _legAxisTmp.subVectors(_legPosR, _legPosL);
+      if (_legAxisTmp.lengthSq() > 1e-6) {
+        _legAxisTmp.normalize();
+      } else {
+        _legAxisTmp.set(-1, 0, 0).applyQuaternion(botRoot.quaternion).normalize();
+      }
+    } else {
+      _legAxisTmp.set(-1, 0, 0).applyQuaternion(botRoot.quaternion).normalize();
+    }
+
+    const cacheLegJoint = (bone: THREE.Object3D | undefined): CachedLegJoint | undefined => {
+      if (!bone) return undefined;
+      bone.getWorldQuaternion(_legBoneQuatInv);
+      _legBoneQuatInv.invert();
+      const localRightAxis = _legAxisTmp.clone().applyQuaternion(_legBoneQuatInv).normalize();
+      return {
+        bone,
+        restQuat: bone.quaternion.clone(),
+        localRightAxis,
+      };
+    };
+
     const rig: WeaponHoldRig = {
       hips: ModelFactory.findSkeletonBone(botRoot, [/Hips$/i, /Pelvis$/i]),
       spine2: ModelFactory.findSkeletonBone(botRoot, [/Spine2$/i, /Chest$/i, /Spine1$/i, /Spine$/i]),
@@ -1716,6 +1793,10 @@ export class ModelFactory {
       leftHand,
       rightHandBasis: rightHand ? ModelFactory.buildHandBasis(rightHand, 'Right') : undefined,
       leftHandBasis: leftHand ? ModelFactory.buildHandBasis(leftHand, 'Left') : undefined,
+      leftUpLeg: cacheLegJoint(leftUpLegBone),
+      leftLeg: cacheLegJoint(leftLegBone),
+      rightUpLeg: cacheLegJoint(rightUpLegBone),
+      rightLeg: cacheLegJoint(rightLegBone),
       handSocket: botRoot.getObjectByName('hand_weapon_socket') || undefined,
       botWeapon: botRoot.getObjectByName('bot_weapon') || undefined,
       initialized: true,
@@ -1723,6 +1804,57 @@ export class ModelFactory {
 
     botRoot.userData.__weaponHoldRig = rig;
     return rig;
+  }
+
+  /**
+   * Procedural leg walk/run/crouch locomotion for GLTF skeletons that lack walk/run animation clips (e.g., michelle.glb).
+   * Rotates relative to cached rest quaternions around the auto-verified character-right axis so there is zero drift.
+   */
+  public static animateGltfLegs(
+    botRoot: THREE.Object3D,
+    animTimer: number,
+    moveSpeed: number,
+    isCrouched: boolean
+  ): void {
+    const rig = ModelFactory.getOrCacheWeaponHoldRig(botRoot);
+    if (!rig.leftUpLeg || !rig.rightUpLeg) return;
+
+    let lHip = 0.04;
+    let rHip = -0.04;
+    let lKnee = -0.08;
+    let rKnee = -0.08;
+
+    if (isCrouched) {
+      lHip = 0.62;
+      rHip = 0.44;
+      lKnee = -1.08;
+      rKnee = -0.92;
+    } else if (moveSpeed > 0.25) {
+      const speedScale = moveSpeed > 3.2 ? 1.15 : 0.9;
+      const amp = Math.min(0.62, 0.26 + moveSpeed * 0.085);
+      const phase = animTimer * speedScale;
+      const lSin = Math.sin(phase);
+      const rSin = Math.sin(phase + Math.PI);
+      lHip = lSin * amp + 0.06;
+      rHip = rSin * amp + 0.06;
+      lKnee = -Math.max(0.08, lSin > 0 ? lSin * 0.62 : -lSin * 0.42);
+      rKnee = -Math.max(0.08, rSin > 0 ? rSin * 0.62 : -rSin * 0.42);
+    }
+
+    _legRotQuat.setFromAxisAngle(rig.leftUpLeg.localRightAxis, lHip);
+    rig.leftUpLeg.bone.quaternion.copy(rig.leftUpLeg.restQuat).multiply(_legRotQuat);
+
+    _legRotQuat.setFromAxisAngle(rig.rightUpLeg.localRightAxis, rHip);
+    rig.rightUpLeg.bone.quaternion.copy(rig.rightUpLeg.restQuat).multiply(_legRotQuat);
+
+    if (rig.leftLeg) {
+      _legRotQuat.setFromAxisAngle(rig.leftLeg.localRightAxis, lKnee);
+      rig.leftLeg.bone.quaternion.copy(rig.leftLeg.restQuat).multiply(_legRotQuat);
+    }
+    if (rig.rightLeg) {
+      _legRotQuat.setFromAxisAngle(rig.rightLeg.localRightAxis, rKnee);
+      rig.rightLeg.bone.quaternion.copy(rig.rightLeg.restQuat).multiply(_legRotQuat);
+    }
   }
 
   private static rotateBoneWorldDelta(
@@ -2142,16 +2274,257 @@ export class ModelFactory {
     socket.quaternion.copy(_ikParentWorldQuat.invert().multiply(_ikWeaponQuat));
   }
 
+  private static attachHeadgearToBone(
+    botRoot: THREE.Object3D,
+    gearStyle: 'michelle_nvg' | 'xbot_visor' | 'soldier_goggles',
+    team: 'allies' | 'axis'
+  ): void {
+    const headBone = ModelFactory.findSkeletonBone(botRoot, [/Head$/i]);
+    if (!headBone) return;
+
+    botRoot.updateMatrixWorld(true);
+    const headTopBone = ModelFactory.findSkeletonBone(headBone, [/HeadTop/i]);
+    const headPos = new THREE.Vector3();
+    const headWorldQuat = new THREE.Quaternion();
+    const headWorldScale = new THREE.Vector3();
+    const rootWorldQuat = new THREE.Quaternion();
+
+    headBone.getWorldPosition(headPos);
+    headBone.getWorldQuaternion(headWorldQuat);
+    headBone.getWorldScale(headWorldScale);
+    botRoot.getWorldQuaternion(rootWorldQuat);
+
+    let eyeY = 0.105;
+    if (headTopBone) {
+      const topPos = new THREE.Vector3();
+      headTopBone.getWorldPosition(topPos);
+      const span = topPos.y - headPos.y;
+      if (span > 0.08 && span < 0.45) {
+        eyeY = span * 0.44;
+      }
+    }
+
+    const avgScale =
+      (Math.abs(headWorldScale.x) + Math.abs(headWorldScale.y) + Math.abs(headWorldScale.z)) / 3 || 1;
+    const mount = new THREE.Group();
+    mount.name = 'bot_headgear_mount';
+    mount.scale.setScalar(1 / avgScale);
+    mount.quaternion.copy(headWorldQuat).invert().multiply(rootWorldQuat);
+
+    const accentColor = team === 'axis' ? 0xef4444 : 0x38bdf8;
+    const frameMat = new THREE.MeshStandardMaterial({
+      color: 0x181c22,
+      roughness: 0.35,
+      metalness: 0.78,
+    });
+    const glowMat = new THREE.MeshStandardMaterial({
+      color: accentColor,
+      emissive: accentColor,
+      emissiveIntensity: 0.85,
+      roughness: 0.15,
+      metalness: 0.8,
+    });
+
+    if (gearStyle === 'michelle_nvg') {
+      // Tactical GPNVG-18 Quad-Tube Night Vision Goggles + Comms Headset
+      const strap = new THREE.Mesh(new THREE.BoxGeometry(0.185, 0.032, 0.21), frameMat);
+      strap.position.set(0, eyeY + 0.025, 0.005);
+      const mountArm = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.028, 0.065), frameMat);
+      mountArm.position.set(0, eyeY + 0.032, 0.115);
+      mount.add(strap, mountArm);
+
+      for (let i = -1.5; i <= 1.5; i++) {
+        const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.014, 0.068, 10), frameMat);
+        tube.rotateX(Math.PI / 2);
+        tube.position.set(i * 0.034, eyeY + 0.006, 0.14);
+        const lens = new THREE.Mesh(new THREE.CircleGeometry(0.012, 10), glowMat);
+        lens.position.set(i * 0.034, eyeY + 0.006, 0.175);
+        mount.add(tube, lens);
+      }
+    } else if (gearStyle === 'xbot_visor') {
+      // Armored Cyber Enforcer Tactical Helmet Brow & Emissive Optic Slit
+      const crownPlate = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.065, 0.20), frameMat);
+      crownPlate.position.set(0, eyeY + 0.055, 0.0);
+      const visorSlit = new THREE.Mesh(new THREE.BoxGeometry(0.145, 0.026, 0.036), glowMat);
+      visorSlit.position.set(0, eyeY + 0.004, 0.098);
+      const jawGuard = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.055, 0.06), frameMat);
+      jawGuard.position.set(0, eyeY - 0.05, 0.085);
+      mount.add(crownPlate, visorSlit, jawGuard);
+    } else {
+      // Arid Desert Recon Tactical Dust Goggles
+      const goggleBody = new THREE.Mesh(new THREE.BoxGeometry(0.165, 0.048, 0.042), frameMat);
+      goggleBody.position.set(0, eyeY + 0.01, 0.105);
+      const goggleLens = new THREE.Mesh(
+        new THREE.BoxGeometry(0.145, 0.032, 0.046),
+        new THREE.MeshStandardMaterial({
+          color: 0xf59e0b,
+          emissive: 0xb45309,
+          emissiveIntensity: 0.55,
+          roughness: 0.15,
+          metalness: 0.85,
+        })
+      );
+      goggleLens.position.set(0, eyeY + 0.01, 0.107);
+      mount.add(goggleBody, goggleLens);
+    }
+
+    mount.traverse((child) => {
+      if (child instanceof THREE.Mesh) {
+        child.castShadow = true;
+        child.receiveShadow = true;
+      }
+    });
+    headBone.add(mount);
+  }
+
+  private static applyGltfBotVariant(
+    model: THREE.Group,
+    variantKey: 'soldier' | 'michelle' | 'xbot' | 'active',
+    team: 'allies' | 'axis',
+    archetype: 'assault' | 'heavy' | 'sniper' | 'flanker',
+    subStyle: BotSubStyle
+  ): void {
+    // Clone materials per bot instance so tints/emissives never bleed across other bots or lobby previews
+    model.traverse((child) => {
+      if (child instanceof THREE.Mesh && child.material) {
+        if (Array.isArray(child.material)) {
+          child.material = child.material.map((m) => (m && m.visible !== false ? m.clone() : m));
+        } else if (child.material.visible !== false) {
+          child.material = child.material.clone();
+        }
+      }
+    });
+
+    const accentHex = team === 'axis' ? 0xef4444 : 0x38bdf8;
+    const applyMatEdit = (mesh: THREE.Mesh, mat: THREE.Material) => {
+      if (!(mat instanceof THREE.MeshStandardMaterial)) return;
+      const matName = (mat.name || '').toLowerCase();
+      const meshName = (mesh.name || '').toLowerCase();
+
+      if (variantKey === 'soldier') {
+        if (matName.includes('visor') || meshName.includes('visor')) {
+          const visorHex = subStyle === 'desert' ? 0xf59e0b : accentHex;
+          mat.color.setHex(visorHex);
+          mat.emissive.setHex(visorHex);
+          mat.emissiveIntensity = 0.72;
+          mat.roughness = 0.18;
+          mat.metalness = 0.85;
+        } else {
+          if (team === 'axis') {
+            if (subStyle === 'desert') {
+              mat.color.setHex(0xd4bc94);
+            } else {
+              mat.color.setHex(0x6d7480);
+            }
+          } else {
+            mat.color.setHex(0x8fa389);
+          }
+        }
+      } else if (variantKey === 'michelle') {
+        if (team === 'axis') {
+          mat.color.setHex(subStyle === 'stealth' ? 0x6b7280 : 0x808794);
+          mat.roughness = Math.min(1, (mat.roughness ?? 0.6) + 0.1);
+        } else {
+          mat.color.setHex(0x9cb2c9);
+        }
+      } else if (variantKey === 'xbot') {
+        if (matName.includes('joint') || meshName.includes('mesh.001')) {
+          mat.color.setHex(0x1b2029);
+          mat.emissive.setHex(team === 'axis' ? 0xdc2626 : 0x0284c7);
+          mat.emissiveIntensity = 0.65;
+          mat.metalness = 0.88;
+          mat.roughness = 0.22;
+        } else {
+          mat.color.setHex(team === 'axis' ? 0x3b4252 : 0x4b5c74);
+          mat.metalness = 0.82;
+          mat.roughness = 0.28;
+        }
+      }
+    };
+
+    model.traverse((child) => {
+      if (child instanceof THREE.Mesh && child.material) {
+        if (Array.isArray(child.material)) {
+          child.material.forEach((m) => {
+            if (m && m.visible !== false) applyMatEdit(child, m);
+          });
+        } else if (child.material.visible !== false) {
+          applyMatEdit(child, child.material);
+        }
+      }
+    });
+
+    if (variantKey === 'xbot') {
+      if (archetype === 'heavy' || subStyle === 'cyber') {
+        model.scale.setScalar(1.055);
+      }
+      ModelFactory.attachHeadgearToBone(model, 'xbot_visor', team);
+    } else if (variantKey === 'michelle') {
+      ModelFactory.attachHeadgearToBone(model, 'michelle_nvg', team);
+    } else if (variantKey === 'soldier' && subStyle === 'desert') {
+      ModelFactory.attachHeadgearToBone(model, 'soldier_goggles', team);
+    }
+  }
+
   // --- AAA 3D ENEMY COMBAT OPERATOR MODEL (FACTION & ARCHETYPE DIVERSITY) ---
   public static createBotMesh(
     team: 'allies' | 'axis' = 'axis',
     archetype: 'assault' | 'heavy' | 'sniper' | 'flanker' = 'assault',
-    weaponType: WeaponType = 'm4'
+    weaponType: WeaponType = 'm4',
+    options?: BotMeshOptions
   ): THREE.Group {
-    const custom3DModel = CharacterModelLoader.getActiveCustomModel();
+    const preference: BotModelVariant = options?.modelPreference || 'auto';
+    const subStyle: BotSubStyle = options?.subStyle || 'default';
+    const variantIdx = options?.variantIndex ?? 0;
+
+    let resolvedVariant: 'active' | 'soldier' | 'michelle' | 'xbot' | 'procedural' = 'active';
+    if (preference === 'active') {
+      resolvedVariant = 'active';
+    } else if (preference === 'procedural') {
+      resolvedVariant = 'procedural';
+    } else if (preference === 'soldier' || preference === 'michelle' || preference === 'xbot') {
+      resolvedVariant = preference;
+    } else {
+      const rotation: ('soldier' | 'michelle' | 'xbot' | 'procedural')[] = [
+        'soldier',
+        'michelle',
+        'xbot',
+        'procedural',
+      ];
+      resolvedVariant = rotation[Math.abs(variantIdx) % rotation.length];
+    }
+
+    let custom3DModel: THREE.Group | null = null;
+    let gltfVariantKey: 'soldier' | 'michelle' | 'xbot' | 'active' = 'active';
+    let isFallbackProcedural = false;
+
+    if (resolvedVariant === 'active') {
+      custom3DModel = CharacterModelLoader.getActiveCustomModel();
+      const activeUrl = CharacterModelLoader.getActiveCustomModelUrl() || '';
+      if (activeUrl.includes('michelle')) gltfVariantKey = 'michelle';
+      else if (activeUrl.includes('xbot')) gltfVariantKey = 'xbot';
+      else if (activeUrl.includes('soldier')) gltfVariantKey = 'soldier';
+      else gltfVariantKey = 'active';
+    } else if (resolvedVariant === 'soldier' || resolvedVariant === 'michelle' || resolvedVariant === 'xbot') {
+      custom3DModel = CharacterModelLoader.getPresetBotModel(resolvedVariant);
+      gltfVariantKey = resolvedVariant;
+      if (!custom3DModel) {
+        isFallbackProcedural = true;
+      }
+    }
+
     if (custom3DModel) {
       custom3DModel.name = `bot_${team}_${archetype}`;
       custom3DModel.userData.weaponType = weaponType;
+      custom3DModel.userData.modelVariant = resolvedVariant;
+      custom3DModel.userData.isFallbackProcedural = false;
+
+      if (preference !== 'active') {
+        ModelFactory.applyGltfBotVariant(custom3DModel, gltfVariantKey, team, archetype, subStyle);
+      }
+
+      // Cache rest bone axes BEFORE IK / animation modifies poses
+      ModelFactory.getOrCacheWeaponHoldRig(custom3DModel);
       custom3DModel.updateMatrixWorld(true);
 
       // Attach weapon to right hand bone if found
@@ -2163,7 +2536,9 @@ export class ModelFactory {
         /Bip01 R Hand$/i,
       ]);
 
-      const botWeapon = ModelFactory.createWeaponMesh(weaponType, team === 'axis' ? 'obsidian' : 'standard');
+      const weaponCamo: WeaponCamo =
+        subStyle === 'desert' ? 'standard' : team === 'axis' ? 'obsidian' : 'standard';
+      const botWeapon = ModelFactory.createWeaponMesh(weaponType, weaponCamo);
       botWeapon.name = 'bot_weapon';
       botWeapon.traverse((child) => {
         if (child instanceof THREE.Mesh) {
@@ -2208,6 +2583,12 @@ export class ModelFactory {
         handSocket.add(botWeapon);
         rightHand.add(handSocket);
 
+        // Refresh cached handSocket reference on rig
+        if (custom3DModel.userData.__weaponHoldRig) {
+          custom3DModel.userData.__weaponHoldRig.handSocket = handSocket;
+          custom3DModel.userData.__weaponHoldRig.botWeapon = botWeapon;
+        }
+
         // Immediately solve Two-Bone IK & align socket upright & forward for frame-0 visibility
         ModelFactory.alignHandWeaponSocket(custom3DModel, 0, 0, { stance: 'ready', weaponType });
       } else {
@@ -2229,6 +2610,8 @@ export class ModelFactory {
 
     const botGroup = new THREE.Group();
     botGroup.name = `bot_${team}_${archetype}`;
+    botGroup.userData.modelVariant = 'procedural';
+    botGroup.userData.isFallbackProcedural = isFallbackProcedural;
 
     // Procedural High-Resolution PBR Textures
     const uniformTexture = TextureGenerator.createOperatorUniformTexture(
@@ -2750,6 +3133,10 @@ export class ModelFactory {
         child.receiveShadow = true;
       }
     });
+
+    if (archetype === 'heavy' || subStyle === 'juggernaut') {
+      botGroup.scale.setScalar(1.06);
+    }
 
     return botGroup;
   }

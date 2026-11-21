@@ -19,6 +19,14 @@ export class CharacterModelLoader {
   private static activeCustomModelName: string = 'Vanguard Tier-1 Soldier (Sketchfab/GLB)';
   public static onModelChange?: (model: THREE.Group | null, name: string) => void;
   private static isInitializing: boolean = false;
+  private static hasUserCustomModel: boolean = false;
+  private static preloadAllPromise: Promise<void> | null = null;
+
+  public static readonly LOCAL_BOT_MODEL_PRESETS = {
+    soldier: '/models/soldier.glb',
+    michelle: '/models/michelle.glb',
+    xbot: '/models/xbot.glb',
+  } as const;
 
   public static readonly PRESET_MODELS: {
     id: string;
@@ -67,58 +75,26 @@ export class CharacterModelLoader {
     },
   ];
 
-  /**
-   * Automatically initializes the default high-fidelity 3D Soldier model from Sketchfab/GLB assets.
-   */
-  public static async initDefaultModel(): Promise<THREE.Group | null> {
-    if (this.activeCustomModel) {
-      return this.getActiveCustomModel();
-    }
-    if (this.isInitializing) return null;
-    this.isInitializing = true;
+  private static cloneTemplate(template: THREE.Group): THREE.Group {
     try {
-      const model = await this.loadModel('/models/soldier.glb', 'Vanguard Tier-1 Soldier (Sketchfab/GLB)');
-      this.isInitializing = false;
-      return model;
-    } catch (err) {
-      this.isInitializing = false;
-      console.warn('[CharacterModelLoader] Default model load fallback:', err);
-      return null;
+      const cloned = SkeletonUtils.clone(template) as THREE.Group;
+      cloned.userData.animations = template.userData.animations || [];
+      cloned.userData.rotationOffsetY = template.userData.rotationOffsetY ?? 0;
+      return cloned;
+    } catch {
+      const cloned = template.clone(true);
+      cloned.userData.animations = template.userData.animations || [];
+      cloned.userData.rotationOffsetY = template.userData.rotationOffsetY ?? 0;
+      return cloned;
     }
   }
 
   /**
-   * Load an external GLTF/GLB 3D character model from an online URL or local File blob.
-   * Automatically scales the model to 1.80m standard human soldier height, aligns ground contact,
-   * and wraps it inside an identity container so BotController.lookAt() faces +Z forward.
+   * Loads and normalizes a GLB/GLTF into the modelCache without mutating activeCustomModel.
    */
-  public static async loadModel(urlOrFile: string | File, customName?: string): Promise<THREE.Group | null> {
-    let url: string;
-    let cacheKey: string;
-    let modelName = customName;
-
-    if (urlOrFile instanceof File) {
-      url = URL.createObjectURL(urlOrFile);
-      cacheKey = `file_${urlOrFile.name}_${urlOrFile.size}`;
-      modelName = modelName || urlOrFile.name.replace(/\.[^/.]+$/, '');
-    } else {
-      url = urlOrFile.trim();
-      cacheKey = url;
-      modelName = modelName || url.split('/').pop()?.split('?')[0] || 'Custom GLTF Model';
-    }
-
-    if (!url) return null;
-
+  private static async loadIntoCache(url: string, cacheKey: string = url): Promise<THREE.Group | null> {
     if (this.modelCache.has(cacheKey)) {
-      const cachedTemplate = this.modelCache.get(cacheKey)!;
-      const cached = SkeletonUtils.clone(cachedTemplate) as THREE.Group;
-      cached.userData.animations = cachedTemplate.userData.animations || [];
-      cached.userData.rotationOffsetY = cachedTemplate.userData.rotationOffsetY ?? 0;
-      this.activeCustomModel = cached;
-      this.activeCustomModelUrl = url;
-      this.activeCustomModelName = modelName;
-      this.onModelChange?.(cached, modelName);
-      return this.getActiveCustomModel();
+      return this.modelCache.get(cacheKey)!;
     }
 
     try {
@@ -180,16 +156,94 @@ export class CharacterModelLoader {
       wrapper.userData.rotationOffsetY = rotationOffsetY;
 
       this.modelCache.set(cacheKey, wrapper);
-      this.activeCustomModel = wrapper;
-      this.activeCustomModelUrl = url;
-      this.activeCustomModelName = modelName;
-      this.onModelChange?.(wrapper, modelName);
-
-      return this.getActiveCustomModel();
+      return wrapper;
     } catch (err) {
       console.error('[CharacterModelLoader] Failed to load 3D character model:', err);
       return null;
     }
+  }
+
+  /**
+   * Preloads all local enemy & operator GLB models in parallel so matches spawn varied 3D silhouettes immediately.
+   */
+  public static async preloadAllBotModels(): Promise<void> {
+    if (this.preloadAllPromise) {
+      return this.preloadAllPromise;
+    }
+    const urls = Object.values(this.LOCAL_BOT_MODEL_PRESETS);
+    this.preloadAllPromise = Promise.allSettled(
+      urls.map((url) => this.loadIntoCache(url, url))
+    ).then(() => {});
+    return this.preloadAllPromise;
+  }
+
+  /**
+   * Returns a cloned skeleton instance of a preloaded preset model (soldier, michelle, or xbot).
+   */
+  public static getPresetBotModel(presetKey: 'soldier' | 'michelle' | 'xbot'): THREE.Group | null {
+    const url = this.LOCAL_BOT_MODEL_PRESETS[presetKey];
+    const cached = this.modelCache.get(url);
+    if (!cached) return null;
+    return this.cloneTemplate(cached);
+  }
+
+  public static isCustomUserImport(): boolean {
+    return this.hasUserCustomModel;
+  }
+
+  /**
+   * Automatically initializes the default high-fidelity 3D Soldier model from Sketchfab/GLB assets.
+   */
+  public static async initDefaultModel(): Promise<THREE.Group | null> {
+    if (this.activeCustomModel) {
+      return this.getActiveCustomModel();
+    }
+    if (this.isInitializing) return null;
+    this.isInitializing = true;
+    try {
+      const model = await this.loadModel('/models/soldier.glb', 'Vanguard Tier-1 Soldier (Sketchfab/GLB)');
+      this.isInitializing = false;
+      return model;
+    } catch (err) {
+      this.isInitializing = false;
+      console.warn('[CharacterModelLoader] Default model load fallback:', err);
+      return null;
+    }
+  }
+
+  /**
+   * Load an external GLTF/GLB 3D character model from an online URL or local File blob.
+   * Automatically scales the model to 1.80m standard human soldier height, aligns ground contact,
+   * and wraps it inside an identity container so BotController.lookAt() faces +Z forward.
+   */
+  public static async loadModel(urlOrFile: string | File, customName?: string): Promise<THREE.Group | null> {
+    let url: string;
+    let cacheKey: string;
+    let modelName = customName;
+    const isFile = urlOrFile instanceof File;
+
+    if (isFile) {
+      url = URL.createObjectURL(urlOrFile);
+      cacheKey = `file_${urlOrFile.name}_${urlOrFile.size}`;
+      modelName = modelName || urlOrFile.name.replace(/\.[^/.]+$/, '');
+    } else {
+      url = urlOrFile.trim();
+      cacheKey = url;
+      modelName = modelName || url.split('/').pop()?.split('?')[0] || 'Custom GLTF Model';
+    }
+
+    if (!url) return null;
+
+    const template = await this.loadIntoCache(url, cacheKey);
+    if (!template) return null;
+
+    this.hasUserCustomModel = isFile || !this.PRESET_MODELS.some((p) => p.url === url);
+    this.activeCustomModel = template;
+    this.activeCustomModelUrl = cacheKey;
+    this.activeCustomModelName = modelName;
+    const cloned = this.cloneTemplate(template);
+    this.onModelChange?.(cloned, modelName);
+    return cloned;
   }
 
   /**
@@ -204,13 +258,15 @@ export class CharacterModelLoader {
     }
     if (this.activeCustomModelUrl && this.modelCache.has(this.activeCustomModelUrl)) {
       const cached = this.modelCache.get(this.activeCustomModelUrl)!;
-      const cachedInner = cached.getObjectByName('model_inner_root') || cached.children[0];
-      if (cachedInner) {
-        cachedInner.rotation.y = (cachedInner.rotation.y + Math.PI) % (Math.PI * 2);
-        cached.userData.rotationOffsetY = cachedInner.rotation.y;
+      if (cached !== this.activeCustomModel) {
+        const cachedInner = cached.getObjectByName('model_inner_root') || cached.children[0];
+        if (cachedInner) {
+          cachedInner.rotation.y = (cachedInner.rotation.y + Math.PI) % (Math.PI * 2);
+          cached.userData.rotationOffsetY = cachedInner.rotation.y;
+        }
       }
     }
-    this.onModelChange?.(this.activeCustomModel, this.activeCustomModelName);
+    this.onModelChange?.(this.getActiveCustomModel(), this.activeCustomModelName);
   }
 
   /**
@@ -281,6 +337,7 @@ export class CharacterModelLoader {
   public static removeCustomModel(): void {
     this.activeCustomModel = null;
     this.activeCustomModelUrl = null;
+    this.hasUserCustomModel = false;
     this.activeCustomModelName = 'Procedural Tier-1 Operator';
     this.onModelChange?.(null, 'Procedural Tier-1 Operator');
   }
@@ -289,6 +346,8 @@ export class CharacterModelLoader {
     this.modelCache.clear();
     this.activeCustomModel = null;
     this.activeCustomModelUrl = null;
+    this.hasUserCustomModel = false;
+    this.preloadAllPromise = null;
     this.activeCustomModelName = 'Procedural Tier-1 Operator';
   }
 }

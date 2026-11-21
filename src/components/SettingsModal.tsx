@@ -1,17 +1,19 @@
 import React from 'react';
 import { GameSettings } from '../types';
-import { Sliders, X, Crosshair, Cpu, Cloud, Volume2, Sparkles, Compass, Circle, Square } from 'lucide-react';
+import { Sliders, X, Crosshair, Cpu, Cloud, Volume2, Sparkles, Compass, Circle, Square, Gamepad2 } from 'lucide-react';
 import { soundManager } from '../game/audio';
 
 interface SettingsModalProps {
   settings: GameSettings;
   onUpdateSettings: (newSettings: GameSettings) => void;
+  onOpenHudCustomizer?: () => void;
   onClose: () => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
   settings,
   onUpdateSettings,
+  onOpenHudCustomizer,
   onClose,
 }) => {
   const [current, setCurrent] = React.useState<GameSettings>({ ...settings });
@@ -192,6 +194,47 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   );
                 })}
               </div>
+            </div>
+
+            {/* Touch / Mobile Virtual Gamepad Mode */}
+            <div className="flex flex-col gap-1.5 pt-2 border-t border-white/10">
+              <div className="flex justify-between items-center text-xs font-medium">
+                <span className="text-zinc-300">Mobile Touch Gamepad</span>
+                <span className="font-mono text-[#A3E635] font-bold uppercase text-[10px]">
+                  {(current.touchControlsMode || 'auto').toUpperCase()}
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { id: 'auto', label: 'Auto Detect' },
+                  { id: 'on', label: 'Always On' },
+                  { id: 'off', label: 'Off' },
+                ].map(mode => (
+                  <button
+                    key={mode.id}
+                    type="button"
+                    onClick={() => handleChange('touchControlsMode', mode.id)}
+                    className={`py-2 px-2 rounded-sm text-[11px] font-bold uppercase transition-all border cursor-pointer font-mono text-center ${
+                      (current.touchControlsMode || 'auto') === mode.id
+                        ? 'bg-[#1B2214] border-[#A3E635] text-[#A3E635]'
+                        : 'bg-[#0C0E12] border-white/10 text-zinc-400 hover:text-white'
+                    }`}
+                  >
+                    {mode.label}
+                  </button>
+                ))}
+              </div>
+              {onOpenHudCustomizer && (
+                <button
+                  id="btn-settings-custom-hud"
+                  type="button"
+                  onClick={onOpenHudCustomizer}
+                  className="mt-1.5 w-full py-2 px-3 rounded-sm bg-[#161B24] hover:bg-[#1E2633] border border-[#A3E635]/40 hover:border-[#A3E635] text-[#A3E635] text-[11px] font-mono font-bold uppercase flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                >
+                  <Gamepad2 className="w-4 h-4" />
+                  <span>Customize Controls Layout (Free Fire / BGMI HUD)</span>
+                </button>
+              )}
             </div>
           </div>
 

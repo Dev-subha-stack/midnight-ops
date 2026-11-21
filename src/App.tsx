@@ -31,8 +31,16 @@ import { GunsmithModal } from './components/GunsmithModal';
 import { SettingsModal } from './components/SettingsModal';
 import { GameOverModal } from './components/GameOverModal';
 import { PauseMenu } from './components/PauseMenu';
+import { MobileGamepad } from './components/MobileGamepad';
+import { MobileHudCustomizer } from './components/MobileHudCustomizer';
 import { CharacterModelLoader } from './game/character_loader';
 import { ModelFactory } from './game/models';
+import { isTouchCapableDevice } from './game/gamepad';
+import {
+  loadMobileLayout,
+  MobileControlLayoutConfig,
+  saveMobileLayout,
+} from './game/mobile_layout';
 import {
   Play,
   Crosshair,
@@ -49,11 +57,12 @@ import {
   Link2,
   Check,
   ChevronRight,
+  Gamepad2,
 } from 'lucide-react';
 import { soundManager } from './game/audio';
-import { DEFAULT_WEAPON_OPTICS, WEAPON_REGISTRY } from './game/weapons';
+import { DEFAULT_WEAPON_OPTICS, OPTIC_REGISTRY, WEAPON_REGISTRY } from './game/weapons';
 
-const GAME_VERSION_NUM = '3.1';
+const GAME_VERSION_NUM = '3.4';
 const GAME_VERSION = `v${GAME_VERSION_NUM}`;
 
 export default function App() {
@@ -67,11 +76,14 @@ export default function App() {
   const [isScoreboardOpen, setIsScoreboardOpen] = useState<boolean>(false);
   const [isGunsmithOpen, setIsGunsmithOpen] = useState<boolean>(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
+  const [isHudCustomizerOpen, setIsHudCustomizerOpen] = useState<boolean>(false);
   const [isGameOver, setIsGameOver] = useState<boolean>(false);
   const [isVictory, setIsVictory] = useState<boolean>(false);
   const [easterEggVictory, setEasterEggVictory] = useState<string | null>(null);
   const [lobbyModelRevision, setLobbyModelRevision] = useState<number>(0);
   const [linkCopied, setLinkCopied] = useState<boolean>(false);
+  const [detectedTouchDevice, setDetectedTouchDevice] = useState<boolean>(() => isTouchCapableDevice());
+  const [mobileControlLayout, setMobileControlLayout] = useState<MobileControlLayoutConfig>(() => loadMobileLayout());
 
   // Environment & Weather State
   const [environment, setEnvironment] = useState<EnvironmentState>({
@@ -119,6 +131,7 @@ export default function App() {
   const [isAiming, setIsAiming] = useState<boolean>(false);
   const [isReloading, setIsReloading] = useState<boolean>(false);
   const [isSprinting, setIsSprinting] = useState<boolean>(false);
+  const [isAutoRunning, setIsAutoRunning] = useState<boolean>(false);
   const [isHoldingBreath, setIsHoldingBreath] = useState<boolean>(false);
   const [breathStamina, setBreathStamina] = useState<number>(1.0);
   const [isHyperventilating, setIsHyperventilating] = useState<boolean>(false);
@@ -192,14 +205,20 @@ export default function App() {
     weatherPreset: 'clear_day',
     mapType: 'warehouse',
     minimapShape: 'square',
+    touchControlsMode: 'auto',
   });
+
+  const touchMode = settings.touchControlsMode || 'auto';
+  const isMobileControlsActive =
+    touchMode === 'on' || (touchMode === 'auto' && detectedTouchDevice);
 
   // Start / Init Engine
   const startMission = async (overrideMode?: GameMode) => {
     soundManager.init();
-    if (!CharacterModelLoader.hasCustomModel()) {
-      await CharacterModelLoader.initDefaultModel().catch(() => {});
-    }
+    await Promise.allSettled([
+      !CharacterModelLoader.hasCustomModel() ? CharacterModelLoader.initDefaultModel() : Promise.resolve(null),
+      CharacterModelLoader.preloadAllBotModels(),
+    ]);
     const modeToUse = overrideMode || gameMode;
     const effectiveMap = modeToUse === 'battleroyale' ? 'bermuda' : selectedMap;
     setSettings(prev => ({ ...prev, mapType: effectiveMap }));
@@ -214,17 +233,32 @@ export default function App() {
       window.removeEventListener('pointerdown', handleGesture);
       window.removeEventListener('keydown', handleGesture);
     };
+    const handlePointerDetect = (e: PointerEvent) => {
+      if (e.pointerType === 'touch') {
+        setDetectedTouchDevice(true);
+      }
+    };
+    const coarseMq = typeof window.matchMedia === 'function' ? window.matchMedia('(pointer: coarse)') : null;
+    const handleMqChange = () => setDetectedTouchDevice(isTouchCapableDevice());
+
     window.addEventListener('pointerdown', handleGesture, { passive: true });
+    window.addEventListener('pointerdown', handlePointerDetect, { passive: true });
     window.addEventListener('keydown', handleGesture, { passive: true });
+    coarseMq?.addEventListener?.('change', handleMqChange);
     return () => {
       window.removeEventListener('pointerdown', handleGesture);
+      window.removeEventListener('pointerdown', handlePointerDetect);
       window.removeEventListener('keydown', handleGesture);
+      coarseMq?.removeEventListener?.('change', handleMqChange);
     };
   }, []);
 
-  // Preload default 3D soldier character & refresh Lobby 3D Stage once loaded
+  // Preload default 3D soldier & enemy GLB roster & refresh Lobby 3D Stage once loaded
   useEffect(() => {
-    CharacterModelLoader.initDefaultModel()
+    Promise.allSettled([
+      CharacterModelLoader.initDefaultModel(),
+      CharacterModelLoader.preloadAllBotModels(),
+    ])
       .then(() => setLobbyModelRevision(r => r + 1))
       .catch(err => {
         console.warn('[App] Preloading default 3D model:', err);
@@ -240,7 +274,7 @@ export default function App() {
 
   // Lobby keyboard shortcut [Enter] / [Space] to deploy
   useEffect(() => {
-    if (isPlaying || isGunsmithOpen || isSettingsOpen) return;
+    if (isPlaying || isGunsmithOpen || isSettingsOpen || isHudCustomizerOpen) return;
     const handleLobbyKey = (e: KeyboardEvent) => {
       if (e.code === 'Enter' || e.code === 'NumpadEnter' || e.code === 'Space') {
         e.preventDefault();
@@ -249,7 +283,7 @@ export default function App() {
     };
     window.addEventListener('keydown', handleLobbyKey);
     return () => window.removeEventListener('keydown', handleLobbyKey);
-  }, [isPlaying, isGunsmithOpen, isSettingsOpen, gameMode, selectedMap]);
+  }, [isPlaying, isGunsmithOpen, isSettingsOpen, isHudCustomizerOpen, gameMode, selectedMap]);
 
   // Sync URL game version (?v=3.1) & auto-deploy via URL parameter (?play=1 or ?autostart=1 or ?deploy=1)
   useEffect(() => {
@@ -269,6 +303,7 @@ export default function App() {
     if (!isPlaying || !canvasContainerRef.current) return;
 
     const engine = new GameEngine(canvasContainerRef.current, settings, gameMode);
+    engine.controller.setMobileControlsEnabled(isMobileControlsActive);
     engineRef.current = engine;
 
     engine.onStatsUpdate = newStats => setStats(newStats);
@@ -353,6 +388,7 @@ export default function App() {
         setIsAiming(engine.controller.isAiming);
         setIsReloading(engine.controller.isReloading);
         setIsSprinting(engine.controller.isSprinting);
+        setIsAutoRunning(engine.controller.isMobileAutoRun());
         setCurrentWeapon(engine.controller.currentWeapon);
         const activeOptic =
           engine.controller.equippedOptics[engine.controller.currentWeapon] ||
@@ -447,20 +483,29 @@ export default function App() {
   }, [isPlaying, gameMode]);
 
   useEffect(() => {
-    if (isGunsmithOpen || isSettingsOpen) {
+    engineRef.current?.controller.setMobileControlsEnabled(isMobileControlsActive);
+    if (isMobileControlsActive && document.pointerLockElement) {
+      document.exitPointerLock?.();
+    }
+  }, [isMobileControlsActive]);
+
+  useEffect(() => {
+    if (isGunsmithOpen || isSettingsOpen || isHudCustomizerOpen) {
       if (engineRef.current && !engineRef.current.isPaused) {
         engineRef.current.setPaused(true);
         setIsPaused(true);
       }
     }
-  }, [isGunsmithOpen, isSettingsOpen]);
+  }, [isGunsmithOpen, isSettingsOpen, isHudCustomizerOpen]);
 
   const handleResume = () => {
     setIsPaused(false);
     if (engineRef.current) {
       engineRef.current.setPaused(false);
     }
-    canvasContainerRef.current?.requestPointerLock();
+    if (!isMobileControlsActive) {
+      canvasContainerRef.current?.requestPointerLock();
+    }
   };
 
   const handleRestart = () => {
@@ -617,6 +662,9 @@ export default function App() {
 
   const activePlaylist = playlistModes.find(p => p.id === gameMode) || playlistModes[0];
 
+  const activeOpticCfg = OPTIC_REGISTRY[currentOptic];
+  const canHoldBreath = isAiming && Boolean(activeOpticCfg && (activeOpticCfg.magnification >= 2.0 || activeOpticCfg.variableZoomSteps));
+
   return (
     <main id="app-root" className="fixed inset-0 w-full h-full bg-[#090B0E] overflow-hidden select-none">
       {/* 3D WebGL Game Viewport */}
@@ -625,7 +673,7 @@ export default function App() {
           id="webgl-canvas-container"
           ref={canvasContainerRef}
           onClick={() => {
-            if (!isPointerLocked) {
+            if (!isPointerLocked && !isMobileControlsActive) {
               try {
                 canvasContainerRef.current?.requestPointerLock();
               } catch {
@@ -637,8 +685,8 @@ export default function App() {
         />
       )}
 
-      {/* Pointer Lock Prompt */}
-      {isPlaying && !isGameOver && !isPaused && !isPointerLocked && !isGunsmithOpen && !isSettingsOpen && (
+      {/* Pointer Lock Prompt (Desktop Only) */}
+      {isPlaying && !isGameOver && !isPaused && !isPointerLocked && !isGunsmithOpen && !isSettingsOpen && !isHudCustomizerOpen && !isMobileControlsActive && (
         <div
           onClick={() => {
             try {
@@ -716,6 +764,34 @@ export default function App() {
           onActivateStreak={handleActivateStreak}
           onOpenGunsmith={() => setIsGunsmithOpen(true)}
           onOpenSettings={() => setIsSettingsOpen(true)}
+          mobileControlsActive={isMobileControlsActive}
+        />
+      )}
+
+      {/* VIRTUAL MOBILE GAMEPAD (rokobuljan/gamepad template + Free Fire / BGMI Layout) */}
+      {isPlaying && !isGameOver && !isPaused && !isGunsmithOpen && !isSettingsOpen && !isHudCustomizerOpen && isMobileControlsActive && (
+        <MobileGamepad
+          controller={engineRef.current?.controller || null}
+          layoutConfig={mobileControlLayout}
+          isAiming={isAiming}
+          isSprinting={isSprinting}
+          isAutoRunning={isAutoRunning}
+          isTacSprinting={stats.isTacSprinting}
+          isReloading={isReloading}
+          grenadesCount={grenadesCount}
+          tacticalCount={tacticalCount}
+          tacticalType={tacticalType}
+          canHoldBreath={canHoldBreath}
+          isHoldingBreath={isHoldingBreath}
+          onTogglePause={() => {
+            if (!isGameOver && engineRef.current) {
+              setIsPaused(true);
+              engineRef.current.setPaused(true);
+            }
+          }}
+          onOpenGunsmith={() => setIsGunsmithOpen(true)}
+          onToggleScoreboard={() => setIsScoreboardOpen(prev => !prev)}
+          onOpenCustomizer={() => setIsHudCustomizerOpen(true)}
         />
       )}
 
@@ -750,7 +826,7 @@ export default function App() {
           }}
           onClose={() => {
             setIsGunsmithOpen(false);
-            if (isPlaying && !isGameOver) {
+            if (isPlaying && !isGameOver && !isMobileControlsActive) {
               canvasContainerRef.current?.requestPointerLock();
             }
           }}
@@ -767,17 +843,43 @@ export default function App() {
               engineRef.current.updateSettings(newS);
             }
           }}
+          onOpenHudCustomizer={() => {
+            setIsSettingsOpen(false);
+            setIsHudCustomizerOpen(true);
+          }}
           onClose={() => {
             setIsSettingsOpen(false);
-            if (isPlaying && !isGameOver) {
+            if (isPlaying && !isGameOver && !isMobileControlsActive) {
               canvasContainerRef.current?.requestPointerLock();
             }
           }}
         />
       )}
 
+      {/* FREE FIRE / BGMI MOBILE CONTROLS CUSTOMIZER */}
+      {isHudCustomizerOpen && (
+        <MobileHudCustomizer
+          initialLayout={mobileControlLayout}
+          onSave={nextLayout => {
+            const saved = saveMobileLayout(nextLayout);
+            setMobileControlLayout(saved);
+            if (engineRef.current) {
+              engineRef.current.controller.mobileLookSensitivity = saved.lookSensitivity;
+            }
+            setIsHudCustomizerOpen(false);
+            if (isPlaying && !isGameOver) {
+              setIsPaused(false);
+              engineRef.current?.setPaused(false);
+            }
+          }}
+          onCancel={() => {
+            setIsHudCustomizerOpen(false);
+          }}
+        />
+      )}
+
       {/* PAUSE MENU */}
-      {isPaused && isPlaying && !isGameOver && !isGunsmithOpen && !isSettingsOpen && (
+      {isPaused && isPlaying && !isGameOver && !isGunsmithOpen && !isSettingsOpen && !isHudCustomizerOpen && (
         <PauseMenu
           gameMode={gameMode}
           currentWeather={environment.weather}
@@ -785,6 +887,7 @@ export default function App() {
           onResume={handleResume}
           onOpenGunsmith={() => setIsGunsmithOpen(true)}
           onOpenSettings={() => setIsSettingsOpen(true)}
+          onOpenHudCustomizer={() => setIsHudCustomizerOpen(true)}
           onRestart={handleRestart}
           onReturnToHome={handleReturnToHomescreen}
           onSelectWeather={handleSelectWeather}
@@ -887,6 +990,35 @@ export default function App() {
 
             {/* Zone 3: Operator & Utility Cluster */}
             <div className="flex items-center gap-2.5 shrink-0">
+              <button
+                id="btn-toggle-touch-gamepad"
+                onClick={() =>
+                  setSettings(prev => ({
+                    ...prev,
+                    touchControlsMode: isMobileControlsActive ? 'off' : 'on',
+                  }))
+                }
+                title="Toggle Mobile Touch Controls"
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-sm border text-[11px] font-mono transition-colors cursor-pointer whitespace-nowrap shrink-0 min-h-[34px] ${
+                  isMobileControlsActive
+                    ? 'bg-[#192014] border-[#A3E635] text-[#A3E635]'
+                    : 'bg-[#141820]/90 hover:bg-[#1C222D] border-white/10 text-zinc-300 hover:text-white'
+                }`}
+              >
+                <Gamepad2 className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">{isMobileControlsActive ? 'Touch Pad On' : 'Touch Pad'}</span>
+              </button>
+
+              <button
+                id="btn-lobby-custom-hud"
+                onClick={() => setIsHudCustomizerOpen(true)}
+                title="Customize Free Fire / BGMI Mobile Controls Layout"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-sm bg-[#141820]/90 hover:bg-[#1C222D] border border-white/10 hover:border-[#A3E635]/60 text-[11px] font-mono text-zinc-200 hover:text-[#A3E635] transition-colors cursor-pointer whitespace-nowrap shrink-0 min-h-[34px]"
+              >
+                <Sliders className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Custom HUD</span>
+              </button>
+
               <button
                 id="btn-test-audio"
                 onClick={() => {
@@ -1307,7 +1439,9 @@ const LobbyOperatorStage: React.FC<{
     const team = operatorCamo === 'axis_shadow' ? 'axis' : 'allies';
     const archetype =
       operatorCamo === 'spec_ops' ? 'flanker' : operatorCamo === 'desert_tan' ? 'sniper' : 'assault';
-    const operatorMesh = ModelFactory.createBotMesh(team, archetype, weapon);
+    const operatorMesh = ModelFactory.createBotMesh(team, archetype, weapon, {
+      modelPreference: 'active',
+    });
     charGroup.add(operatorMesh);
 
     let mixer: THREE.AnimationMixer | null = null;
@@ -1332,24 +1466,24 @@ const LobbyOperatorStage: React.FC<{
       renderer.setSize(w, h);
     };
 
-    const onMouseDown = (e: MouseEvent) => {
+    const onPointerDown = (e: PointerEvent) => {
       draggingRef.current = true;
       lastXRef.current = e.clientX;
     };
-    const onMouseMove = (e: MouseEvent) => {
+    const onPointerMove = (e: PointerEvent) => {
       if (!draggingRef.current) return;
       const dx = e.clientX - lastXRef.current;
       rotYRef.current += dx * 0.012;
       lastXRef.current = e.clientX;
     };
-    const onMouseUp = () => {
+    const onPointerUp = () => {
       draggingRef.current = false;
     };
 
     window.addEventListener('resize', handleResize);
-    container.addEventListener('mousedown', onMouseDown);
-    window.addEventListener('mousemove', onMouseMove);
-    window.addEventListener('mouseup', onMouseUp);
+    container.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
 
     const clock = new THREE.Clock();
     let animId = 0;
@@ -1376,9 +1510,9 @@ const LobbyOperatorStage: React.FC<{
       cancelAnimationFrame(animId);
       if (mixer) mixer.stopAllAction();
       window.removeEventListener('resize', handleResize);
-      container.removeEventListener('mousedown', onMouseDown);
-      window.removeEventListener('mousemove', onMouseMove);
-      window.removeEventListener('mouseup', onMouseUp);
+      container.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
       renderer.dispose();
       if (container.contains(renderer.domElement)) {
         container.removeChild(renderer.domElement);
@@ -1386,5 +1520,5 @@ const LobbyOperatorStage: React.FC<{
     };
   }, [weapon, operatorCamo, revision]);
 
-  return <div ref={containerRef} className="absolute inset-0 z-0 cursor-grab active:cursor-grabbing" />;
+  return <div ref={containerRef} className="absolute inset-0 z-0 cursor-grab active:cursor-grabbing touch-none" />;
 };

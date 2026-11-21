@@ -136,3 +136,84 @@ input[type="range"]:active {
     background-size: 100% 3px;
   }
 }
+
+/* --- VIRTUAL MOBILE GAMEPAD (rokobuljan/gamepad template) --- */
+.Gamepad-anchor {
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.Gamepad-controller {
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  transition: transform 80ms ease-out, box-shadow 80ms ease-out, border-color 80ms ease-out, background-color 80ms ease-out;
+  font-family: var(--font-mono);
+  touch-action: none;
+}
+
+.Gamepad-controller.is-active {
+  box-shadow: 0 0 22px currentColor;
+  transform: translate(-50%, -50%) scale(0.95) !important;
+}
+
+.Gamepad-joystick-handle {
+  opacity: 0.85;
+  box-shadow: 0 0 14px currentColor;
+}
+
+.Gamepad-controller.is-active .Gamepad-joystick-handle {
+  opacity: 1;
+  box-shadow: 0 0 24px currentColor;
+}
+
+.Gamepad-controller .gp-label,
+.Gamepad-controller .gp-label-lg {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  font-family: var(--font-mono);
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: #f4f4f5;
+  pointer-events: none;
+}
+
+.Gamepad-controller .gp-label {
+  font-size: 10px;
+}
+
+.Gamepad-controller .gp-label small {
+  font-size: 8px;
+  opacity: 0.85;
+  margin-top: 2px;
+}
+
+.Gamepad-controller .gp-label-lg {
+  font-size: 13px;
+}
+
+.Gamepad-dpad-x::before,
+.Gamepad-dpad-x::after {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 9px;
+  font-weight: 800;
+  color: #e4e4e7;
+  pointer-events: none;
+}
+
+.Gamepad-dpad-x::before {
+  content: '◀';
+  left: 6px;
+}
+
+.Gamepad-dpad-x::after {
+  content: '▶';
+  right: 6px;
+}
+

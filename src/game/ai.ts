@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { AIAlertLevel, AIArchetype, EnemyBot, GameMode, SquadRadioItem, SquadRole, WeaponType } from '../types';
-import { ModelFactory } from './models';
+import { BotModelVariant, BotSubStyle, ModelFactory } from './models';
+import { CharacterModelLoader } from './character_loader';
 import { TacticalCoverPoint, TacticalMap } from './map';
 import { ParticleSystem } from './particles';
 import { soundManager } from './audio';
@@ -109,8 +110,12 @@ export class BotManager {
     });
   }
 
-  public rebuildAllBotMeshes() {
-    this.bots.forEach(b => b.rebuildMesh());
+  public rebuildAllBotMeshes(onlyFallbacks: boolean = false) {
+    this.bots.forEach(b => {
+      if (!onlyFallbacks || b.group.userData.isFallbackProcedural) {
+        b.rebuildMesh();
+      }
+    });
   }
 
   // --- NEAR-MISS BULLET SUPPRESSION ---
@@ -163,21 +168,38 @@ export class BotManager {
     if (gameMode === 'tdm') {
       // In TDM: 5v5 Match (Task Force 141 Allies vs Kortac Axis)
       // Player is squad leader of Allies team!
-      // Allies team bots (4 friendly bots): Ghost, Soap, Price, Gaz
-      const alliesRoster = [
-        { name: 'Ghost_Riley', archetype: 'flanker' as AIArchetype, weapon: 'vector' as WeaponType },
-        { name: 'Soap_MacTavish', archetype: 'assault' as AIArchetype, weapon: 'scar' as WeaponType },
-        { name: 'Price_Bravo6', archetype: 'heavy' as AIArchetype, weapon: 'shotgun' as WeaponType },
-        { name: 'Gaz_Garrick', archetype: 'sniper' as AIArchetype, weapon: 'sniper' as WeaponType },
+      const alliesRoster: {
+        name: string;
+        archetype: AIArchetype;
+        weapon: WeaponType;
+        modelVariant: BotModelVariant;
+        subStyle: BotSubStyle;
+      }[] = [
+        {
+          name: 'Ghost_Riley',
+          archetype: 'flanker',
+          weapon: 'vector',
+          modelVariant: CharacterModelLoader.isCustomUserImport() ? 'active' : 'procedural',
+          subStyle: 'default',
+        },
+        { name: 'Soap_MacTavish', archetype: 'assault', weapon: 'scar', modelVariant: 'soldier', subStyle: 'default' },
+        { name: 'Price_Bravo6', archetype: 'heavy', weapon: 'shotgun', modelVariant: 'procedural', subStyle: 'juggernaut' },
+        { name: 'Gaz_Garrick', archetype: 'sniper', weapon: 'sniper', modelVariant: 'michelle', subStyle: 'stealth' },
       ];
 
-      // Axis team bots (5 enemy bots): Viper, Kruger, Minotaur, Bale, Shadow
-      const axisRoster = [
-        { name: 'Viper_01', archetype: 'assault' as AIArchetype, weapon: 'ak47' as WeaponType },
-        { name: 'Kruger_SpecOps', archetype: 'flanker' as AIArchetype, weapon: 'vector' as WeaponType },
-        { name: 'Minotaur_Enforcer', archetype: 'heavy' as AIArchetype, weapon: 'scar' as WeaponType },
-        { name: 'Bale_Vanguard', archetype: 'assault' as AIArchetype, weapon: 'ak47' as WeaponType },
-        { name: 'Shadow_Lead', archetype: 'sniper' as AIArchetype, weapon: 'sniper' as WeaponType },
+      // Axis team bots (5 distinct enemy models & silhouettes): Viper, Kruger, Minotaur, Bale, Shadow
+      const axisRoster: {
+        name: string;
+        archetype: AIArchetype;
+        weapon: WeaponType;
+        modelVariant: BotModelVariant;
+        subStyle: BotSubStyle;
+      }[] = [
+        { name: 'Viper_01', archetype: 'assault', weapon: 'ak47', modelVariant: 'soldier', subStyle: 'merc' },
+        { name: 'Kruger_SpecOps', archetype: 'flanker', weapon: 'vector', modelVariant: 'michelle', subStyle: 'stealth' },
+        { name: 'Minotaur_Enforcer', archetype: 'heavy', weapon: 'scar', modelVariant: 'xbot', subStyle: 'cyber' },
+        { name: 'Bale_Vanguard', archetype: 'assault', weapon: 'ak47', modelVariant: 'procedural', subStyle: 'juggernaut' },
+        { name: 'Shadow_Lead', archetype: 'sniper', weapon: 'sniper', modelVariant: 'soldier', subStyle: 'desert' },
       ];
 
       const allySpawns = this.map.spawnPoints.filter(s => s.team === 'allies');
@@ -197,7 +219,8 @@ export class BotManager {
           this.scene,
           this.map,
           this.particles,
-          this
+          this,
+          { variantIndex: idx, modelVariant: r.modelVariant, subStyle: r.subStyle }
         );
         this.bots.push(bot);
       });
@@ -216,22 +239,29 @@ export class BotManager {
           this.scene,
           this.map,
           this.particles,
-          this
+          this,
+          { variantIndex: idx, modelVariant: r.modelVariant, subStyle: r.subStyle }
         );
         this.bots.push(bot);
       });
     } else {
       // FFA, Battle Royale, or Gun Game
-      const freeRoster = [
-        { name: 'Viper_01', archetype: 'assault' as AIArchetype, weapon: 'm4' as WeaponType },
-        { name: 'Kruger_SpecOps', archetype: 'flanker' as AIArchetype, weapon: 'vector' as WeaponType },
-        { name: 'Minotaur_Enforcer', archetype: 'heavy' as AIArchetype, weapon: 'scar' as WeaponType },
-        { name: 'Bale_Vanguard', archetype: 'assault' as AIArchetype, weapon: 'ak47' as WeaponType },
-        { name: 'Shadow_Lead', archetype: 'sniper' as AIArchetype, weapon: 'sniper' as WeaponType },
-        { name: 'Ghost_Operative', archetype: 'flanker' as AIArchetype, weapon: 'mp5' as WeaponType },
-        { name: 'Ronin_Tactical', archetype: 'assault' as AIArchetype, weapon: 'scar' as WeaponType },
-        { name: 'Mace_Carnage', archetype: 'heavy' as AIArchetype, weapon: 'shotgun' as WeaponType },
-        { name: 'Nikto_Heavy', archetype: 'assault' as AIArchetype, weapon: 'ak47' as WeaponType },
+      const freeRoster: {
+        name: string;
+        archetype: AIArchetype;
+        weapon: WeaponType;
+        modelVariant: BotModelVariant;
+        subStyle: BotSubStyle;
+      }[] = [
+        { name: 'Viper_01', archetype: 'assault', weapon: 'm4', modelVariant: 'soldier', subStyle: 'merc' },
+        { name: 'Kruger_SpecOps', archetype: 'flanker', weapon: 'vector', modelVariant: 'michelle', subStyle: 'stealth' },
+        { name: 'Minotaur_Enforcer', archetype: 'heavy', weapon: 'scar', modelVariant: 'xbot', subStyle: 'cyber' },
+        { name: 'Bale_Vanguard', archetype: 'heavy', weapon: 'ak47', modelVariant: 'procedural', subStyle: 'juggernaut' },
+        { name: 'Shadow_Lead', archetype: 'sniper', weapon: 'sniper', modelVariant: 'procedural', subStyle: 'default' },
+        { name: 'Ghost_Operative', archetype: 'flanker', weapon: 'mp5', modelVariant: 'soldier', subStyle: 'desert' },
+        { name: 'Ronin_Tactical', archetype: 'assault', weapon: 'scar', modelVariant: 'michelle', subStyle: 'stealth' },
+        { name: 'Mace_Carnage', archetype: 'heavy', weapon: 'shotgun', modelVariant: 'xbot', subStyle: 'cyber' },
+        { name: 'Nikto_Heavy', archetype: 'assault', weapon: 'ak47', modelVariant: 'soldier', subStyle: 'merc' },
       ];
 
       for (let i = 0; i < count; i++) {
@@ -248,7 +278,8 @@ export class BotManager {
           this.scene,
           this.map,
           this.particles,
-          this
+          this,
+          { variantIndex: i, modelVariant: rosterItem.modelVariant, subStyle: rosterItem.subStyle }
         );
         this.bots.push(bot);
       }
@@ -448,6 +479,9 @@ export class BotController {
   public team: 'allies' | 'axis';
   public archetype: AIArchetype;
   public weapon: WeaponType;
+  public variantIndex: number = 0;
+  public modelVariant: BotModelVariant = 'auto';
+  public subStyle: BotSubStyle = 'default';
   public health: number = 100;
   public maxHealth: number = 100;
   public armor: number = 0;
@@ -589,13 +623,17 @@ export class BotController {
     scene: THREE.Scene,
     map: TacticalMap,
     particles: ParticleSystem,
-    squad: BotManager
+    squad: BotManager,
+    appearance?: { variantIndex?: number; modelVariant?: BotModelVariant; subStyle?: BotSubStyle }
   ) {
     this.id = id;
     this.name = name;
     this.team = team;
     this.archetype = archetype;
     this.weapon = weapon;
+    this.variantIndex = appearance?.variantIndex ?? 0;
+    this.modelVariant = appearance?.modelVariant || 'auto';
+    this.subStyle = appearance?.subStyle || 'default';
     this.position = new THREE.Vector3(spawnPos.x, 0, spawnPos.z);
     this.difficulty = difficulty;
     this.scene = scene;
@@ -654,7 +692,11 @@ export class BotController {
       this.accuracy += 0.25;
     }
 
-    this.group = ModelFactory.createBotMesh(team, archetype, weapon);
+    this.group = ModelFactory.createBotMesh(team, archetype, weapon, {
+      variantIndex: this.variantIndex,
+      modelPreference: this.modelVariant,
+      subStyle: this.subStyle,
+    });
     this.group.position.copy(this.position);
     this.scene.add(this.group);
 
@@ -1396,6 +1438,11 @@ export class BotController {
           this.currentAction = this.idleAction;
         }
       }
+    }
+
+    // Procedural leg walk/run/crouch locomotion for GLTF rigs without walk/run animation clips (e.g., michelle.glb)
+    if (this.botWeaponMesh?.userData.isBoneAttached && !this.runAction && !this.walkAction && !this.isDead) {
+      ModelFactory.animateGltfLegs(this.group, this.animTimer, moveSpeed, this.isCrouchedInCover);
     }
 
     // 2. Head Look & Flinch with matching lean
@@ -2248,13 +2295,25 @@ export class BotController {
   }
 
   public rebuildMesh() {
+    const prevRotation = this.group.rotation.clone();
     this.scene.remove(this.group);
     if (this.mixer) {
       this.mixer.stopAllAction();
       this.mixer = null;
     }
-    this.group = ModelFactory.createBotMesh(this.team, this.archetype, this.weapon);
+    this.animations = [];
+    this.idleAction = null;
+    this.runAction = null;
+    this.walkAction = null;
+    this.currentAction = null;
+
+    this.group = ModelFactory.createBotMesh(this.team, this.archetype, this.weapon, {
+      variantIndex: this.variantIndex,
+      modelPreference: this.modelVariant,
+      subStyle: this.subStyle,
+    });
     this.group.position.copy(this.position);
+    this.group.rotation.copy(prevRotation);
     this.scene.add(this.group);
 
     this.headMesh = this.group.getObjectByName('bot_head') || null;
